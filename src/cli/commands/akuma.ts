@@ -7,13 +7,11 @@ import { canonicalDocument } from "../../akuma/schema.js";
 import { classifyVerb, verbs } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
 import { StatusLine } from "../render/status-line.js";
-import type { CurrentWork } from "../../akuma/status-projection.js";
 import type { AkumaId } from "../../akuma/identity.js";
-import type { AkumaStatus } from "../../akuma/akuma.js";
-import { type CliOutcome, displayContext, resultContext, writeCliStream, writeJson, writeStdout } from "../streams.js";
+import { type CliOutcome, displayContext, writeCliStream, writeJson, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import { askRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
-import { askCurrentWorkLine, askResultText } from "../render/akuma.js";
+import { askFrame, askResultText } from "../render/akuma.js";
 import { aliasSelector, renderVerb } from "../render/verbs.js";
 
 async function schemaFromFile(path: string) {
@@ -69,34 +67,20 @@ function emitAnswer(body: string, exact: boolean): void {
 
 export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
-  const context = resultContext();
   const stderr = process.stderr;
   const stdout = process.stdout;
   const alias = aliasSelector(input.akuma);
   const status = output === "text" ? new StatusLine(stderr) : undefined;
-  let observed:
-    | Readonly<{ id: AkumaId; inputId: string; life?: AkumaStatus["life"]; summary?: CurrentWork["summary"] }>
-    | undefined;
+  let admittedId: AkumaId | undefined;
   const observe =
     status === undefined
       ? undefined
       : (event: AskProgress): void => {
-          if (event.kind === "admitted") {
-            observed = { id: event.id, inputId: event.tell.admission.tellId };
-          } else {
-            if (observed === undefined) return;
-            const work = event.observation.status.work;
-            observed = {
-              id: observed.id,
-              inputId: observed.inputId,
-              life: event.observation.status.life,
-              summary: work.summary,
-            };
-          }
-          const current = observed;
-          status.show((elapsed) =>
-            askCurrentWorkLine({ ...current, ...(alias === undefined ? {} : { alias }) }, elapsed, context),
-          );
+          if (event.kind === "admitted") admittedId = event.id;
+          const id = admittedId;
+          if (id === undefined) return;
+          const observed = event.kind === "live" ? event.observation.status : undefined;
+          status.show((elapsed) => askFrame(elapsed, id, alias, observed));
         };
   try {
     const run = {
@@ -108,7 +92,7 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);
     else {
-      writeCliStream(stderr, askResultText(result, alias, context));
+      writeCliStream(stderr, askResultText(result, alias));
       const answer = askRawAnswer(result);
       if (answer !== undefined) stdout.write(answer);
     }

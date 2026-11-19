@@ -836,7 +836,7 @@ test("settings CLI retains scoped failures and available opaque observations", a
     assert.equal(text.stderr, "");
     assert.match(text.stdout, /  user  read/u);
     assert.match(text.stdout, /  project  failed[\s\S]*settings root must be an object\n  namespace/u);
-    assert.match(text.stdout, /  namespace  future  failed\n    failure  project  settings root must be an object/u);
+    assert.match(text.stdout, /  namespace  future  failed\n    failure  project\n      settings root must be an object/u);
     assert.match(text.stdout, /    entry  local · user\n      value  object \(1\)\n        token  "synthetic"/u);
     assert.doesNotMatch(text.stdout, /shadows user|redacted/u);
     const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
@@ -866,7 +866,7 @@ test("settings text preserves long paths and opaque provider values", async () =
       JSON.stringify({ providers: { local: { kind: "acp", env: { LONG_VALUE: "x".repeat(100) } } } }),
     );
     const observed = await Settings.load({ cwd: value.project, home: longHome });
-    const text = renderSettingsText(observed, 72);
+    const text = renderSettingsText(observed);
     assert.match(text, new RegExp(realpathSync.native(longPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     assert.match(text, /LONG_VALUE  "x{100}"/u);
   } finally {

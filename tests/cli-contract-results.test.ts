@@ -154,6 +154,18 @@ test("normal and exceptional Contract receipts retain the same optional diagnost
   assert.ok(exceptional.includes("native cancellation"));
 });
 
+test("delivery preview keeps a requested diff complete regardless of width", () => {
+  const added = `+  ${"content".repeat(30)}`;
+  const render = (columns: number) => renderVerb("deliver", { contract: id, dryRun: true, showDiff: true }, {
+    kind: "returned", value: {
+      kind: "ready", contractId: id, candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)),
+      contentId: changeId("c".repeat(40)), scope: {}, diff: { kind: "present", text: `@@\n${added}\n context\n+end` },
+    },
+  }, { columns, color: false });
+  assert.equal(render(12), render(120));
+  assert.ok(render(12).includes(`  diff\n  @@\n  ${added}\n   context\n  +end`));
+});
+
 test("reconciliation and exceptional receipts share ordered repeated native movement", () => {
   const effect = Object.freeze({ kind: "ref" as const, name: "refs/heads/main", before: "a".repeat(40), after: "b".repeat(40) });
   const reconciliation = renderVerb("reconcile", { contract: id }, {

@@ -1,13 +1,13 @@
 import type { ContractHistory, ContractHistoryEvent } from "../../index.js";
 import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
-import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText } from "./terminal.js";
+import { exactIndentedLines, safeText } from "./terminal.js";
 
 function listFact(label: string, values: readonly string[] | undefined): readonly string[] {
   return values === undefined ? [] : [`  ${label}  ${values.length === 0 ? "none" : values.map(safeText).join(" · ")}`];
 }
 
 function historicalPayload(label: string, payload: string): readonly string[] {
-  return [`  ${label}`, ...payload.split("\n").map((line) => (line.length === 0 ? "" : `  ${safeText(line)}`))];
+  return [`  ${label}`, ...exactIndentedLines(payload, "  ")];
 }
 
 /** Lay out a recorded dependency-key set as its labeled facts; unknown representations stay literal. */
@@ -55,8 +55,8 @@ function clock(event: ContractHistoryEvent): string {
 }
 
 function payloadSuffix(payload: string | undefined): string {
-  if (payload === undefined || payload.trim().length === 0) return "";
-  const count = renderOpaqueBlock(payload, "  ", DEFAULT_CLI_COLUMNS).length;
+  if (payload === undefined || payload.length === 0) return "";
+  const count = payload.split("\n").length;
   return ` · ${count} line${count === 1 ? "" : "s"}`;
 }
 

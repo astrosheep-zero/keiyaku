@@ -28,24 +28,12 @@ export function writeStderr(body: string): void {
   writeCliStream(process.stderr, body);
 }
 
-/** The product-result presentation context, measured from the stream that carries the result. */
+/** Presentation context for the shared transport renderer. */
 export function displayContext(): TextRenderContext {
   return {
-    columns:
-      process.stdout.isTTY === true && Number.isInteger(process.stdout.columns)
-        ? process.stdout.columns
-        : DEFAULT_CLI_COLUMNS,
+    columns: DEFAULT_CLI_COLUMNS,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
     now: Date.now(),
-  };
-}
-
-/** The live-progress context, measured from stderr where activity rows are written. */
-export function resultContext(): TextRenderContext {
-  const tty = process.stderr.isTTY === true;
-  return {
-    columns: tty && Number.isInteger(process.stderr.columns) ? process.stderr.columns : DEFAULT_CLI_COLUMNS,
-    color: tty && process.env.NO_COLOR === undefined,
   };
 }
 

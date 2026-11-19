@@ -1,6 +1,6 @@
 import type { ExecutionObservation } from "../../protocol/execution-observation.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
-import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+import { exactIndentedLines, safeText } from "./terminal.js";
 
 type VerificationObservation = Extract<ExecutionObservation, { kind: "verification" }>["observation"];
 type Phase = Extract<VerificationObservation, { kind: "phase" }>;
@@ -45,11 +45,7 @@ function phaseFinishLine(observation: Phase): string {
   return `${mark} ${facts.join(" · ")}`;
 }
 
-export type ExecutionProgressOptions = StatusLineOptions &
-  Readonly<{
-    stream: StatusLineStream;
-    context: TextRenderContext;
-  }>;
+export type ExecutionProgressOptions = StatusLineOptions & Readonly<{ stream: StatusLineStream }>;
 
 /** One bounded phase observer; the native receipt alone concludes Verification. */
 export function createExecutionProgressRenderer(
@@ -58,7 +54,6 @@ export function createExecutionProgressRenderer(
   let status: StatusLine | undefined;
   const destination = watchDestination(input.stream);
   let buffers = { stdout: emptyBuffer(), stderr: emptyBuffer() };
-  let phase: Phase | undefined;
   let chain: Promise<void> = Promise.resolve();
   let finishing: Promise<void> | undefined;
   let retired = false;
@@ -67,7 +62,6 @@ export function createExecutionProgressRenderer(
     if (retired) return;
     status?.finish();
     status = undefined;
-    phase = undefined;
     const captured = buffers;
     buffers = { stdout: emptyBuffer(), stderr: emptyBuffer() };
     for (const stream of ["stdout", "stderr"] as const) {
@@ -78,7 +72,7 @@ export function createExecutionProgressRenderer(
         const unit = buffer.omittedBytes === 1 ? "byte" : "bytes";
         lines.push(`  [earlier output omitted: ${buffer.omittedBytes} ${unit}]`);
       }
-      lines.push(...renderOpaqueBlock(buffer.text, "  ", input.context.columns));
+      lines.push(...exactIndentedLines(buffer.text, "  "));
       await writeChunk(input.stream, `${lines.join("\n")}\n`);
     }
   }
@@ -93,10 +87,8 @@ export function createExecutionProgressRenderer(
     await flush();
     if (retired) return;
     if (observation.state === "started") {
-      phase = observation;
-      const label = phaseDetail(phase);
       status = new StatusLine(input.stream, input);
-      status.show((duration) => `verify  ● ${label} · ${elapsed(duration)}`);
+      status.show((duration) => `verify ${elapsed(duration)} ${observation.phase}`);
     } else {
       await writeChunk(input.stream, `${phaseFinishLine(observation)}\n`);
     }

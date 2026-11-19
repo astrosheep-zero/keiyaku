@@ -25,7 +25,7 @@ import { resetFailureLines } from "./receipt.js";
 import { renderRefusal, renderStructuredRefusal } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
-import { formatNextCall, renderBoundedPayload, safeText, type TextRenderContext } from "./terminal.js";
+import { formatNextCall, previewLines, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
 export function aliasSelector(selector: string | undefined): string | undefined {
@@ -38,17 +38,11 @@ function missing(operation: string, contract: string | undefined): string {
   return renderRefusal({ operation, contract: id, refusal: { kind: "contract-missing" } });
 }
 
-function actionFailure(
-  name: string,
-  failure: FailureProjection,
-  context: TextRenderContext,
-  input: VerbInput<VerbName>,
-): string | undefined {
+function actionFailure(name: string, failure: FailureProjection, input: VerbInput<VerbName>): string | undefined {
   if (failure.spawn !== undefined)
     return renderSpawnFailure(
       failure.spawn,
       failure.diagnostic,
-      context,
       name === "spawn" ? spawnPresentation(input as VerbInput<"spawn">) : {},
     );
   if (failure.tell !== undefined)
@@ -58,7 +52,6 @@ function actionFailure(
         failure.tell,
         "prompt" in input && typeof input.prompt === "string" ? input.prompt : "",
         undefined,
-        context,
         true,
       ),
       `  input ${failure.tell.tellId}`,
@@ -77,7 +70,7 @@ function actionFailure(
 
 function thrown(name: string, error: unknown, context: TextRenderContext, input: VerbInput<VerbName>): string {
   const failure = projectFailure(error);
-  const action = actionFailure(name, failure, context, input);
+  const action = actionFailure(name, failure, input);
   if (action !== undefined) return action;
   if (error instanceof AkumaNotBornError)
     return renderStructuredRefusal(name, "Akuma not found", [`id  ${safeText(error.id)}`]);
@@ -115,7 +108,7 @@ function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">):
   return renderRegionText(result, input);
 }
 
-function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, context: TextRenderContext): string {
+function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">): string {
   const selectedAlias = input.selectors.length === 1 ? aliasSelector(input.selectors[0]) : undefined;
   const rows = result.members.map((member) => {
     if (member.kind === "contract") return contractWaitMemberText(member.observation);
@@ -123,29 +116,15 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
     const row = waitText(
       { kind: "akuma", reason: result.reason === "deadline" ? "deadline" : "completed", results: [member.observation] },
       selectedAlias === undefined ? {} : { alias: selectedAlias },
-      context,
     );
     if (result.reason !== "reported" || result.report.akumaId !== member.observation.id) return row;
     const { reportId, text, clipped } = result.report;
-    return [
-      row,
-      `  ${reportId}`,
-      ...renderBoundedPayload({
-        text: text.trim() === "" && clipped ? "…" : text,
-        first: "    ",
-        continuation: "    ",
-        columns: context.columns,
-        maxLines: 4,
-        quote: "",
-        preserveLines: true,
-        truncated: clipped === true,
-      }),
-    ].join("\n");
+    return [row, `  ${reportId}`, ...previewLines(text, "    ", 3, clipped === true)].join("\n");
   });
   return [result.reason, ...rows].join("\n");
 }
 
-function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">, context: TextRenderContext): string {
+function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">): string {
   if (query.selector.startsWith("kei/")) {
     if (result.kind === "contract-missing") return missing("history", result.contractId);
     if (result.kind === "contract-unknown-history")
@@ -166,34 +145,25 @@ function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history"
   const selectedAlias = aliasSelector(query.selector);
   return (
     historyRawAnswer(result, id) ??
-    historyText(
-      result,
-      {
-        ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
-        ...(id === undefined ? {} : { id }),
-        ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
-        answer,
-      },
-      context,
-    )
+    historyText(result, {
+      ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
+      ...(id === undefined ? {} : { id }),
+      ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
+      answer,
+    })
   );
 }
 
 type DebtVerbName = Extract<VerbName, `debt.${string}`>;
 
-function renderDebtVerb(
-  name: DebtVerbName,
-  input: VerbInput<DebtVerbName>,
-  value: VerbOutput<DebtVerbName>,
-  context: TextRenderContext,
-): string {
+function renderDebtVerb(name: DebtVerbName, input: VerbInput<DebtVerbName>, value: VerbOutput<DebtVerbName>): string {
   switch (name) {
     case "debt.add":
     case "debt.addDocument":
-      return renderDebtMutation("add", value as VerbOutput<"debt.add">, context);
+      return renderDebtMutation("add", value as VerbOutput<"debt.add">);
     case "debt.update": {
       const query = input as VerbInput<"debt.update">;
-      return renderDebtUpdate(query.id, value as VerbOutput<"debt.update">, context);
+      return renderDebtUpdate(query.id, value as VerbOutput<"debt.update">);
     }
     case "debt.doctor":
       return renderDoctor(value as VerbOutput<"debt.doctor">);
@@ -202,19 +172,15 @@ function renderDebtVerb(
   }
 }
 
-function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">, context: TextRenderContext): string {
-  return renderKillText(value, aliasSelector(input.akuma), context);
+function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">): string {
+  return renderKillText(value, aliasSelector(input.akuma));
 }
 
-function renderInput(
-  input: VerbInput<"ask" | "tell">,
-  result: VerbOutput<"ask" | "tell">,
-  context: TextRenderContext,
-): string {
+function renderInput(input: VerbInput<"ask" | "tell">, result: VerbOutput<"ask" | "tell">): string {
   const selectedAlias = aliasSelector(input.akuma);
   if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
-    return tellText(result, input.prompt, selectedAlias, context);
-  return renderAskText(result, selectedAlias, context);
+    return tellText(result, input.prompt, selectedAlias);
+  return renderAskText(result, selectedAlias);
 }
 
 function spawnPresentation(input: VerbInput<"spawn">) {
@@ -226,8 +192,8 @@ function spawnPresentation(input: VerbInput<"spawn">) {
   };
 }
 
-function renderSpawn(input: VerbInput<"spawn">, result: VerbOutput<"spawn">, context: TextRenderContext): string {
-  return renderCallText(result, context, spawnPresentation(input));
+function renderSpawn(input: VerbInput<"spawn">, result: VerbOutput<"spawn">): string {
+  return renderCallText(result, spawnPresentation(input));
 }
 
 function renderReport(result: VerbOutput<"report">, context: TextRenderContext): string {
@@ -235,10 +201,10 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
   return result.kind === "recorded" ? `recorded${actor} ${result.reportId}` : `refused report · ${result.reason}`;
 }
 
-function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">, context: TextRenderContext): string {
+function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">): string {
   if (result.kind === "present") return result.guidance;
   if (result.kind === "missing") return missing("show", input.selector);
-  return renderDebtShow(result, context);
+  return renderDebtShow(result);
 }
 
 /** Render native completion values without observing the World or parsing output. */
@@ -269,9 +235,9 @@ export function renderVerb<K extends VerbName>(
   const value = completion.value;
   switch (name) {
     case "show":
-      return renderShow(input as VerbInput<"show">, value as VerbOutput<"show">, context);
+      return renderShow(input as VerbInput<"show">, value as VerbOutput<"show">);
     case "settings":
-      return renderSettingsText(value as VerbOutput<"settings">, context.columns);
+      return renderSettingsText(value as VerbOutput<"settings">);
     case "whoami":
       return renderWhoami(value as VerbOutput<"whoami">);
     case "nuke":
@@ -302,21 +268,21 @@ export function renderVerb<K extends VerbName>(
           : renderKanshiText(result, context);
     }
     case "spawn":
-      return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">, context);
+      return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">);
     case "fork":
       return renderForkText(value as VerbOutput<"fork">, input as VerbInput<"fork">);
     case "tell":
     case "ask":
-      return renderInput(input as VerbInput<"ask" | "tell">, value as VerbOutput<"ask" | "tell">, context);
+      return renderInput(input as VerbInput<"ask" | "tell">, value as VerbOutput<"ask" | "tell">);
     case "kill":
-      return renderKill(input as VerbInput<"kill">, value as VerbOutput<"kill">, context);
+      return renderKill(input as VerbInput<"kill">, value as VerbOutput<"kill">);
     case "wait":
-      return renderWait(input as VerbInput<"wait">, value as VerbOutput<"wait">, context);
+      return renderWait(input as VerbInput<"wait">, value as VerbOutput<"wait">);
     case "history":
-      return renderHistory(input as VerbInput<"history">, value as VerbOutput<"history">, context);
+      return renderHistory(input as VerbInput<"history">, value as VerbOutput<"history">);
     case "report":
       return renderReport(value as VerbOutput<"report">, context);
     default:
-      return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>, context);
+      return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>);
   }
 }

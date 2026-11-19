@@ -54,7 +54,10 @@ test("native permission waits reach public status, clear on reply, and end with 
     assert.equal(status.life, "running", "an approval wait is work evidence, not a new lifecycle state");
     assert.deepEqual(status.work.awaiting?.requests, [{ id: "per_read", action: "external_directory", resources: [path], tool: "read" }]);
     assert.ok(status.work.awaiting!.id > 0);
-    assert.match(currentWorkLines(status.work, { columns: 120, color: false }).join("\n"), /Awaiting approval:.*external_directory.*read.*\/outside\/work\/secret\.txt/u);
+    assert.match(currentWorkLines(status.work).join("\n"), /Awaiting approval:.*external_directory.*read.*\/outside\/work\/secret\.txt/u);
+    const longResource = `/outside/${"nested/".repeat(28)}target.txt`;
+    const awaiting = { ...status.work.awaiting!, requests: [{ ...status.work.awaiting!.requests[0]!, resources: [longResource] }] };
+    assert.ok(currentWorkLines({ ...status.work, awaiting }).some((line) => line.endsWith(longResource)));
 
     // Ordinary narration does not displace the pending state from the small status window.
     for (let index = 0; index < 8; index += 1) native.push("session.compaction.ended");

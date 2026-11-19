@@ -12,24 +12,16 @@ import {
   targetFacts,
   workspaceState,
 } from "./contract-observation.js";
-import { DEFAULT_CLI_COLUMNS, renderBoundedPayload, safeText, type TextRenderContext } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, previewLines, safeText, type TextRenderContext } from "./terminal.js";
 import { akumaLabel, renderAkumaBoard } from "./kanshi-akuma.js";
 import { contractRowLines } from "./catalog.js";
 import { debtRowLines } from "./debt.js";
 
-function payload(label: string, text: string, context: TextRenderContext): readonly string[] {
-  return renderBoundedPayload({
-    text,
-    first: `  ${label}  `,
-    continuation: "    │ ",
-    columns: context.columns,
-    maxLines: 3,
-    quote: "“",
-    truncated: false,
-  });
+function payload(label: string, text: string): readonly string[] {
+  return [`  ${label}`, ...previewLines(text, "    ")];
 }
 
-function renderSelectedContractRow(row: ContractKanshiDetail, context: TextRenderContext): readonly string[] {
+function renderSelectedContractRow(row: ContractKanshiDetail): readonly string[] {
   const abbreviations = abbreviateGitIds(gitIdsInDetail(row));
   const facts = [
     `holder  ${typeof row.holder === "string" ? row.holder : row.holder === undefined ? "none" : "unavailable"}`,
@@ -67,20 +59,20 @@ function renderSelectedContractRow(row: ContractKanshiDetail, context: TextRende
     ...(row.gates ?? []).flatMap((gate) =>
       gate.requirements.flatMap((requirement) =>
         requirement.current.kind === "attested" && requirement.current.summary !== undefined
-          ? payload(`${requirementDisplayName(gate.gate, requirement)} summary`, requirement.current.summary, context)
+          ? payload(`${requirementDisplayName(gate.gate, requirement)} summary`, requirement.current.summary)
           : [],
       ),
     ),
-    ...(row.abandonNote === undefined ? [] : payload("note", row.abandonNote, context)),
+    ...(row.abandonNote === undefined ? [] : payload("note", row.abandonNote)),
   ];
 }
 
-function renderSelectedContract(report: KanshiContractReport, context: TextRenderContext): readonly string[] {
+function renderSelectedContract(report: KanshiContractReport): readonly string[] {
   if (report.kind === "contract-absent") return ["  keiyaku absent"];
   if (report.kind === "contract-failed")
     return [`! ${safeText(report.id)} · unavailable · ${safeText(report.diagnostic)}`];
   if (report.kind === "contract-missing") return [`○ ${safeText(report.id)} · missing`];
-  return renderSelectedContractRow(report, context);
+  return renderSelectedContractRow(report);
 }
 
 function countLine<Value>(label: string, section: Section<Value>, render: (value: Value) => string): string {
@@ -121,7 +113,7 @@ export function renderKanshiText(
   report: KanshiReport | KanshiContractReport,
   context: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false },
 ): string {
-  if (!("contracts" in report)) return renderSelectedContract(report, context).join("\n");
+  if (!("contracts" in report)) return renderSelectedContract(report).join("\n");
   const contracts = report.contracts;
   const debts = report.debts;
   const blocks = [

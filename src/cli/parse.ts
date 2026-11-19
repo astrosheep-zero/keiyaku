@@ -31,7 +31,6 @@ import {
   type ContractCommand as Command,
   type ContractCommandSpec as CommandSpec,
 } from "./commands/contract-help.js";
-import { renderOpaqueBlock, renderTextBlock } from "./render/terminal.js";
 import { scanArgs, type ScanSpec } from "./scan.js";
 import {
   CliUsageError,
@@ -56,57 +55,38 @@ const INVOCATION_PATH_OPTIONS = new Set(["-C", "--cwd", "--repo", "--workdir"]);
 const WHOAMI_USAGE = "whoami [--json]";
 const WHOAMI_PURPOSE = "Observe self, current Turn initiator, and Akuma profile.";
 
-export function renderRootHelp(columns?: number): string {
-  return renderHelpText(
-    [
-      "keiyaku — Contract, Debt, and Akuma control for one repository",
-      "",
-      ROOT_USAGE,
-      "",
-      "Contract — standing acceptance",
-      ...Object.entries(CONTRACT_COMMAND_SPECS)
-        .filter(([command]) => command !== "settings")
-        .map(([command, spec]) => `  ${command.padEnd(10)} ${spec.purpose}`),
-      "",
-      "Debt — unresolved-work ledger",
-      "  debt       Debt coordination; see `keiyaku debt --help`.",
-      "",
-      "Akuma — contracted demons",
-      ...renderAkumaRootRows(),
-      "",
-      "Workspace",
-      `  ${"install".padEnd(10)} ${INSTALL_ROOT_PURPOSE}`,
-      `  ${"settings".padEnd(10)} ${CONTRACT_COMMAND_SPECS.settings.purpose}`,
-      `  ${"whoami".padEnd(10)} ${WHOAMI_PURPOSE}`,
-      "",
-      "Package",
-      "  --version  Print the running package version.",
-      "",
-      "Global options:",
-      "  -C, --cwd <path>    Set the invocation working directory.",
-      "  --repo <path>       Select the Git repository coordinate.",
-      "  --workdir <path>    Set the execution directory for spawn only.",
-      "",
-      "Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 4 unsatisfied · 64 usage",
-    ].join("\n"),
-    columns,
-  );
-}
-
-function renderHelpText(help: string, columns: number | undefined): string {
-  if (columns === undefined || !Number.isFinite(columns) || columns <= 0) return help;
-  return help
-    .split("\n")
-    .flatMap((line) => {
-      if (line.trim().length === 0) return [line];
-      const indent = line.match(/^\s*/u)?.[0] ?? "";
-      const body = line.slice(indent.length);
-      if (body.startsWith("usage  ") || indent.startsWith("      ")) {
-        return renderOpaqueBlock(body, indent, columns);
-      }
-      return renderTextBlock(body, indent, columns);
-    })
-    .join("\n");
+export function renderRootHelp(): string {
+  return [
+    "keiyaku — Contract, Debt, and Akuma control for one repository",
+    "",
+    ROOT_USAGE,
+    "",
+    "Contract — standing acceptance",
+    ...Object.entries(CONTRACT_COMMAND_SPECS)
+      .filter(([command]) => command !== "settings")
+      .map(([command, spec]) => `  ${command.padEnd(10)} ${spec.purpose}`),
+    "",
+    "Debt — unresolved-work ledger",
+    "  debt       Debt coordination; see `keiyaku debt --help`.",
+    "",
+    "Akuma — contracted demons",
+    ...renderAkumaRootRows(),
+    "",
+    "Workspace",
+    `  ${"install".padEnd(10)} ${INSTALL_ROOT_PURPOSE}`,
+    `  ${"settings".padEnd(10)} ${CONTRACT_COMMAND_SPECS.settings.purpose}`,
+    `  ${"whoami".padEnd(10)} ${WHOAMI_PURPOSE}`,
+    "",
+    "Package",
+    "  --version  Print the running package version.",
+    "",
+    "Global options:",
+    "  -C, --cwd <path>    Set the invocation working directory.",
+    "  --repo <path>       Select the Git repository coordinate.",
+    "  --workdir <path>    Set the execution directory for spawn only.",
+    "",
+    "Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 4 unsatisfied · 64 usage",
+  ].join("\n");
 }
 
 export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
@@ -118,24 +98,21 @@ export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
   return commandGuide(name, CONTRACT_COMMAND_SPECS[name as Command].usage);
 }
 
-export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): string {
-  const help = (() => {
-    switch (coordinate.kind) {
-      case "root":
-        return renderRootHelp();
-      case "contract":
-        return renderContractHelpForOwner(coordinate.command);
-      case "debt":
-        return renderDebtHelp(coordinate.action);
-      case "install":
-        return renderInstallHelp();
-      case "whoami":
-        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only. For an Akuma, who started its current turn is shown apart from who spawned it. Missing or unreadable facts stay explicit.`;
-      case "akuma":
-        return renderAkumaHelp(coordinate.action);
-    }
-  })();
-  return renderHelpText(help, columns);
+export function renderHelp(coordinate: CliHelpCoordinate): string {
+  switch (coordinate.kind) {
+    case "root":
+      return renderRootHelp();
+    case "contract":
+      return renderContractHelpForOwner(coordinate.command);
+    case "debt":
+      return renderDebtHelp(coordinate.action);
+    case "install":
+      return renderInstallHelp();
+    case "whoami":
+      return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only. For an Akuma, who started its current turn is shown apart from who spawned it. Missing or unreadable facts stay explicit.`;
+    case "akuma":
+      return renderAkumaHelp(coordinate.action);
+  }
 }
 
 type RequestOutput = Readonly<{ output: "text" | "json" }>;

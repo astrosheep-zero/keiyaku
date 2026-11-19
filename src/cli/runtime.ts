@@ -26,7 +26,7 @@ import {
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
 import { renderVerb } from "./render/verbs.js";
 import { renderRefusal } from "./render/refusal.js";
-import { DEFAULT_CLI_COLUMNS, formatNextCall, safeText, type RecoveryCoordinates } from "./render/terminal.js";
+import { formatNextCall, safeText, type RecoveryCoordinates } from "./render/terminal.js";
 import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
 import { renderUsageMessage, usageAcceptanceLines } from "./usage.js";
 
@@ -67,17 +67,7 @@ function memoized(reader: () => Promise<string>): () => Promise<string> {
 export async function writeExecutionProgress(
   stream: NodeJS.WritableStream = process.stderr,
 ): Promise<ExecutionProgressDriver> {
-  const terminal = stream as NodeJS.WritableStream & Readonly<{ isTTY?: boolean; columns?: number }>;
-  const renderer = createExecutionProgressRenderer({
-    stream: terminal,
-    context: {
-      columns:
-        terminal.isTTY === true && Number.isInteger(terminal.columns)
-          ? (terminal.columns ?? DEFAULT_CLI_COLUMNS)
-          : DEFAULT_CLI_COLUMNS,
-      color: false,
-    },
-  });
+  const renderer = createExecutionProgressRenderer({ stream });
   return { observe: (event) => renderer.observe(event), finish: () => renderer.finish() };
 }
 

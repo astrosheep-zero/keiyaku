@@ -8,7 +8,7 @@ import type {
 } from "../../index.js";
 import type { FailureProjection } from "../../library/outcome.js";
 import type { MeaningfulEffect } from "../../library/reconcile.js";
-import { DEFAULT_CLI_COLUMNS, kindWords, quotedText, renderOpaqueBlock, safeText } from "./terminal.js";
+import { exactIndentedLines, kindWords, quotedText, safeText } from "./terminal.js";
 
 /** Coordinates are copyable facts, independent of terminal width. */
 export function fact(lines: string[], label: string, value: string | number | null | undefined): void {
@@ -16,7 +16,7 @@ export function fact(lines: string[], label: string, value: string | number | nu
 }
 
 export function payload(lines: string[], label: string, value: string | undefined): void {
-  if (value !== undefined) lines.push(`  ${label}`, ...renderOpaqueBlock(value, "  ", DEFAULT_CLI_COLUMNS));
+  if (value !== undefined) lines.push(`  ${label}`, ...exactIndentedLines(value, "  "));
 }
 
 type PartialContract = Extract<PartialOutcomeEnvelope, { kind: "contract" }>;

@@ -100,10 +100,13 @@ test("help is stdout zero and does not enter an absent world", async () => {
   assert.doesNotMatch(stdout, /^\{/u);
 });
 
-test("verify help needs neither World nor plugins", async () => {
-  const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "verify", "--help"]));
+test("verify help stays complete on a narrow TTY without a World or plugins", async () => {
+  const result = await captureOutput(() => {
+    Object.assign(process.stdout, { isTTY: true, columns: 12 });
+    return main(["-C", "/definitely/absent/keiyaku-world", "verify", "--help"]);
+  });
   assert.equal(result.exit, 0);
-  assert.match(result.stdout, /usage  keiyaku verify/u);
+  assert.equal(result.stdout, `${renderContractHelp("verify").trimEnd()}\n`);
   assert.equal(result.stderr, "");
 });
 

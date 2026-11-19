@@ -201,8 +201,8 @@ test("selected Contract status preserves every supplied requirement and workspac
     "workspace  unavailable",
     "checkout unavailable · checkout read failed",
     "akuma  aku/worker/11112222",
-    "verification 1 summary  “First check passed”",
-    "verification 2 summary  “Second check failed”",
+    "verification 1 summary\n    First check passed",
+    "verification 2 summary\n    Second check failed",
   ];
   for (const phase of ["bound", "claimed", "abandoned"] as const) {
     const text = renderKanshiText({ ...report, phase }, { columns: 80, color: false });

@@ -10,7 +10,6 @@ import { contractId } from "../src/core/facts/types.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkumaId;
-const context = { columns: 100, color: false } as const;
 function parseExecution(argv: readonly string[]): ParsedCommandInvocation {
   const parsed = parseArgv(argv);
   if (!("command" in parsed)) throw new Error("expected command invocation");
@@ -32,7 +31,7 @@ test("spawn defaults to detached birth and rejects removed detach flags", () => 
   });
   assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);
   assert.throws(() => parseArgv(["spawn", "worker", "--detach", "prompt"]), /option --detach is not valid for spawn/u);
-  const text = renderCallText(spawned(), context, { cwd: world });
+  const text = renderCallText(spawned(), { cwd: world });
   assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"), "verdict, subject, and invocation directory");
   assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached spawn has no timeline or observation conclusion");
   assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁|└─|├─/u);
@@ -42,7 +41,6 @@ test("a contract-bound spawn receipt indents contract, invocation context, and a
   const previous = parseAkumaId("aku/worker/0000beef").id;
   const text = renderCallText(
     spawned({ alias: { kind: "moved", previousAkumaId: previous } }),
-    context,
     { cwd: world, contractId: contractId("kei/tree-receipt"), alias: "@sapling" },
   );
   assert.equal(
@@ -65,7 +63,7 @@ test("a fork receipt names its source without inventing extra evidence", () => {
 
 test("prompt-free spawn renders its born identity without a Tell receipt", () => {
   const result = spawned();
-  const text = renderCallText(result, context, { cwd: world });
+  const text = renderCallText(result, { cwd: world });
   assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"));
   assert.doesNotMatch(text, /tell|answer|cwd|->/u);
 });
@@ -76,7 +74,6 @@ test("a detached call keeps its born child, execution directory, and native fail
       tellId: "tell/msys",
       kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost" }],
     }),
-    context,
     { cwd: world, prompt: "prompt" },
   );
   assert.equal(
@@ -85,18 +82,18 @@ test("a detached call keeps its born child, execution directory, and native fail
       `! spawned ${akuma}`,
       `  ${world}`,
       "  input tell/msys",
-      '  "prompt"',
+      "  prompt",
       "  ! tell failed infrastructure window lost",
     ].join("\n"),
     "a failed Tell stage stays an action receipt over the admitted child, its directory, and its Tell input",
   );
-  assert.equal((text.match(/"prompt"/gu) ?? []).length, 1, "the submitted Tell payload is not replayed");
+  assert.equal((text.match(/^  prompt$/gmu) ?? []).length, 1, "the submitted Tell payload is not replayed");
 });
 
 test("detached spawn keeps alias and independent partial failures", () => {
   const aliased = spawned();
   assert.match(
-    renderCallText(aliased, context, { cwd: world, alias: "@ship" }),
+    renderCallText(aliased, { cwd: world, alias: "@ship" }),
     /aku\/worker\/1234abcd \(@ship\)/u,
   );
 
@@ -111,7 +108,7 @@ test("detached spawn keeps alias and independent partial failures", () => {
     },
   ];
   for (const { result, diagnostic } of failures) {
-    const text = renderCallText(result, context, { cwd: world });
+    const text = renderCallText(result, { cwd: world });
     assert.ok(text.split("\n").includes(`  ${diagnostic}`), diagnostic);
     assert.match(
       text.split("\n")[0]!,

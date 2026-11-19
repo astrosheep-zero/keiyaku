@@ -6,8 +6,13 @@ import {
   contractReport,
   contractSummary,
   kanshiReport,
+  cliJson,
+  runCli,
 } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import {
   changeId,
@@ -25,7 +30,6 @@ import type { ReconcileCompletion } from "../src/library/reconcile.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import {
   DEFAULT_CONTEXT,
-  frameRule,
   historyText as nativeHistoryText,
   snapshotText,
   waitText as nativeWaitText,
@@ -37,13 +41,7 @@ import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/pr
 import type { AkumaObservation, ContractGateCurrent, DeliverOutcome, Placement, Placed } from "../src/index.js";
 import { renderAkumaBoard } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import {
-  diagnosticLines,
-  displayColumns,
-  renderOpaqueBlock,
-  takeDisplayColumns,
-  truncateDisplayText,
-} from "../src/cli/render/terminal.js";
+import { exactIndentedLines, previewLines } from "../src/cli/render/terminal.js";
 import { evidenceLines } from "../src/cli/render/receipt.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
 import {
@@ -57,10 +55,13 @@ import {
   type ActivityToolCall,
 } from "./support/kanshi-activity.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { askCurrentWorkLine } from "../src/cli/render/akuma.js";
-import { activityFact } from "./support/akuma-fixtures.js";
+import { activityFact, bornBody } from "./support/akuma-fixtures.js";
+import { makeGitRepository } from "./support/git.js";
+import { temporaryDirectory } from "./support/process.js";
+import { contractMarkdown } from "./support/markdown.js";
 import { projectFact } from "../src/akuma/projection.js";
-import type { TimelineFact } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, type TimelineFact } from "../src/akuma/heart/index.js";
+import type { Settings } from "../src/settings.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import {
@@ -95,8 +96,7 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
         at: row.at,
         outcome: row.outcome,
       },
-      { id: "turn/1" },
-      DEFAULT_CONTEXT,
+      { id: "turn/1" }
     ),
     "canceled",
   );
@@ -192,10 +192,10 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
 }
 
 type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
-const genericLines = (rows: readonly GenericFixture[], columns: number) =>
+const genericLines = (rows: readonly GenericFixture[]) =>
   nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
     events: rows.map(([sequence, name, input]) => genericTool(sequence, name, input)),
-  }, {}, { columns, color: false }).split("\n").slice(2);
+  }, {}).split("\n").slice(1);
 /** One native Debt summary row; scenario deltas are explicit overrides. */
 function debtSummary(overrides: Partial<DebtSummary> = {}): DebtSummary {
   return {
@@ -512,7 +512,6 @@ test("Debt show and doctor render native prerequisite facts", () => {
         }),
       }],
     },
-    { columns: 120, color: false },
   );
   assert.match(shown, /^○ debt\/root · open · P2 — Root$/mu);
   assert.match(shown, /^ {2}needs debt\/child · dropped$/mu);
@@ -738,7 +737,7 @@ test("selected Contract roster preserves terminal associations and unavailable o
 test("Contract status preserves ordered native facts and bounded testimony in every phase", () => {
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));
-  const long = "👩‍💻".repeat(120);
+  const long = "👩‍💻".repeat(161);
   const reviewGate = (current: ContractGateCurrent) => ({
     gate: "reviewed",
     satisfied: current.kind === "attested" && current.verdict === "satisfied",
@@ -773,7 +772,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
     delivery: { candidate: tender, integration },
     gates: [reviewGate({ kind: "attested", verdict: "unsatisfied", at, summary: "Fix missing coverage" })],
   });
-  assert.match(denied, /review summary  “Fix missing coverage”/u);
+  assert.match(denied, /^  review summary\n    Fix missing coverage$/mu);
   assert.match(denied, /review · current · unsatisfied/u);
   assert.doesNotMatch(denied, /× reviewed/u);
   assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
@@ -822,14 +821,11 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   assert.match(claimed, /target behind 5/u);
   assert.match(claimed, /worktree  \/tmp\/wt/u);
   assert.doesNotMatch(claimed, /when  5s/u);
-  assert.match(claimed, /review summary  “/u);
-  assert.match(claimed, /│ /u);
-  assert.match(claimed, /…”/u);
+  assert.match(claimed, /^  review summary\n    [^\n]+…$/mu);
   assert.doesNotMatch(claimed, /landed|predecessor|method|content identity|target moved/u);
   const abandoned = show({ ...base, phase: "abandoned", abandonNote: long });
   assert.match(abandoned, /· abandoned ·/u);
-  assert.match(abandoned, /note  “/u);
-  assert.match(abandoned, /…”/u);
+  assert.match(abandoned, /^  note\n    [^\n]+…$/mu);
   assert.match(abandoned, /worktree  \/tmp\/wt/u);
   assert.match(abandoned, /review · missing/u);
   const world = renderKanshiText(
@@ -926,18 +922,12 @@ test("verb receipts render native conclusions with explicit invocation context",
   for (const text of texts) assert.ok(text.includes(id));
 });
 
-test("opaque payloads preserve lines and name overflow", () => {
-  assert.deepEqual(renderOpaqueBlock("diff --git a/x b/x\n+++ b/x\n@@ -1 +1 @@", "  ", 100), [
-    "  diff --git a/x b/x",
-    "  +++ b/x",
-    "  @@ -1 +1 @@",
-  ]);
-  const lines = renderOpaqueBlock(`${"line\n".repeat(100)}tail`, "  ", 100);
-  assert.equal(lines.length, 100);
-  assert.match(lines.at(-1) ?? "", /omitted/u);
-  const wrapped = renderOpaqueBlock("x".repeat(8_000), "  ", 80);
-  assert.equal(wrapped.length, 100);
-  assert.match(wrapped.at(-1) ?? "", /omitted/u);
+test("exact indented content preserves source lines and its full tail", () => {
+  const line = "a".repeat(800);
+  const lines = exactIndentedLines(`${line}\n${"\n".repeat(101)}  tail\n`, "  ");
+  assert.equal(lines[0], `  ${line}`);
+  assert.deepEqual(lines.slice(1, 102), Array(101).fill(""));
+  assert.deepEqual(lines.slice(102), ["    tail", ""]);
 });
 
 /** A native selected-Contract reconcile result; absence means known empty. */
@@ -1280,31 +1270,30 @@ test("reconcile renders private-state seat-close failure and diagnostic", () => 
   assert.match(text, /^ {2}diagnostic\n {2}could not close publication seat$/mu);
 });
 
-test("reconcile hook payloads preserve lines and remain bounded", () => {
-  const result = reconcile({
-    issues: [
-      {
-        kind: "worktree-hook-failed",
-        severity: "required",
-        phase: "destroy",
-        path: "/tmp/wt",
-        name: "cleanup",
-        diagnostic: `exit 9\n${"line\n".repeat(100)}tail`,
-      },
-    ],
+test("CLI bind receipt keeps native hook diagnostics through their recovery text", async (t) => {
+  const repo = makeGitRepository();
+  repo.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const home = temporaryDirectory(t, "keiyaku-hook-receipt-home-");
+  const diagnostic = `${"upstream output\n".repeat(100)}  inspect the recovery log: /retained/hook.log`;
+  mkdirSync(join(repo.path, ".keiyaku"), { recursive: true });
+  writeFileSync(join(repo.path, ".keiyaku", "settings.json"), JSON.stringify({
+    worktree: { create: [{ name: "prepare", timeoutMs: 5000,
+      argv: [process.execPath, "-e", `process.stderr.write(${JSON.stringify(diagnostic)}); process.exitCode = 9`],
+    }] },
+  }));
+  const receipt = await runCli(["-C", repo.path, "bind", "-"], {
+    cwd: repo.path, environment: { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home },
+    readStdin: async () => contractMarkdown("Hook recovery receipt", {
+      Context: "A local managed hook failed.", Objective: "Expose its supplied diagnostic.",
+      Design: "Reconcile one appointment.", Region: "file.txt", Criteria: "### Recovery\nKeep the hook evidence.",
+    }),
   });
-  const lines = renderVerb(
-    "reconcile",
-    { contract: reconcileId },
-    { kind: "returned", value: result },
-    RECEIPT_CONTEXT,
-  ).split("\n");
-  const block = lines.slice(lines.indexOf("  diagnostic") + 1);
-  assert.equal(block.length, 100);
-  assert.equal(block[0], "  exit 9");
-  assert.equal(block.includes("  tail"), false);
-  assert.equal(block.includes("  line  line"), false);
-  assert.equal(block.at(-1), "  … (2 lines omitted)");
+  assert.equal(receipt.exit, 3, receipt.stderr || receipt.stdout);
+  assert.match(receipt.stdout, /^  admitted  bind$/mu);
+  assert.match(receipt.stdout, /^  issue  worktree hook failed$/mu);
+  const payload = ["exit 9", "stderr:", ...diagnostic.split("\n")].map((line) => `  ${line}`).join("\n");
+  assert.ok(receipt.stdout.includes(`  diagnostic\n${payload}`));
+  assert.doesNotMatch(receipt.stdout, /^  available  /mu, "hook prose is not interpreted as a recovery call");
 });
 
 test("reconcile renders contract-file and settlement failures", () => {
@@ -1924,31 +1913,21 @@ test("native history retains diagnostics beneath a bounded command row", () => {
   const diagnostic = "hook failed; retained diagnostic words; log /work/recovery/log.txt";
   const row = completedTool(1, "bash", { kind: "run", command: `bash -lc 'npm test ${"long-file ".repeat(30)}'` },
     { status: "error", exitCode: 7, message: diagnostic });
-  const context = { columns: 48, color: false };
   const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
-  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
-  const lines = text.split("\n");
-  const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ");
-  assert.ok(continuation.includes(diagnostic));
-  assert.doesNotMatch(continuation, /…/u, "a diagnostic that fits the continuation stays whole");
-  assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {});
+  assert.match(text, /! run \(bash\) 1\n  \$[^…\n]+…\n  detail  exit 7\n  cause\n/u);
+  assert.equal(text.split("\n").at(-1), `    ${diagnostic}`);
   const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
-  const textShort = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [short] }, {}, context);
+  const textShort = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [short] }, {});
   assert.equal(textShort.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
 });
 
 test("native history bounds long diagnostics with a visible omission", () => {
   const message = "diagnostic word ".repeat(1000);
-  for (const columns of [24, 48, 100, 200]) {
-    const context = { columns, color: false };
-    for (const failed of [false, true]) {
-      const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: failed ? "error" : "ok", message });
-      const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
-      const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
-      assert.match(text, /diagnostic/u);
-      assert.match(text.trimEnd(), /…$/u, "the bounded diagnostic visibly omits its remainder");
-    }
-  }
+  const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: "error", message });
+  const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {});
+  assert.equal(text.split("\n").at(-1), `    ${message.slice(0, 160)}…`);
 });
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
@@ -1971,32 +1950,28 @@ test("a settled successful tool spends no mark while voice and input rows keep t
     { kind: "tell", sequence: 3, at: AKUMA_ACTIVITY_AT, tellId: "tell/mark-law", text: "told direction", state: "told",
       deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }] },
   ];
-  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId(id).id, events: rows }, {}, { columns: 100, color: false });
-  assert.match(text, /^ {3}read +src\/a\.ts · L0-0$/mu, "a settled tool affirms success by spending no mark");
-  assert.match(text, /^▎ spoken$/mu, "speech sits on its own rail without a label or quotes");
-  assert.match(text, /^▸ told direction$/mu, "a told input keeps its input lead");
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId(id).id, events: rows }, {});
+  assert.match(text, /^ {2}read 1\n  path  src\/a\.ts\n  detail  L0-0$/mu, "a settled tool spends no mark");
+  assert.match(text, /^▎ 2\n  spoken$/mu, "speech keeps its distinct mark and no quotes");
+  assert.match(text, /^▸ tell\/mark-law · 3\n  told direction$/mu, "a told input keeps its input lead");
   assert.equal((text.match(/✓/gu) ?? []).length, 0, "settled work adds no completion to running status");
 });
 
 test("generic tool rows preserve observed JSON arguments", () => {
-  const lines = genericLines(
-    [
-      [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })],
-      [2, "silent"],
-      [3, "silent", preview({})],
-      [4, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
-    ],
-    200,
-  );
-  const text = lines.join("\n");
-  assert.match(
-    text,
-    /future_tool\s+\{"alpha":1,"beta":"x","gamma":\{"delta":\[true,null\]\}\}/u,
-    "nested compact JSON keeps types and order",
-  );
-  assert.match(text, /future_tool\s+\{"alpha":1,"beta":"long…/u, "a truncated capture keeps its explicit ellipsis");
-  assert.match(text, /^ {3}silent$/mu, "an absent argument preview keeps the tool identity alone");
-  assert.match(text, /^ {3}silent +\{\}$/mu, "an explicitly empty argument object stays visibly empty");
+  assert.deepEqual(genericLines([
+    [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })],
+    [2, "silent"],
+    [3, "silent", preview({})],
+    [4, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
+  ]), [
+    "  future_tool 1",
+    '  {"alpha":1,"beta":"x","gamma":{"delta":[true,null]}}',
+    "  silent 2",
+    "  silent 3",
+    "  {}",
+    "  future_tool 4",
+    '  {"alpha":1,"beta":"long…',
+  ]);
 });
 
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
@@ -2009,67 +1984,52 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
     ),
     completedTool(2, "future_tool", { kind: "other", input: preview({}) }, { status: "error", exitCode: 7 }),
   ];
-  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {}, { columns: 200, color: false });
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {});
   for (const [pattern, message] of [
-    [/\{"alpha":1\} — error · refused$/mu, "argument evidence and its failure stay together"],
-    [/future_tool\s+\{\} — exit 7$/mu, "an empty argument object never swallows failure evidence"],
+    [/\{"alpha":1\}\n  detail  error\n  cause\n    refused$/mu, "argument, failure and cause remain distinct"],
+    [/future_tool 2\n  \{\}\n  detail  exit 7$/mu, "an empty argument object never swallows failure evidence"],
   ] as const)
     assert.match(text, pattern, message);
   assert.doesNotMatch(text, / — ok/u);
   const legacy = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
     events: [completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" })],
-  }, {}, { columns: 120, color: false });
-  assert.match(legacy, /mystery — error · refused$/mu);
+  }, {});
+  assert.match(legacy, /mystery 1\n  detail  error\n  cause\n    refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
 
-test("generic tool rows preserve name, width, and grapheme behavior", () => {
-  const exact = "e".repeat(71);
+test("generic tool names are complete; only argument previews use the content aperture", () => {
+  const name = "long-tool-name-".repeat(20);
   const family = "👨‍👩‍👧‍👦";
-  const lines = genericLines(
-    [
-      [1, "n".repeat(120), preview({ a: 1 })],
-      [2, "🙂".repeat(60), preview({ a: 1 })],
-      [3, "n".repeat(120)],
-      [4, exact, preview({ a: 1 })],
-      [5, family + family, preview({ a: 1 })],
-      [6, family.repeat(60), preview({ a: 1 })],
-      [7, "ok_tool", preview({ path: "a" })],
-      [8, "a_very_long_tool_name_here", preview({ arguments: "y".repeat(200) })],
-      [9, "wide_tool", preview({ text: "🙂".repeat(30) })],
-    ],
-    80,
-  );
-  assert.equal(lines.length, 9, "one rendered line per generic tool row");
-  for (const line of lines) assert.ok(displayColumns(line) <= 80, `one line within 80 columns: ${line}`);
-  assert.ok(lines[0]!.includes("…"), "an over-wide name truncates visibly");
-  assert.ok(lines[1]!.includes("🙂"), "a wide name keeps whole graphemes");
-  assert.doesNotMatch(lines[1]!, /\uFFFD/u, "no grapheme is split into a replacement");
-  assert.ok(lines[3]!.includes(exact), "an exact-fit name is not truncated");
-  assert.ok(lines[3]!.endsWith("…"), "the argument preview truncates visibly instead of vanishing");
-  for (const line of lines.slice(4, 6)) {
-    assert.ok(line.includes(family), "a ZWJ family stays whole");
-    assert.doesNotMatch(line, /\uFFFD/u, "ZWJ is never replaced by a replacement character");
-  }
-  assert.equal(
-    lines[6]!.indexOf("{"),
-    3 + "ok_tool".length + 1,
-    "a name longer than six cells uses its own action width",
-  );
-  assert.ok(lines[7]!.includes("a_very_long_tool_name_here"), "an over-long name stays complete");
-  assert.ok(lines[7]!.endsWith("…"), "args truncate before the name does");
-  assert.ok(lines[8]!.includes("🙂") && lines[8]!.endsWith("…"), "a truncated emoji argument stays grapheme-safe");
+  const args = preview({ text: family.repeat(180) });
+  assert.deepEqual(genericLines([[123456789, name, args], [2, name, { json: "", truncated: true }]]), [
+    `  ${name} 123456789`,
+    `  {"text":"${family.repeat(151)}…`,
+    `  ${name} 2`,
+    "  …",
+  ]);
 });
 
-test("activity rows share one six-cell default action column", () => {
-  const note = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "payload" } as const;
-  const plainNote = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events: [note] }, {}, { columns: 80, color: false }).split("\n")[2]!;
-  const plainTool = genericLines([[1, "tool", preview({ value: 1 })]], 80)[0]!;
-  assert.equal(
-    plainNote.indexOf("payload"),
-    plainTool.indexOf("{"),
-    "narrative and tool rows share the default action column",
-  );
+test("long read paths and read ranges sit outside the text preview budget", () => {
+  const path = `/work/${"source/".repeat(30)}nested.ts`;
+  const row = completedTool(1, "read", { kind: "read", path, offset: 7, limit: 4 });
+  const page = { kind: "akuma" as const, akumaId: parseAkumaId("aku/worker/abcd1234").id, events: [row] };
+  assert.deepEqual(nativeHistoryText(page, {}).split("\n").slice(1), ["  read 1", `  path  ${path}`, "  detail  L7-10"]);
+});
+
+test("status and World keep the complete native summary and retained activity ID", () => {
+  const id = "aku/worker/aabb0009";
+  const path = `/work/${"source/".repeat(30)}nested.ts`;
+  const sequence = 123456789;
+  const rows = openRows([startedTool(sequence, "read", { kind: "read", path, offset: 7, limit: 4 })]);
+  const view = observation(statusOf(id, "running", rows));
+  const report = akumaWorldReport([activityAkumaRow(id, "running", rows)]);
+  const line = `${sequence} read ${path} · L7-10`;
+  for (const columns of [12, 120]) {
+    const context = { columns, color: false };
+    assert.equal(snapshotText(view, context).split("\n").filter((row) => row === line).length, 1);
+    assert.equal(renderKanshiText(report, context).split("\n").filter((row) => row === `  ${line}`).length, 1);
+  }
 });
 
 test("World current work keeps concrete active work and visible clipping", () => {
@@ -2091,8 +2051,10 @@ test("World current work keeps concrete active work and visible clipping", () =>
     "2026-01-01T10:00:05.000Z",
     { columns: 120, color: false },
   ).join("\n");
-  assert.match(truncatedRoster, /…$/u);
-  assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
+  const summary = projectCurrentWork(truncated).summary!;
+  assert.equal(summary.clipped, true);
+  assert.ok(summary.text.endsWith("…"));
+  assert.equal(truncatedRoster.split("\n").at(-1), `  ${summary.id} ${summary.text}`);
 });
 
 test("a sleeping worker retains its outcome coordinate and completion judgment", () => {
@@ -2128,8 +2090,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
         },
       ],
     },
-    {},
-    { columns: 80, color: false },
+    {}
   );
   assert.equal(returned, `✓ ${sleeping.id} — answered\n  turn/1 · answered\n  the answer`, "wait keeps the complete exact-turn answer without a status panel");
   assert.doesNotMatch(returned, /─|✓ answer|came back/u, "no panel, no separate answer row, no retired life label");
@@ -2150,8 +2111,8 @@ test("status text and JSON report the Akuma execution workdir", () => {
   const statusLines = snapshotText(observationView, DEFAULT_CONTEXT).split("\n");
   assert.deepEqual(
     statusLines.slice(0, 3),
-    [id, "  /work/tree", frameRule([id, "  /work/tree"], DEFAULT_CONTEXT.columns)],
-    "the execution directory is a static coordinate above the content boundary",
+    [id, "  /work/tree", "● running"],
+    "the execution directory is a static coordinate before the observed life",
   );
   assert.doesNotMatch(statusLines.join("\n"), /cwd/u, "the coordinate is named once, above the timeline");
   const json = JSON.parse(JSON.stringify(observationView));
@@ -2249,18 +2210,17 @@ test("status keeps current evidence while history retains thought narration", ()
       lowestRetainedSequence: 1,
       highestSequence: 12,
     },
-    {},
-    DEFAULT_CONTEXT,
+    {}
   );
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
-  assert.match(historyText, /^ {3}··· +55 earlier events · showing last 13/mu);
+  assert.match(historyText, /^ {2}··· 55 earlier events · showing last 13/mu);
   assert.doesNotMatch(historyText, /earlier turns/u);
   assert.doesNotMatch(historyText, /●/u, "history never asserts live activity");
   for (const command of ["c4", "c5", "c6", "c7"])
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
 
-test("Ask current work follows the native overlapping-tool frontier", () => {
+test("status current work follows the native overlapping-tool frontier", () => {
   const id = parseAkumaId("aku/worker/abcd0104").id;
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
@@ -2301,25 +2261,14 @@ test("Ask current work follows the native overlapping-tool frontier", () => {
     activityFact(7, 1, at(7), { type: "note", text: "between tools" }),
   ];
   const third = [...second, tool(8, "completed", "A")];
-  const projection = (facts: readonly TimelineFact[]) => {
-    const rows = facts.map(projectFact);
-    return { status: statusOf(id, "running", rows), rows };
-  };
-  const context = { columns: 120, color: false };
-  const line = (facts: readonly TimelineFact[]) => {
-    const observed = projection(facts);
-    return askCurrentWorkLine(
-      { id, life: observed.status.life, summary: observed.status.work.summary },
-      2_000,
-      context,
-    );
-  };
-  assert.match(line(first), /run \$ B/u);
-  assert.match(line(second), /run \$ A/u);
-  assert.match(line(third), /last observed running/u);
-  assert.doesNotMatch(line(third), /\$ [AB]/u, "settled tools are no longer current work");
+  const snapshot = (facts: readonly TimelineFact[]) =>
+    snapshotText(observation(statusOf(id, "running", facts.map(projectFact))), DEFAULT_CONTEXT);
+  assert.match(snapshot(first), /run \$ B/u);
+  assert.match(snapshot(second), /run \$ A/u);
+  assert.match(snapshot(third), /running/u);
+  assert.doesNotMatch(snapshot(third), /\$ [AB]/u, "settled tools are no longer current work");
   const completions = third.map(projectFact).filter(row => row.kind === "tool" && row.phase === "completed");
-  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: completions }, {}, context);
+  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: completions }, {});
   assert.ok(history.indexOf("$ B") < history.indexOf("$ A"), "native history retains both completion identities in durable order");
 });
 
@@ -2342,8 +2291,7 @@ test("a plural wait text renders compact facts, exact-turn outcomes and unreadab
         { kind: "unobserved", id: missing, diagnostic: "window lost" },
       ],
     },
-    {},
-    { columns: 120, color: false },
+    {}
   );
   assert.equal(
     text,
@@ -2377,7 +2325,7 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
     { kind: "observed" as const, id: complete.id, life: complete.life },
     { kind: "observed" as const, id: pending.id, life: pending.life, pending: true as const },
   ];
-  const text = nativeWaitText({ kind: "akuma", reason: "completed", results }, {}, { columns: 120, color: false });
+  const text = nativeWaitText({ kind: "akuma", reason: "completed", results }, {});
   assert.equal(
     text,
     [`✓ ${complete.id} — completed`, `⧗ ${pending.id} — pending tell`].join("\n"),
@@ -2385,49 +2333,72 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
   );
 });
 
-test("diagnostic payloads fold whitespace, wrap body-aligned, and expose bounded grapheme-safe omission", () => {
-  assert.deepEqual(
-    diagnosticLines("created debts", "  Unmigrated\tledger\n authority: /tmp/tasks  ", 32),
-    ["! created debts unavailable", "  Unmigrated ledger authority:", "  /tmp/tasks"],
-    "the subject never borrows the cause, and wrapping prefers a word boundary",
-  );
-  const lines = diagnosticLines("contract association", "👩‍💻".repeat(100), 32);
-  assert.equal(lines[0], "! contract association unavailable");
-  const payload = lines.slice(1);
-  assert.equal(payload.length, 3, "diagnostics use the existing bounded payload budget");
-  assert.ok(payload.every((line) => displayColumns(line) <= 32 && /^ {2}(?:👩‍💻)+…?$/u.test(line)));
-  assert.match(payload.at(-1)!, /…$/u, "omission stays on the cause, not its subject");
+test("paged CLI history distinguishes authored ellipsis from display omission", async (t) => {
+  const { path: cwd } = makeGitRepository();
+  const home = temporaryDirectory(t, "keiyaku-preview-home-");
+  const { allocated, holder, body } = await bornBody(cwd, "aabb1234", AKUMA_ACTIVITY_AT);
+  try {
+    const turn = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AKUMA_ACTIVITY_AT });
+    const prefix = `${"a".repeat(159)}…`;
+    const stored = [prefix, `${prefix}LOST`];
+    const ids: number[] = [];
+    for (const text of stored) {
+      ids.push(await appendActivity(allocated.paths, {
+        turnSequence: turn.sequence, at: AKUMA_ACTIVITY_AT, event: { type: "assistant", text },
+      }));
+    }
+    const runtime = { cwd, environment: { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home } };
+    const history = await runCli(["history", allocated.id], runtime);
+    assert.equal(history.exit, 0, history.stderr);
+    assert.deepEqual(history.stdout.split("\n").filter((line) => line.startsWith(`  ${prefix}`)), [
+      `  ${prefix}`,
+      `  ${prefix}…`,
+    ]);
+    const exact = await runCli(["history", allocated.id, "--id", String(ids[1])], runtime);
+    assert.equal(exact.exit, 0, exact.stderr);
+    assert.equal(exact.stdout, `said: ${stored[1]}`);
+  } finally {
+    holder.release();
+  }
 });
 
-test("terminal width counts grapheme clusters rather than code points", () => {
-  const family = "👨‍👩‍👧‍👦";
-  assert.equal([...family].length, 7, "a ZWJ family is seven code points in one cluster");
-  assert.equal(displayColumns(family), 2, "a ZWJ sequence occupies one cell group");
-  assert.equal(displayColumns("©"), 1, "a plain text symbol stays narrow");
-  assert.equal(displayColumns("©️"), 2, "the emoji selector widens the same symbol");
-  assert.equal(displayColumns("™"), 1, "an unselected letterlike symbol stays narrow");
-  assert.equal(displayColumns("♥"), 1, "a text-presentation heart stays narrow");
-  assert.equal(displayColumns("☀"), 1, "a text-presentation sun stays narrow");
-  assert.equal(displayColumns("❤"), 1, "an emoji without its selector stays text width");
-  assert.equal(displayColumns("✅"), 2, "an emoji that is wide by default needs no selector");
-  assert.equal(displayColumns("🇺🇸"), 2, "a flag is one pair of regional indicators");
-  assert.equal(displayColumns("❤️"), 2, "an emoji presentation selector widens its base");
-  assert.equal(displayColumns("1️⃣"), 2, "a keycap is one cluster");
-  assert.equal(displayColumns("👍🏽"), 2, "a skin tone modifier adds no cells");
-  assert.equal(displayColumns("é"), 1, "a precomposed accented letter is one cell");
-  assert.equal(displayColumns("e\u0301"), 1, "a combining mark adds no cell");
-  assert.equal(displayColumns("\u0301"), 0, "an isolated mark occupies no cell");
-  assert.equal(displayColumns(`a${family}b`), 4, "narrow text around a cluster keeps its cells");
-  assert.equal(displayColumns("plain ascii"), 11, "ASCII keeps its own measure");
-  assert.deepEqual(takeDisplayColumns(`a${family}b`, 3), { text: `a${family}`, rest: "b" });
-  assert.deepEqual(takeDisplayColumns("🇺🇸x", 1), { text: "", rest: "🇺🇸x" }, "a cluster never splits");
-  assert.deepEqual(takeDisplayColumns("e\u0301x", 1), { text: "e\u0301", rest: "x" });
-  assert.equal(displayColumns(truncateDisplayText(family.repeat(3), 5)), 5, "ZWJ truncation keeps its cell width");
-  assert.equal(
-    truncateDisplayText(family.repeat(3), 5).includes("\uFFFD"),
-    false,
-    "ZWJ survives terminal-safe truncation",
-  );
+test("settings CLI scope coordinates containing controls round-trip to the actual file", { skip: process.platform === "win32" }, async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-settings-path-");
+  const cwd = join(root, 'project\t\u001b"\\\u200d');
+  const home = join(root, "home with space");
+  mkdirSync(join(cwd, ".keiyaku"), { recursive: true });
+  mkdirSync(home);
+  execFileSync("git", ["init", "--quiet", cwd]);
+  const projectPath = join(cwd, ".keiyaku", "settings.json");
+  const userPath = join(home, "settings.json");
+  writeFileSync(projectPath, "{}");
+  writeFileSync(userPath, "{}");
+  const runtime = { cwd, environment: { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home } };
+  const argv = ["-C", cwd, "settings"];
+  const json = await cliJson<Pick<Settings, "scopes">>(argv, runtime);
+  const text = await runCli(argv, runtime);
+  assert.equal(json.exit, 0, json.stderr);
+  assert.equal(text.exit, 0, text.stderr);
+  const projectLead = "  project  read  ";
+  const line = text.stdout.split("\n").find((row) => row.startsWith(projectLead));
+  assert.ok(line);
+  assert.doesNotMatch(line, /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+  assert.equal(JSON.parse(line.slice(projectLead.length)), realpathSync.native(projectPath));
+  assert.equal(json.value.scopes.project.path, realpathSync.native(projectPath));
+  assert.ok(text.stdout.split("\n").includes(`  user  read  ${realpathSync.native(userPath)}`));
+});
+
+test("preview clips whole graphemes, excludes its prefix from the budget, and marks native omission once", () => {
+  const content = "👨‍👩‍👧‍👦🇺🇸e\u0301👍🏽".repeat(40);
+  const prefix = `${"identity/".repeat(35)} `;
+  assert.deepEqual(previewLines(content, prefix), [prefix + content]);
+  assert.deepEqual(previewLines(`${content}x`, prefix, 1, true), [`${prefix}${content}…`]);
+  assert.deepEqual(previewLines("", prefix, 3, true), [`${prefix}…`]);
+  assert.deepEqual(previewLines("retained…", "  ", 3, true), ["  retained……"]);
+  assert.deepEqual(previewLines("\t one\n\n two  ", "  ", 1), ["  one two"]);
+  assert.deepEqual(previewLines("one\n  two\n    three\n", "  "), ["  one", "    two", "      three…"]);
+  const long = "x".repeat(158);
+  assert.deepEqual(previewLines(`${long}\n  end`, "  "), [`  ${long}`, "    …"]);
 });
 
 test("failed sections preserve each owner diagnostic", () => {

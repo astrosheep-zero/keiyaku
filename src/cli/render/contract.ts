@@ -18,7 +18,7 @@ import {
   requirementLines,
 } from "./receipt.js";
 import { callLines, refusalRecoveryLines } from "./refusal.js";
-import { gitShortStat, kindWords, safeText, type TextRenderContext } from "./terminal.js";
+import { exactIndentedLines, gitShortStat, kindWords, safeText, type TextRenderContext } from "./terminal.js";
 
 export type ContractResultName = "bind" | "amend" | "arc" | "abandon" | "deliver" | "review" | "verify" | "reconcile";
 type Answer = VerbOutput<ContractResultName>;
@@ -169,7 +169,7 @@ function diffLines(value: ContractEvidence): string[] {
   if ("diff" in value && value.diff !== undefined) {
     if (value.diff.kind === "unavailable") fact(lines, "diff", "unavailable");
     else if (value.diff.text.length === 0) fact(lines, "diff", "empty");
-    else payload(lines, "diff", value.diff.text);
+    else lines.push("  diff", ...exactIndentedLines(value.diff.text, "  "));
   }
   return lines;
 }

@@ -14,12 +14,7 @@ export function associationFact(contract: NonNullable<AkumaKanshiRow["contract"]
   return contract.contractId;
 }
 
-function akumaRowLines(
-  row: AkumaKanshiRow,
-  observedAt: string,
-  context: TextRenderContext,
-  caller?: string,
-): readonly string[] {
+function akumaRowLines(row: AkumaKanshiRow, observedAt: string, caller?: string): readonly string[] {
   const lifeAge = row.lifeAt === undefined ? undefined : ageText(row.lifeAt, observedAt);
   const activityAge = row.lastActivityAt === undefined ? undefined : ageText(row.lastActivityAt, observedAt);
   const work = row.work;
@@ -40,7 +35,7 @@ function akumaRowLines(
       ? []
       : work.kind === "unavailable"
         ? [`! work unavailable · ${safeText(work.diagnostic)}`]
-        : currentWorkLines(work, { ...context, columns: Math.max(1, context.columns - 2) });
+        : currentWorkLines(work);
   return [
     identityLine(akumaMark(row.life), row.id, `${akumaLabel(row)} · ${facts.join(" · ")}`.trim()),
     ...preview.map((line) => `  ${line}`),
@@ -64,7 +59,7 @@ export function renderAkumaBoard(
   return [
     "AKUMA",
     "",
-    ...rows.flatMap((row) => akumaRowLines(row, observedAt, context, context.caller)),
+    ...rows.flatMap((row) => akumaRowLines(row, observedAt, context.caller)),
     ...diagnostics,
     ...(section.more === true ? ["…"] : []),
   ];

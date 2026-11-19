@@ -11,7 +11,6 @@ const coordinate = {
   index: 2,
   total: 3,
 };
-const context = { columns: 400, color: false };
 
 function event(observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"]): ExecutionObservation {
   return { kind: "verification", contractId: contractId("kei/compact-progress"), snapshot: coordinate.snapshot, observation };
@@ -25,7 +24,7 @@ test("completed phases retain native check, hook, timing and failure facts", asy
       callback();
     },
   });
-  const renderer = createExecutionProgressRenderer({ stream, context });
+  const renderer = createExecutionProgressRenderer({ stream });
   renderer.observe(event({ ...coordinate, kind: "phase", phase: "setup", state: "started", name: "install dependencies" }));
   renderer.observe(event({ ...coordinate, kind: "phase", phase: "setup", state: "finished",
     name: "install dependencies", elapsedMs: 42_000, outcome: "exit 7" }));
@@ -44,7 +43,7 @@ test("phase blocks and hook names remain terminal-safe factual output", async ()
       callback();
     },
   });
-  const renderer = createExecutionProgressRenderer({ stream, context });
+  const renderer = createExecutionProgressRenderer({ stream });
   renderer.observe(event({ ...coordinate, kind: "output", phase: "declaration", stream: "stderr", text: "error\u001b[2K" }));
   renderer.observe(event({ ...coordinate, kind: "output", phase: "declaration", stream: "stdout", text: "first line\nsecond line" }));
   renderer.observe(event({ ...coordinate, kind: "phase", phase: "cleanup", state: "finished", name: "hook\u001b[2K", outcome: "exit 7\r" }));

@@ -17,9 +17,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   try {
     parsed = parseArgv(argv);
     if ("help" in parsed) {
-      const columns =
-        process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : undefined;
-      const help = renderHelp(parsed.help, columns);
+      const help = renderHelp(parsed.help);
       process.stdout.write(help.endsWith("\n") ? help : `${help}\n`);
       return cliExitCode("accepted");
     }

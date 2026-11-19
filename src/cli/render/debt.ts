@@ -16,45 +16,15 @@ import type { DebtKanshiRow } from "../../kanshi/report.js";
 import { associationFact } from "./kanshi-akuma.js";
 import { debtMark } from "./marks.js";
 import { renderStructuredRefusal } from "./refusal.js";
-import {
-  DEFAULT_CLI_COLUMNS,
-  displayColumns,
-  emptyCatalogue,
-  renderOpaqueBlock,
-  renderTextBlock,
-  safeText,
-  type TextRenderContext,
-} from "./terminal.js";
+import { emptyCatalogue, exactIndentedLines, safeText } from "./terminal.js";
 
 export { debtMark } from "./marks.js";
 
 type DebtFailure = Extract<DebtMutationResult | DebtUpdateResult, { kind: "refused" | "retry" }>;
-type DebtEntity = Readonly<{
-  id: string;
-  priority: number;
-  mark: string;
-  word?: string;
-  title: string;
-}>;
 type RefusalProjection = Readonly<{ diagnostic: string; facts?: readonly string[] }>;
-
-const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 
 export function dispositionText(word: string): string {
   return word === "drop" ? "dropped" : word.replaceAll("_", " ");
-}
-
-function entityLines(entity: DebtEntity, columns: number, indent = ""): readonly string[] {
-  const parts = [
-    `${entity.mark} ${entity.id}`,
-    ...(entity.word === undefined ? [] : [dispositionText(entity.word)]),
-    `P${entity.priority}`,
-  ];
-  const scan = `${indent}${parts.join(" · ")}`;
-  const title = safeText(entity.title);
-  const inline = `${scan} — ${title}`;
-  if (displayColumns(inline) <= columns) return [inline];
-  return [scan, ...renderTextBlock(title, `${indent}  `, columns, "—")];
 }
 
 function projectRefusal(refusal: DebtRefusal): RefusalProjection {
@@ -74,8 +44,8 @@ function renderFailure(verb: string, result: DebtFailure, id?: string): string {
 }
 
 /** A cleanup problem cannot reverse the confirmed write. */
-function warningLines(warning: DebtWarning, columns: number): readonly string[] {
-  return ["  ! warning", ...renderOpaqueBlock(warning, "    ", columns)];
+function warningLines(warning: DebtWarning): readonly string[] {
+  return ["  ! warning", ...exactIndentedLines(warning, "    ")];
 }
 
 function edge(label: string, ref: DebtRef): string {
@@ -105,34 +75,27 @@ function textTimestamp(timestamp: string): string {
   return timestamp.replace(/\.\d+(?=Z$)/u, "");
 }
 
-function renderShowDetail(id: string, debt: Extract<DebtShowItem, { kind: "found" }>, columns: number): string {
+function renderShowDetail(id: string, debt: Extract<DebtShowItem, { kind: "found" }>): string {
   const lines = [
-    ...entityLines(
-      { id, priority: debt.priority, mark: debtMark(debt.state), word: debt.state, title: debt.title },
-      columns,
-    ),
+    `${debtMark(debt.state)} ${id} · ${dispositionText(debt.state)} · P${debt.priority} — ${safeText(debt.title)}`,
     `  created  ${textTimestamp(debt.createdAt)}`,
     `  updated  ${textTimestamp(debt.updatedAt)}`,
   ];
   for (const need of debt.needs ?? []) lines.push(edge("needs", need));
   for (const label of ["note", "body"] as const) {
     const payload = debt[label];
-    if (payload !== undefined)
-      lines.push(`  ${label}`, ...payload.split("\n").map((line) => `  ${safeText(line)}`), "");
+    if (payload !== undefined) lines.push(`  ${label}`, ...exactIndentedLines(payload, "  "), "");
   }
   return lines.join("\n");
 }
 
 /** Each item corresponds to the same invocation position, including missing targets. */
-export function renderDebtShow(
-  result: DebtShowResult | DebtAbsent,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
+export function renderDebtShow(result: DebtShowResult | DebtAbsent): string {
   if (result.kind === "absent") return "debt world absent";
   return result.items
     .map((item) =>
       item.kind === "found"
-        ? renderShowDetail(item.id, item, context.columns)
+        ? renderShowDetail(item.id, item)
         : renderStructuredRefusal("show", "debt missing", [`debt  ${item.id}`]),
     )
     .join("\n\n");
@@ -153,27 +116,18 @@ export function renderDoctor(report: DebtDoctorReport | DebtAbsent): string {
 
 const PAST_VERBS: Readonly<Record<string, string>> = { add: "added", update: "updated" };
 
-export function renderDebtUpdate(
-  id: string | undefined,
-  result: DebtUpdateResult,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  const columns = context.columns;
+export function renderDebtUpdate(id: string | undefined, result: DebtUpdateResult): string {
   if (result.kind !== "accepted") return renderFailure("update", result, id);
   const lines = [`✓ ${PAST_VERBS.update!}${id === undefined ? "" : `  ${safeText(id)}`}`];
   for (const field of result.changes ?? []) lines.push(`  ${field}  changed`);
-  if (result.warning !== undefined) lines.push(...warningLines(result.warning, columns));
+  if (result.warning !== undefined) lines.push(...warningLines(result.warning));
   return lines.join("\n");
 }
 
 /** Creation retains its minted identity in the native answer. */
-export function renderDebtMutation(
-  verb: string,
-  result: DebtMutationResult,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
+export function renderDebtMutation(verb: string, result: DebtMutationResult): string {
   if (result.kind !== "accepted") return renderFailure(verb, result);
   const lines = [`✓ ${PAST_VERBS[verb] ?? verb}  ${safeText(result.id)}`];
-  if (result.warning !== undefined) lines.push(...warningLines(result.warning, context.columns));
+  if (result.warning !== undefined) lines.push(...warningLines(result.warning));
   return lines.join("\n");
 }

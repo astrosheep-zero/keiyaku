@@ -12,6 +12,15 @@ export type StatusLineOptions = Readonly<{
   cancel?: (handle: IntervalHandle) => void;
 }>;
 
+/** Draw short ASCII status text without measuring the terminal or changing wrap mode. */
+function frame(text: string): string {
+  const cells = text.replace(/[^ -~]/gu, "?");
+  let output = "\r\u001b[2K";
+  // Horizontal positioning clamps at the right edge. Painting right to left leaves the visible prefix there.
+  for (let index = cells.length - 1; index >= 0; index--) output += `\u001b[${index + 1}G${cells[index]}`;
+  return output;
+}
+
 /** A terminal-only, ephemeral line. It owns neither execution nor its outcome. */
 export class StatusLine {
   readonly isTTY: boolean;
@@ -65,7 +74,7 @@ export class StatusLine {
   private redraw(): void {
     if (!this.isTTY || this.format === undefined || this.startedAt === undefined) return;
     const line = this.format(Math.max(0, this.now() - this.startedAt));
-    if (!this.finished) this.stream.write(`\r\u001b[2K${line}`);
+    if (!this.finished) this.stream.write(frame(line));
   }
 
   private erase(): void {

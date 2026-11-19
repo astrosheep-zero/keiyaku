@@ -6,7 +6,6 @@ import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityHistory, type ActivityRow, type OutcomeRow } from "../src/akuma/projection.js";
 import {
   DEFAULT_CONTEXT,
-  frameRule,
   historyText,
   killResultText,
   snapshotText,
@@ -14,7 +13,7 @@ import {
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import {
-  askCurrentWorkLine,
+  askFrame,
   askResultText,
   renderCallText,
   renderForkText,
@@ -93,14 +92,9 @@ test("status retains execution context, current work, changes, and unavailable a
   ).split("\n");
   assert.equal(lines[0], id, "identity roots the panel alone");
   assert.equal(lines[1], "  /work/appointed", "the execution directory is static context, not a labelled row");
-  assert.equal(
-    lines[2],
-    frameRule([id, "  /work/appointed"], DEFAULT_CONTEXT.columns),
-    "one rule divides context from activity",
-  );
-  assert.ok(lines[3]!.includes(note.text));
-  assert.match(lines[4]!, /^● running$/u);
-  assert.ok(lines.indexOf("  changes") > 4, "reported changes follow the conclusion, subordinate");
+  assert.equal(lines[2], `2 ${note.text}`);
+  assert.match(lines[3]!, /^● running$/u);
+  assert.ok(lines.indexOf("  changes") > 3, "reported changes follow the conclusion, subordinate");
   assert.ok(lines.some((line) => /^ {4}~ +\/work\/file$/u.test(line)));
   assert.equal(
     lines.filter((line) => line.includes("/work/appointed")).length,
@@ -140,8 +134,7 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
       lowestRetainedSequence: 1,
       highestSequence: 8,
     },
-    {},
-    { columns: 72, color: false },
+    {}
   );
   for (const evidence of [
     "first input", "spoken line", "indented line", "hidden reasoning", "a note", "echo ok", "exit 1",
@@ -159,17 +152,17 @@ test("paged history exposes copyable report and Turn coordinates with indented p
     { kind: "outcome", sequence: 13, turnSequence: 4, at: AKUMA_ACTIVITY_AT, outcome: { kind: "canceled" } },
   ];
   const page = { kind: "akuma" as const, akumaId: SPECIMEN_ID, events };
-  const wide = historyText(page, {}, { columns: 100, color: false });
-  assert.ok(wide.includes("   report/123456789 progress\n"));
-  assert.ok(wide.includes("✓ turn/123456789\n  answer\n    nested"));
-  assert.ok(wide.includes("✓ turn/2\n! turn/3\n  failed\n    cause\n○ turn/4 · canceled"));
-  const narrow = historyText(page, {}, { columns: 10, color: false });
-  for (const coordinate of ["report/123456789", "turn/123456789", "turn/2", "turn/3", "turn/4"])
-    assert.ok(narrow.includes(coordinate), coordinate);
+  const value = { kind: "returned" as const, value: page };
+  const query = { selector: SPECIMEN_ID };
+  const narrow = renderVerb("history", query, value, { columns: 10, color: false });
+  assert.equal(narrow, renderVerb("history", query, value, { columns: 120, color: false }));
+  assert.ok(narrow.includes("  report/123456789\n  progress\n    detail"));
+  assert.ok(narrow.includes("✓ turn/123456789\n  answer\n    nested"));
+  assert.ok(narrow.includes("✓ turn/2\n! turn/3\n  failed\n    cause\n○ turn/4 · canceled"));
 });
 
 test("history renders the full exact report without confusing it with an outcome", () => {
-  const text = " report\n  complete\n";
+  const text = ` report\n  ${"complete ".repeat(60)}\nthird\nfourth\n`;
   assert.equal(
     historyText(
       {
@@ -177,8 +170,7 @@ test("history renders the full exact report without confusing it with an outcome
         akumaId: parseAkumaId("aku/elite/b9977141").id,
         sequence: 5, bodySequence: 1, turnSequence: 2, at: AKUMA_ACTIVITY_AT, text,
       },
-      { id: "report/5" },
-      { columns: 64, color: false },
+      { id: "report/5" }
     ),
     text,
   );
@@ -206,12 +198,14 @@ test("history keeps long call and Tell inputs to one bounded input line", () => 
       lowestRetainedSequence: 1,
       highestSequence: 2,
     },
-    {},
-    { columns: 64, color: false },
+    {}
   ).split("\n");
-  assert.equal(lines.length, 4, "identity, rule, and exactly one line per input");
-  assert.match(lines[2]!, /^▸ Final minimal correction .*…$/u);
-  assert.match(lines[3]!, /^⧗ Final minimal correction .*…$/u);
+  assert.deepEqual(lines.slice(1), [
+    "▸ 1",
+    `  ${text.slice(0, 160)}…`,
+    "⧗ tell/long-input · 2",
+    `  ${text.slice(0, 160)}…`,
+  ]);
 });
 
 test("sleeping with a pending Tell concludes pending, not completed", () => {
@@ -255,8 +249,7 @@ test("Akuma observation failures name the target and reason without carrier word
           { kind: "unobserved", id: second, diagnostic: "permission denied" },
         ],
       },
-      {},
-      DEFAULT_CONTEXT,
+      {}
     ),
     [`! ${first} — observation failed · heart locked`, `! ${second} — observation failed · permission denied`].join(
       "\n",
@@ -282,13 +275,11 @@ function waitItem(status: LiveStatusObservation["status"], rows: readonly Activi
 function singleWait(
   status: LiveStatusObservation["status"],
   rows: readonly ActivityRow[],
-  columns = 120,
   alias?: string,
 ): string {
   return waitText(
     { kind: "akuma", reason: "completed", results: [waitItem(status, rows)] },
-    { ...(alias === undefined ? {} : { alias }) },
-    { columns, color: false },
+    { ...(alias === undefined ? {} : { alias }) }
   );
 }
 
@@ -326,8 +317,7 @@ test("wait renders compact member facts and complete labeled outcomes", () => {
   ];
   const text = waitText(
     { kind: "akuma", reason: "completed", results: members.map(([status, rows]) => waitItem(status, rows)) },
-    {},
-    { columns: 120, color: false },
+    {}
   );
   assert.equal(
     text,
@@ -351,24 +341,17 @@ test("wait renders compact member facts and complete labeled outcomes", () => {
   assert.doesNotMatch(text, /─|changes|debts/u, "no full status frame, change or Debt dump");
 });
 
-test("wait wraps its full answer without truncating identity or payload", () => {
+test("wait keeps the exact-turn answer beyond the preview aperture", () => {
   const id = "aku/worker/abcd0111";
-  const rows = [answeredOutcome(1, "a very long answered preview that cannot fit")];
+  const long = "👩‍💻".repeat(175);
+  const rows = [answeredOutcome(1, `${long}\n  detail\nthird\nfourth\n`)];
   const status = statusOf(id, "asleep", rows);
-  const narrow = singleWait(status, rows, 40);
-  assert.ok(narrow.startsWith(`✓ ${id} — `), "the mark, complete identity, and separator survive");
-  assert.ok(narrow.endsWith("cannot fit"), "the answer tail remains complete at narrow width");
-  const wide = singleWait(status, rows, 200);
-  assert.equal(
-    wide,
-    `✓ ${id} — answered\n  turn/1 · answered\n  a very long answered preview that cannot fit`,
-    "the exact turn labels the complete answer",
-  );
+  assert.equal(singleWait(status, rows), `✓ ${id} — answered\n  turn/1 · answered\n  ${long}\n    detail\n  third\n  fourth\n`);
 });
 
 test("wait keeps a single-target alias and none in plural output", () => {
   const status = statusOf("aku/worker/abcd0112", "asleep", []);
-  assert.equal(singleWait(status, [], 120, "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
+  assert.equal(singleWait(status, [], "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
   const other = statusOf("aku/worker/abcd0113", "asleep", []);
   const plural = waitText(
     {
@@ -376,24 +359,22 @@ test("wait keeps a single-target alias and none in plural output", () => {
       reason: "completed",
       results: [waitItem(status, []), waitItem(other, [])],
     },
-    { alias: "@scout" },
-    DEFAULT_CONTEXT,
+    { alias: "@scout" }
   );
   assert.doesNotMatch(plural, /@scout/u, "an ambiguous alias is not attached to any member");
 });
 
 test("Tell admission and final Ask answer retain their distinct native facts", () => {
   const id = parseAkumaId("aku/worker/deadbeef").id;
-  const context = { columns: 80, color: false };
   const answer = { akumaId: id, tellId: "tell-id", kind: "answered" as const, answer: "exact answer" };
   assert.equal(askRawAnswer(answer), JSON.stringify("exact answer"));
   const tell = { kind: "admitted" as const, akumaId: id, tellId: "tell-id" };
-  const standalone = tellText(tell, "continue", undefined, context);
+  const standalone = tellText(tell, "continue", undefined);
   assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
-  assert.equal(renderAskText(answer, undefined, context), JSON.stringify("exact answer"));
-  assert.equal(askResultText(answer, undefined, context), `✓ answered ${id}\n  input tell-id`);
+  assert.equal(renderAskText(answer, undefined), JSON.stringify("exact answer"));
+  assert.equal(askResultText(answer, undefined), `✓ answered ${id}\n  input tell-id`);
   const longPrompt = "one line of caller input ".repeat(20);
-  const receipt = tellText(tell, longPrompt, undefined, context).split("\n");
+  const receipt = tellText(tell, longPrompt, undefined).split("\n");
   assert.equal(receipt.length, 1, "one receipt line even past the terminal width");
   assert.match(receipt[0]!, /^✓ told aku\/worker\/deadbeef — one line of caller input .*…$/u);
   assert.doesNotMatch(
@@ -402,12 +383,12 @@ test("Tell admission and final Ask answer retain their distinct native facts", (
     "an action receipt has no frame and adds no quotes",
   );
   assert.match(
-    tellText({ ...tell, wake: { kind: "pending" } }, longPrompt, undefined, context),
+    tellText({ ...tell, wake: { kind: "pending" } }, longPrompt, undefined),
     /^⧗ tell aku\/worker\/deadbeef — one line of caller input .*…$/mu,
     "a pending Tell keeps neutral vocabulary and the pending mark",
   );
   assert.equal(
-    tellText({ ...tell, kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }, "continue", undefined, context),
+    tellText({ ...tell, kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }, "continue", undefined),
     ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed", "    wake refused"].join("\n"),
     "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
   );
@@ -422,32 +403,27 @@ test("Tell admission and final Ask answer retain their distinct native facts", (
   assert.equal(askRawAnswer({ ...answer, answer: "decoded scalar" }), '"decoded scalar"');
 });
 
-test("Ask line preserves complete identity and explicit life while bounding native work", () => {
-  const id = parseAkumaId("aku/worker/deadbeef").id;
-  const context = { columns: 100, color: false };
-  assert.equal(askCurrentWorkLine({ id }, 2_900, context), `${id} · observing 2s`);
+test("Ask's logical live row safely spells complete identity and supplied work", () => {
+  assert.equal(askFrame(2_900, SPECIMEN_ID, undefined), `${SPECIMEN_ID} ask 2s`);
+  const status = {
+    life: "running" as const,
+    work: { kind: "open" as const, summary: { id: 2, text: "read 👩‍💻\\\u001b…", clipped: true as const } },
+  };
   assert.equal(
-    askCurrentWorkLine({ id, life: "asleep" }, 4_000, context),
-    `${id} · last observed asleep · observing 4s`,
+    askFrame(4_000, SPECIMEN_ID, "@é", status),
+    String.raw`${SPECIMEN_ID} (@\u{e9}) ask 4s last running | activity 2 read \u{1f469}\u{200d}\u{1f4bb}\\\u{1b}\u{2026}`,
   );
-  const narrow = askCurrentWorkLine(
-    { id, alias: "@scout", life: "running", summary: { id: 5, text: "run a long command", clipped: true } },
-    6_000,
-    { columns: 20, color: false },
-  );
-  assert.equal(narrow, `${id} (@scout) · last observed running · … · observing 6s`);
 });
 
 test("final Ask facts preserve exact native outcomes and historical wake failure", () => {
   const subject = { akumaId: SPECIMEN_ID, tellId: "tell/answer" };
-  const context = { columns: 100, color: false };
   const answered = {
     ...subject,
     kind: "answered" as const,
     answer: { ok: true },
     wake: { kind: "failed" as const, diagnostic: "launch refused", logPath: "/work/wake.log" },
   };
-  const final = renderAskText(answered, "@worker", context);
+  const final = renderAskText(answered, "@worker");
   for (const fact of [
     "✓ answered",
     SPECIMEN_ID,
@@ -464,13 +440,13 @@ test("final Ask facts preserve exact native outcomes and historical wake failure
   );
   for (const kind of ["deadline", "unanswered"] as const) {
     const result = { ...subject, kind };
-    assert.match(askResultText(result, undefined, context), new RegExp(kind, "u"));
+    assert.match(askResultText(result, undefined), new RegExp(kind, "u"));
     assert.equal(askRawAnswer(result), undefined);
   }
   const invalid = { ...subject, kind: "invalid-output" as const, diagnostic: "not JSON", answer: "broken\n  evidence" };
   assert.equal(askRawAnswer(invalid), undefined);
   assert.match(
-    askResultText(invalid, undefined, context),
+    askResultText(invalid, undefined),
     /invalid-output[\s\S]*not JSON[\s\S]*invalid answer[\s\S]*broken\n    evidence/u,
   );
 });
@@ -525,9 +501,9 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
       changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
     }),
   ];
-  const lines = historyText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {}, { columns: 120, color: false });
-  assert.match(lines, /src\/unknown\.ts — ~/u);
-  assert.match(lines, /src\/known\.ts — \+2 -1/u);
+  const lines = historyText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {});
+  assert.match(lines, /path  src\/unknown\.ts\n  detail  ~/u);
+  assert.match(lines, /path  src\/known\.ts\n  detail  \+2 -1/u);
   assert.doesNotMatch(lines, /\+\? -\?/u);
 });
 
@@ -611,16 +587,14 @@ test("shared ask rendering serializes JSON answers and retains non-answer conclu
 });
 
 test("every action receipt leads with a verdict and subject, then indented evidence", () => {
-  const context = { columns: 100, color: false };
   assert.deepEqual(
-    renderCallText(spawned(), context, { cwd: "/work/repo" }).split("\n"),
+    renderCallText(spawned(), { cwd: "/work/repo" }).split("\n"),
     ["✓ spawned aku/worker/1234abcd", "  /work/repo"],
     "a prompt-free birth is an action receipt with its invocation directory subordinate",
   );
   assert.deepEqual(
     renderCallText(
       spawned({ alias: { kind: "moved", previousAkumaId: parseAkumaId("aku/worker/9999beef").id } }),
-      context,
       { cwd: "/work/repo", contractId: contractId("kei/example-1234"), alias: "@reviewer" },
     ).split("\n"),
     [
@@ -634,7 +608,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
-      context,
       { cwd: "/work/repo" },
     ).split("\n"),
     ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! dispatch failed infrastructure busy"],
@@ -643,7 +616,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "window lost" }] }),
-      context,
       { cwd: "/work/repo" },
     ).split("\n"),
     ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! birth failed infrastructure window lost"],
@@ -655,14 +627,13 @@ test("every action receipt leads with a verdict and subject, then indented evide
         tellId: "tell/specimen",
         kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost", attemptedTellId: "tell/attempted" }],
       }),
-      context,
       { cwd: "/work/repo", prompt: "exact prompt" },
     ).split("\n"),
     [
       "! spawned aku/worker/1234abcd",
       "  /work/repo",
       "  input tell/specimen",
-      '  "exact prompt"',
+      "  exact prompt",
       "  ! tell failed infrastructure window lost",
       "  attempted input tell/attempted",
     ],
@@ -671,7 +642,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ dispatchWarning: "private-state-seat-close-failed seat closed late" }),
-      context,
       { contractId: contractId("kei/example-1234"), cwd: "/work/repo" },
     ).split("\n"),
     [
@@ -714,41 +684,25 @@ test("every action receipt leads with a verdict and subject, then indented evide
 });
 
 test("Tell and kill keep pending, failure, and plural evidence inside the action hierarchy", () => {
-  const context = { columns: 100, color: false };
   const started = compactTell({ action: { kind: "started", historyId: "turn/17" } });
   const steering = compactTell({ action: { kind: "steering", historyId: "turn/17" } });
+  assert.equal(tellText(started, "go", "@fleet-desk"), "✓ @fleet-desk started turn/17");
+  assert.equal(tellText(steering, "go", "@fleet-desk"), "✓ @fleet-desk steered turn/17");
+  assert.equal(tellText(started, "go", undefined), "✓ aku/worker/1234abcd started turn/17");
+  assert.equal(tellText(started, "go", undefined, true), "✓ tell aku/worker/1234abcd\n  started turn/17");
   assert.equal(
-    tellText(started, "go", "@fleet-desk", context),
-    "✓ @fleet-desk started turn/17",
-    "a confirmed launch names the caller's alias and its exact Turn on one line",
+    tellText(compactTell(), '  he said "wait"\n', "@tired"),
+    '✓ told aku/worker/1234abcd (@tired) — he said "wait"',
+    "the non-settled preview folds whitespace and preserves literal quotes",
   );
-  assert.equal(
-    tellText(steering, "go", "@fleet-desk", context),
-    "✓ @fleet-desk steered turn/17",
-    "a confirmed live submission reads in past tense at the same selector position",
-  );
-  assert.equal(
-    tellText(started, "go", undefined, context),
-    "✓ aku/worker/1234abcd started turn/17",
-    "without an alias the complete canonical identity occupies the same position",
-  );
-  assert.equal(
-    tellText(started, '  he said "wait"\n', "@fleet-desk", context),
-    "✓ @fleet-desk started turn/17",
-    "a confirmed Tell never echoes the submitted input or a second identity",
-  );
-  assert.equal(
-    tellText(started, "go", undefined, context, true),
-    "✓ tell aku/worker/1234abcd\n  started turn/17",
-    "the exceptional projection with an action keeps its old detail",
-  );
+  assert.equal(tellText(compactTell(), "   ", undefined), "✓ told aku/worker/1234abcd");
   assert.deepEqual(
-    tellText(compactTell({ wake: { kind: "pending" } }), "go", undefined, context).split("\n"),
+    tellText(compactTell({ wake: { kind: "pending" } }), "go", undefined).split("\n"),
     ["⧗ tell aku/worker/1234abcd — go", "  wake pending"],
     "a pending Tell keeps the pending mark and asserts no delivery",
   );
   assert.deepEqual(
-    tellText(compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }), "go", undefined, context).split("\n"),
+    tellText(compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }), "go", undefined).split("\n"),
     ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed", "    wake refused"],
     "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
   );
@@ -761,8 +715,7 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
           { id: parseAkumaId("aku/worker/9999beef").id, outcome: "hung" },
         ],
       },
-      undefined,
-      context,
+      undefined
     ),
     [
       "✓ killed aku/worker/1234abcd",
@@ -776,6 +729,7 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     { id: parseAkumaId("aku/worker/1234abcd").id, outcome: "killed" },
     { id: parseAkumaId("aku/worker/5678abcd").id, outcome: "stop-admitted" },
   ]);
+  const context = { columns: 100, color: false };
   assert.equal(renderVerb("kill", { akuma: "aku/worker/*" }, { kind: "threw", error: stopped }, context), [
     "× kill failed",
     "✓ killed aku/worker/1234abcd",
@@ -784,25 +738,20 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
   ].join("\n"));
 });
 
-test("Tell delivery keeps copyable log coordinates on its subject and bounds the cause beneath", () => {
-  const context = { columns: 40, color: false };
-  const path = "/work/long-execution-directory/body.log";
+test("Tell delivery keeps typed log coordinates and the complete terminal-safe cause", () => {
+  const path = `/work/${"long-execution-directory/".repeat(15)}body.log`;
+  const detail = `${"👩‍💻".repeat(170)}\nrecovery: inspect the original worktree`;
   const lines = tellText(
     compactTell({
       kind: "failed", failures: [{ stage: "wake",
-      diagnostic: `  wake\nrefused\t\u001b ${"👩‍💻".repeat(100)}`,
+      diagnostic: `  wake\nrefused\t\u001b ${detail}`,
       logPath: path }],
     }),
     "go",
-    undefined,
-    context,
+    undefined
   ).split("\n");
   assert.equal(lines[1], `  ! tell delivery failed · log ${path}`);
-  const payload = lines.slice(2);
-  assert.equal(payload.length, 3, "the cause retains the shared bounded line budget");
-  assert.match(payload[0]!, /^ {4}wake refused � 👩‍💻/u, "cause text is terminal-safe and whitespace-folded");
-  assert.match(payload.at(-1)!, /…$/u, "the cause names its own omission");
-  assert.match(payload.slice(1).join("\n"), /^(?: {4}(?:👩‍💻)+…?\n?)+$/u, "wrapping keeps whole graphemes");
+  assert.equal(lines.slice(2).map((line) => line.slice(4)).join("\n"), `  wake\nrefused � ${detail}`);
 });
 
 test("an observation panel orders identity, context, activity, conclusion, outputs, and diagnostics", () => {
@@ -826,11 +775,10 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
   const lines = text.split("\n");
   const head = [`${id} · kei/example-1234`, "  /work/appointed"];
   assert.deepEqual(lines.slice(0, 2), head, "identity carries its Contract inline and context sits beneath it");
-  assert.equal(lines[2], frameRule(head, context.columns), "one rule divides context from content");
-  assert.ok(lines[3]!.includes("edited"));
-  assert.equal(lines[4], "● running", "the activity closes on one truthful conclusion");
+  assert.equal(lines[2], "2 edited");
+  assert.equal(lines[3], "● running", "the activity closes on one truthful conclusion");
   assert.deepEqual(
-    lines.slice(5),
+    lines.slice(4),
     ["  changes", "    ~  /work/file"],
     "dynamic outputs stay subordinate and no diagnostic is reported",
   );
@@ -842,7 +790,7 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     context,
   );
   assert.deepEqual(
-    failedReads.split("\n").slice(5),
+    failedReads.split("\n").slice(4),
     [
       "  changes",
       "    ~  /work/file",
@@ -860,14 +808,11 @@ test("a narrow panel never truncates a copyable identity", () => {
     turnStarted(1),
     { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "👩‍💻".repeat(30) },
   ];
-  const status = statusOf(id, "running", rows, { cwd: "/work/界界界/deep/path" });
-  const lines = snapshotText(
-    observation(status, { kind: "associated", contractId: contractId("kei/narrow-columns") }),
-    context,
-  ).split("\n");
-  assert.equal(lines[0], `${id} · kei/narrow-columns`, "the copyable identity is never wrapped or truncated");
-  assert.ok(
-    lines.some((line) => line.includes("👩‍💻")),
-    "wide graphemes survive wrapping",
-  );
+  const cwd = `/work/${"very-deep-directory/".repeat(12)}path`;
+  const status = statusOf(id, "running", rows, { cwd });
+  const view = observation(status, { kind: "associated", contractId: contractId("kei/narrow-columns") });
+  const text = snapshotText(view, context);
+  assert.equal(text, snapshotText(view, { ...context, columns: 120 }));
+  assert.deepEqual(text.split("\n").slice(0, 2), [`${id} · kei/narrow-columns`, `  ${cwd}`]);
+  assert.ok(text.includes("👩‍💻"), "whole graphemes survive preview rendering");
 });

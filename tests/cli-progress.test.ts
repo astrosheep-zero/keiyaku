@@ -54,6 +54,12 @@ class CapturedStream extends Writable {
   }
 }
 
+function writtenFrames(text: string): string[] {
+  return Array.from(text.matchAll(/\r\x1b\[2K((?:\x1b\[\d+G[ -~])+)/gu), ([, frame]) =>
+    Array.from(frame!.matchAll(/\x1b\[\d+G([ -~])/gu), ([, cell]) => cell).reverse().join(""),
+  );
+}
+
 function phase(
   state: "started" | "finished",
   values: Readonly<{
@@ -104,7 +110,7 @@ function output(text: string, stream: "stdout" | "stderr" = "stdout"): Execution
 for (const isTTY of [true, false]) {
   test(`phase output buffers complete blocks in stdout/stderr order (TTY ${isTTY})`, async () => {
     const stream = new CapturedStream(isTTY);
-    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+    const renderer = createExecutionProgressRenderer({ stream });
     renderer.observe(phase("started", { phase: "declaration" }));
     renderer.observe(output("error", "stderr"));
     renderer.observe(output("complete line\npartial"));
@@ -119,7 +125,7 @@ for (const isTTY of [true, false]) {
 
   test(`admitted and stage observations produce no progress (TTY ${isTTY})`, async () => {
     const stream = new CapturedStream(isTTY);
-    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+    const renderer = createExecutionProgressRenderer({ stream });
     renderer.observe({ kind: "admitted", contractId: bindFact.contract, fact: bindFact });
     for (const stage of ["placement", "continuation", "reconciliation"] as const) {
       for (const state of ["started", "finished"] as const) {
@@ -138,7 +144,6 @@ test("TTY ticks the observed phase, resets its clock and erases without a summar
   let cancelled = 0;
   const renderer = createExecutionProgressRenderer({
     stream,
-    context: { columns: 160, color: false },
     now: () => now,
     schedule: (next) => {
       tick = next;
@@ -155,8 +160,8 @@ test("TTY ticks the observed phase, resets its clock and erases without a summar
   renderer.observe(output("hello\n"));
   renderer.observe(phase("started", { phase: "declaration" }));
   await setImmediate();
-  assert.match(stream.text, /verify  ● setup · check 1\/1 · npm ci · 42s/u);
-  assert.match(stream.text, /stdout\n  hello\n\n\r\x1b\[2Kverify  ● declaration 1\/1 · 0s/u);
+  assert.deepEqual(writtenFrames(stream.text), ["verify 0s setup", "verify 42s setup", "verify 0s declaration"]);
+  assert.match(stream.text, /stdout\n  hello\n\n/u);
   renderer.observe(phase("finished", { phase: "declaration", outcome: "exit 0", elapsedMs: 2_000 }));
   await renderer.finish();
   const closed = stream.text;
@@ -169,7 +174,7 @@ test("TTY ticks the observed phase, resets its clock and erases without a summar
 
 test("cumulative UTF-8 suffixes retain late failures, count omissions and reset each phase", async () => {
   const stream = new CapturedStream(false);
-  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 120, color: false } });
+  const renderer = createExecutionProgressRenderer({ stream });
   renderer.observe(phase("started", { phase: "declaration" }));
   renderer.observe(output("🙂".repeat(700)));
   renderer.observe(output("界".repeat(700)));
@@ -199,7 +204,7 @@ test("cumulative UTF-8 suffixes retain late failures, count omissions and reset 
 
 test("suffix eviction removes whole code points and keeps subsequent output", async () => {
   const stream = new CapturedStream(false);
-  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 120, color: false } });
+  const renderer = createExecutionProgressRenderer({ stream });
   renderer.observe(output("界".repeat(1_366)));
   renderer.observe(output("X"));
   await renderer.finish();
@@ -211,7 +216,7 @@ test("suffix eviction removes whole code points and keeps subsequent output", as
 
 test("empty observed streams differ from absent streams and unfinished phases flush once", async () => {
   const stream = new CapturedStream(false);
-  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+  const renderer = createExecutionProgressRenderer({ stream });
   renderer.observe(phase("started", { phase: "setup", name: "install" }));
   renderer.observe(output(""));
   await setImmediate();
@@ -227,7 +232,7 @@ test("chunk boundaries do not change rendered blocks", async () => {
   const results: string[] = [];
   for (const chunks of [["alpha line\nbeta line\ngamma line"], ["alpha l", "ine\nbe", "ta line\n", "gamma line"]]) {
     const stream = new CapturedStream(false);
-    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 20, color: false } });
+    const renderer = createExecutionProgressRenderer({ stream });
     renderer.observe(phase("started", { phase: "declaration" }));
     for (const chunk of chunks) renderer.observe(output(chunk));
     await renderer.finish();
@@ -268,7 +273,6 @@ for (const failure of ["error", "close", "write"] as const) {
     let cancelled = 0;
     const renderer = createExecutionProgressRenderer({
       stream,
-      context: { columns: 80, color: false },
       schedule: (next) => {
         tick = next;
         return 1 as unknown as ReturnType<typeof setInterval>;
@@ -405,7 +409,8 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
     row: { sequence: 2, at: AKUMA_ACTIVITY_AT, text: "question" },
     wake: { kind: "pending" },
   };
-  const input = { akuma: id, prompt: "question", schema: {} };
+  const input = { akuma: "@delegate", prompt: "question", schema: {} };
+  const command = `first work ${"a".repeat(170)} path-tail`;
   for (const mode of ["answered", "error", "cancel", "non-TTY", "json"] as const) {
     const controller = new AbortController();
     let tick: (() => void) | undefined;
@@ -445,7 +450,7 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
           birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } },
           id,
           life: "running",
-          work: projectCurrentWork([turnStarted(), startedTool(3, "bash", { kind: "run", command: "first work" })]),
+          work: projectCurrentWork([turnStarted(), startedTool(3, "bash", { kind: "run", command })]),
         });
         observe?.({ kind: "live", observation: { status, rows: [] } });
         observe?.({
@@ -466,7 +471,7 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
     );
     try {
       const captured = await captureOutput(async () => {
-        Object.assign(process.stderr, { isTTY: mode !== "non-TTY", columns: 200 });
+        Object.assign(process.stderr, { isTTY: mode !== "non-TTY" });
         const coordinates = { cwd: process.cwd() };
         const runtime = {
           environment: {},
@@ -498,19 +503,24 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
         assert.equal(captured.stdout, JSON.stringify(result.answer));
         assert.ok(
           captured.stderr.endsWith(
-            `✓ answered ${id}\n  input tell/current\n  ! tell delivery failed\n    historical wake refused\n`,
+            `✓ answered ${id} (@delegate)\n  input tell/current\n  ! tell delivery failed\n    historical wake refused\n`,
           ),
         );
       }
       if (mode === "non-TTY" || mode === "json") {
         assert.equal(scheduled, 0);
-        assert.doesNotMatch(captured.stderr, /observing|first work|last observed|\x1b/u);
+        assert.doesNotMatch(captured.stderr, /first work|\x1b/u);
       } else {
-        const frames = captured.stderr.split("\r\x1b[2K").filter((line) => line.includes("observing"));
-        assert.equal(frames[0], `${id} · observing 0s`, "admission has no invented life or summary");
-        assert.match(frames[1]!, /last observed running · run \$ first work · observing/u);
-        assert.equal(frames[2], `${id} · last observed asleep · observing 0s`, "the next callback clears old work");
-        assert.equal(frames[3], `${id} · last observed asleep · observing 42s`, "the clock measures this observation");
+        const frames = writtenFrames(captured.stderr);
+        assert.equal(frames.length, 4);
+        assert.ok(frames.every((frame) => frame.includes(id) && frame.includes("@delegate")));
+        assert.doesNotMatch(frames[0]!, /last|first work/u, "admission is not a life or work observation");
+        assert.ok(
+          frames[1]?.includes(`last running | activity 3 run $ ${command}`),
+          "the complete native summary and its coordinate are present once",
+        );
+        assert.equal(frames.filter((frame) => frame.includes("first work")).length, 1, "the next observation replaces work");
+        assert.match(frames.at(-1)!, /42s last asleep/u);
         assert.equal(scheduled, 1);
         assert.equal(canceled, 1);
       }

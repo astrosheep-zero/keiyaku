@@ -73,287 +73,36 @@ export function gitShortStat(stat: GitShortStat): string {
 }
 
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
-const NON_ASCII = /[^\x20-\x7e]/u;
-const MARK = /\p{Mark}/u;
-const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
-const EMOJI_DEFAULT = /\p{Emoji_Presentation}/u;
-const ZWJ = 0x200d;
-const TEXT_PRESENTATION = 0xfe0e;
-const EMOJI_PRESENTATION = 0xfe0f;
-const REGIONAL_FIRST = 0x1f1e6;
-const REGIONAL_LAST = 0x1f1ff;
-const ZERO_WIDTH = new Set([0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff]);
+const PREVIEW_GRAPHEMES = 160;
 
-const WIDE_RANGES = [
-  [0x1100, 0x115f],
-  [0x2329, 0x232a],
-  [0x2e80, 0xa4cf],
-  [0xac00, 0xd7a3],
-  [0xf900, 0xfaff],
-  [0xfe10, 0xfe19],
-  [0xfe30, 0xfe6f],
-  [0xff00, 0xff60],
-  [0xffe0, 0xffe6],
-  [0x1f300, 0x1faff],
-  [0x20000, 0x3fffd],
-] as const;
-
-/** Columns one code point occupies when its grapheme cluster gives it no wider form. */
-function baseColumns(point: number): number {
-  if (point === 0 || point < 0x20 || (point >= 0x7f && point < 0xa0)) return 0;
-  if (ZERO_WIDTH.has(point) || MARK.test(String.fromCodePoint(point))) return 0;
-  if (point === 0x303f) return 1;
-  return WIDE_RANGES.some(([first, last]) => point >= first && point <= last) ? 2 : 1;
-}
-
-/**
- * Columns one grapheme cluster occupies. A cluster is one terminal cell group even
- * when it is built from many code points, so ZWJ sequences, flags, keycaps and
- * variation selectors never count the width of their parts.
- */
-function graphemeColumns(cluster: string): number {
-  const points = [...cluster].map((character) => character.codePointAt(0)!);
-  if (points.every((point) => point === EMOJI_PRESENTATION || point === TEXT_PRESENTATION)) return 0;
-  const first = points[0]!;
-  if (points.length > 1 && points.every((point) => point >= REGIONAL_FIRST && point <= REGIONAL_LAST)) return 2;
-  // A presentation selector decides a text-default symbol: text stays narrow, emoji widens it.
-  if (points.includes(TEXT_PRESENTATION)) return baseColumns(first);
-  if (points.includes(EMOJI_PRESENTATION)) return 2;
-  // A joined pictographic sequence is one wide cluster; a plain text symbol is not.
-  if (points.includes(ZWJ) && PICTOGRAPHIC.test(cluster)) return 2;
-  if (EMOJI_DEFAULT.test(cluster)) return 2;
-  return baseColumns(first);
-}
-
-export function displayColumns(value: string): number {
-  if (!NON_ASCII.test(value)) return value.length;
-  let columns = 0;
-  for (const { segment } of GRAPHEMES.segment(value)) columns += graphemeColumns(segment);
-  return columns;
-}
-
-export function takeDisplayColumns(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
-  const clusters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
-  let columns = 0;
-  let index = 0;
-  for (; index < clusters.length; index += 1) {
-    const width = graphemeColumns(clusters[index]!);
-    if (columns + width > maximum) break;
-    columns += width;
-  }
-  return { text: clusters.slice(0, index).join(""), rest: clusters.slice(index).join("") };
-}
-
-export function truncateDisplayText(value: string, maximum: number): string {
-  const clean = safeText(value);
-  if (displayColumns(clean) <= maximum) return clean;
-  if (maximum <= 0) return "";
-  if (maximum === 1) return "…";
-  return `${takeDisplayColumns(clean, maximum - 1).text.replace(/…+$/u, "")}…`;
-}
-
-/** Pad text to a terminal-column width; raw string length is never the measuring stick. */
-export function padToDisplay(text: string, width: number): string {
-  const remaining = width - displayColumns(text);
-  return remaining > 0 ? `${text}${" ".repeat(remaining)}` : text;
-}
-
-export function renderBoundedTextBlock(
-  value: string,
-  input: Readonly<{ first: string; continuation: string; columns: number; lines?: number; truncated?: boolean }>,
-): readonly string[] {
-  const maximumLines = input.lines ?? 3;
-  let rest = safeText(value).replace(/\s+/gu, " ").trim();
-  const lines: string[] = [];
-  for (let index = 0; index < maximumLines && rest.length > 0; index += 1) {
-    const prefix = index === 0 ? input.first : input.continuation;
-    const budget = Math.max(1, input.columns - displayColumns(prefix));
-    if (index === maximumLines - 1) {
-      const force = input.truncated === true || displayColumns(rest) > budget;
-      lines.push(`${prefix}${force ? truncateDisplayText(`${rest}…`, budget) : rest}`);
-      rest = "";
+/** The content aperture is independent of prefixes and terminal width. */
+export function previewLines(text: string, prefix: string, lineLimit = 3, alreadyClipped = false): string[] {
+  const source = lineLimit === 1 ? [safeText(text).replace(/\s+/gu, " ").trim()] : text.split(/\r?\n/u, lineLimit + 1);
+  const selected = source.slice(0, lineLimit).map(safeText).join("\n");
+  let end = selected.length;
+  let count = 0;
+  for (const { segment, index } of GRAPHEMES.segment(selected)) {
+    if (segment !== "\n" && count++ === PREVIEW_GRAPHEMES) {
+      end = index;
       break;
     }
-    if (displayColumns(rest) <= budget) {
-      lines.push(`${prefix}${input.truncated === true ? truncateDisplayText(`${rest}…`, budget) : rest}`);
-      rest = "";
-      break;
-    }
-    const taken = takeDisplayColumns(rest, budget);
-    let split = taken.text.lastIndexOf(" ");
-    if (split < Math.floor(taken.text.length / 2)) split = taken.text.length;
-    lines.push(`${prefix}${taken.text.slice(0, split).trimEnd()}`);
-    rest = `${taken.text.slice(split)}${taken.rest}`.trimStart();
   }
-  return lines.length === 0 ? [input.first.trimEnd()] : lines;
+  const omitted = alreadyClipped || source.length > lineLimit || end < selected.length;
+  return `${selected.slice(0, end)}${omitted ? "…" : ""}`.split("\n").map((line) => `${prefix}${line}`);
 }
 
-/** A tool diagnostic names its subject first; only its bounded payload carries the cause. */
-export function diagnosticLines(
-  subject: string,
-  cause: string,
-  columns: number,
-  options: Readonly<{ state?: "unavailable" | "failed"; suffix?: string }> = {},
-): readonly string[] {
-  return [
-    `! ${safeText(subject)} ${options.state ?? "unavailable"}${safeText(options.suffix ?? "")}`,
-    ...renderBoundedTextBlock(cause, { first: "  ", continuation: "  ", columns }),
-  ];
+export function exactIndentedLines(text: string, indent: string): string[] {
+  return text.split(/\r?\n/u).map((line) => (line === "" ? "" : `${indent}${safeText(line)}`));
 }
 
-type BoundedPayload = Readonly<{
-  text: string;
-  first: string;
-  continuation: string;
-  columns: number;
-  maxLines: number;
-  quote: string;
-  truncated: boolean;
-  /** Keep source line breaks and indentation; single-line previews fold whitespace instead. */
-  preserveLines?: true;
-  /** A single-line action keeps its trailer before bounding diagnostic detail. */
-  trailer?: Readonly<{ text: string; diagnostic: string; complete: boolean }>;
-}>;
+const TERMINAL_CONTROLS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
-export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
-  if (input.trailer !== undefined) {
-    const columns = Math.max(0, input.columns);
-    const omissionWidth = displayColumns("…");
-    const suffix = truncateDisplayText(input.trailer.text, Math.max(0, columns - omissionWidth));
-    const diagnostic = safeText(input.trailer.diagnostic).replace(/\s+/gu, " ").trim();
-    const extra = diagnostic === "" ? "" : `${suffix === "" ? " — " : " · "}${diagnostic}`;
-    const extraWidth = displayColumns(extra);
-    const [firstBody] = GRAPHEMES.segment(input.text);
-    const bodyMinimum = firstBody === undefined ? 0 : displayColumns(firstBody.segment) + omissionWidth;
-    // Reserve the body's first grapheme plus its omission and any diagnostic omission before clipping the prefix.
-    // An absent preview reserves nothing, so the tool identity keeps its full width; sharing spare cells
-    // monotonically keeps wider rows from reducing the body allowance.
-    const minimumPayload = bodyMinimum + (extra === "" ? 0 : omissionWidth);
-    const prefixWidth = Math.min(
-      displayColumns(input.first),
-      Math.max(0, columns - displayColumns(suffix) - minimumPayload),
-    );
-    const labelWidth = Math.max(0, prefixWidth - displayColumns(" "));
-    const first =
-      prefixWidth === 0 ? "" : `${padToDisplay(truncateDisplayText(input.first.trimEnd(), labelWidth), labelWidth)} `;
-    const continuation = takeDisplayColumns(input.continuation, prefixWidth).text;
-    const available = Math.max(0, columns - displayColumns(first + suffix));
-    const diagnosticReserve = Math.min(extraWidth, Math.floor(available / 2), Math.max(0, available - bodyMinimum));
-    const body = renderFoldedPayload({
-      ...input,
-      first,
-      text: input.text,
-      columns: columns - displayColumns(suffix) - diagnosticReserve,
-      maxLines: 1,
-    })[0]!;
-    const diagnosticWidth = Math.max(0, columns - displayColumns(body + suffix));
-    return [
-      `${body}${suffix}${truncateDisplayText(extra, diagnosticWidth)}`,
-      ...(input.trailer.complete && extraWidth > diagnosticWidth
-        ? renderBoundedTextBlock(diagnostic, { first: continuation, continuation, columns })
-        : []),
-    ];
-  }
-  return input.preserveLines === true ? renderPreservedPayload(input) : renderFoldedPayload(input);
-}
-
-/**
- * Paragraph-preserving payload: source line breaks and leading indentation stay,
- * each line wraps at a word boundary where one exists, and the last rendered
- * line carries either the closing quote or the one truncation mark.
- */
-function renderPreservedPayload(input: BoundedPayload): readonly string[] {
-  const closing = input.quote === "" ? "" : input.quote === "“" ? "”" : input.quote;
-  if (input.text.length === 0)
-    return [input.quote === "" ? input.first.trimEnd() : `${input.first}${input.quote}${closing}`];
-  const source = input.text.split(/\r?\n/u).map((line) => safeText(line).replace(/\s+$/u, ""));
-  const lines: string[] = [];
-  let truncated = input.truncated;
-  let done = false;
-  /** Paragraph breaks are deferred so they never spend the preview's last usable line. */
-  let pendingBlanks = 0;
-  for (const line of source) {
-    if (done) break;
-    if (line.length === 0) {
-      if (lines.length > 0) pendingBlanks += 1;
-      continue;
-    }
-    // A paragraph break never spends the preview's last line: content wins over a blank.
-    const room = input.maxLines - lines.length - 1;
-    for (let count = 0; count < Math.min(pendingBlanks, Math.max(0, room)); count += 1)
-      lines.push(input.continuation.trimEnd());
-    pendingBlanks = 0;
-    const indent = /^ */u.exec(line)![0];
-    let rest = line.slice(indent.length);
-    while (rest.length > 0) {
-      if (lines.length >= input.maxLines) {
-        truncated = true;
-        done = true;
-        break;
-      }
-      const prefix = lines.length === 0 ? input.first : input.continuation;
-      const opening = input.quote !== "" && lines.length === 0 ? input.quote : "";
-      // One cell stays reserved for a closing quote or an omission mark.
-      const budget = Math.max(1, input.columns - displayColumns(prefix) - displayColumns(opening) - 1);
-      const fragment = wrapFragment(rest, budget);
-      if (fragment.body.length === 0) {
-        truncated = true;
-        done = true;
-        break;
-      }
-      lines.push(`${prefix}${opening}${indent}${fragment.body}`);
-      rest = fragment.remaining;
-    }
-  }
-  if (lines.length === 0) return [input.first.trimEnd()];
-  if (truncated) lines[lines.length - 1] = truncateDisplayText(`${lines[lines.length - 1]}…`, input.columns);
-  else if (closing !== "") lines[lines.length - 1] += closing;
-  return lines;
-}
-
-/** One wrapped fragment: a word boundary is preferred over splitting a word. */
-function wrapFragment(rest: string, budget: number): Readonly<{ body: string; remaining: string }> {
-  const taken = takeDisplayColumns(rest, budget);
-  if (taken.rest.length === 0) return { body: taken.text, remaining: "" };
-  const split = taken.text.lastIndexOf(" ");
-  if (split <= 0) return { body: taken.text, remaining: taken.rest };
-  return { body: taken.text.slice(0, split), remaining: `${taken.text.slice(split + 1)}${taken.rest}` };
-}
-
-/** Single-line and bounded summaries fold whitespace into one grapheme-safe stream. */
-function renderFoldedPayload(input: BoundedPayload): readonly string[] {
-  let rest = safeText(input.text).replace(/\s+/gu, " ").trim();
-  const lines: string[] = [];
-  for (let index = 0; index < input.maxLines; index += 1) {
-    const prefix = index === 0 ? input.first : input.continuation;
-    if (rest.length === 0 && !input.quote && index === 0) return [prefix.trimEnd()];
-    const opening = input.quote && index === 0 ? input.quote : "";
-    const closing = input.quote === "“" ? "”" : input.quote;
-    const budget = Math.max(0, input.columns - displayColumns(prefix + opening + closing));
-    if (budget === 0) return lines.length === 0 ? [prefix.trimEnd()] : lines;
-    const fragment = payloadFragment(rest, budget, index === input.maxLines - 1, input.truncated);
-    rest = fragment.remaining;
-    lines.push(`${prefix}${opening}${fragment.body}${rest.length === 0 ? closing : ""}`);
-    if (rest.length === 0) break;
-  }
-  return lines;
-}
-
-function payloadFragment(
-  rest: string,
-  budget: number,
-  last: boolean,
-  forced: boolean,
-): Readonly<{ body: string; remaining: string }> {
-  const truncated = (forced && displayColumns(rest) <= budget) || (last && (forced || displayColumns(rest) > budget));
-  if (truncated) return { body: truncateDisplayText(`${rest}…`, budget), remaining: "" };
-  const body = takeDisplayColumns(rest, budget).text;
-  if (body.length === 0 && rest.length > 0) return { body: truncateDisplayText(rest, budget), remaining: "" };
-  return { body, remaining: rest.slice(body.length) };
+export function opaqueCoordinate(value: string): string {
+  return value.search(TERMINAL_CONTROLS) < 0 ? value : quotedText(value);
 }
 
 export function quotedText(value: string): string {
-  return JSON.stringify(value).replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) =>
+  return JSON.stringify(value).replaceAll(TERMINAL_CONTROLS, (character) =>
     character
       .split("")
       .map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
@@ -362,87 +111,10 @@ export function quotedText(value: string): string {
 }
 
 export function safeText(value: string): string {
-  return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) =>
+  return value.replaceAll(TERMINAL_CONTROLS, (character) =>
     // ZWJ and ZWNJ are legitimate joiners that carry a grapheme cluster's shape; they move no cursor.
     character === "\u200c" || character === "\u200d" ? character : /\s/u.test(character) ? " " : "�",
   );
-}
-
-/**
- * Wrap `value` into the column budget under one indent. A `lead` such as an em dash joins the first
- * word as one unit, so it never dangles alone at a line end.
- */
-export function renderTextBlock(value: string, indent: string, columns: number, lead?: string): readonly string[] {
-  const words = safeText(value)
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0);
-  if (words.length === 0) return [lead === undefined ? indent : `${indent}${lead}`];
-  if (lead !== undefined) words[0] = `${lead} ${words[0]}`;
-  const lines: string[] = [];
-  let current = indent;
-  for (const word of words) {
-    const candidate = current === indent ? `${indent}${word}` : `${current} ${word}`;
-    if (current !== indent && displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `${indent}${word}`;
-    } else current = candidate;
-  }
-  lines.push(current);
-  return lines;
-}
-
-const OPAQUE_BLOCK_MAX_LINES = 100;
-
-export function renderOpaqueBlock(value: string, indent: string, columns: number): readonly string[] {
-  if (value.length === 0) return [indent.trimEnd()];
-  const continuation = `${indent}  `;
-  const lines: string[] = [];
-  const sourceLines = value.split("\n");
-  let sourceIndex = 0;
-  let rest = "";
-  let prefix = indent;
-  let truncated = false;
-  while (sourceIndex < sourceLines.length || rest.length > 0) {
-    if (rest.length === 0) {
-      rest = safeText(sourceLines[sourceIndex++] ?? "");
-      prefix = indent;
-      if (rest.length === 0) {
-        if (lines.length === OPAQUE_BLOCK_MAX_LINES) {
-          truncated = true;
-          break;
-        }
-        if (lines.at(-1) === indent.trimEnd()) continue;
-        lines.push(indent.trimEnd());
-        continue;
-      }
-    }
-    if (lines.length === OPAQUE_BLOCK_MAX_LINES) {
-      truncated = true;
-      break;
-    }
-    const budget = columns - displayColumns(prefix);
-    if (budget <= 0) {
-      lines.push(prefix.trimEnd());
-      prefix = continuation;
-      continue;
-    }
-    const taken = takeDisplayColumns(rest, budget);
-    if (taken.text.length === 0) {
-      lines.push(`${prefix}${rest}`);
-      rest = "";
-      continue;
-    }
-    lines.push(`${prefix}${taken.text}`);
-    rest = taken.rest;
-    prefix = continuation;
-  }
-  if (truncated || sourceIndex < sourceLines.length || rest.length > 0) {
-    const omittedLines = sourceLines.length - sourceIndex + (rest.length > 0 ? 1 : 0);
-    const omitted = omittedLines > 1 ? `${omittedLines} lines` : `${Math.max(1, omittedLines)} line`;
-    lines[OPAQUE_BLOCK_MAX_LINES - 1] = `${indent}… (${omitted} omitted)`;
-  }
-  return lines;
 }
 
 export type SemanticTone = "dim" | "attention" | "alert";

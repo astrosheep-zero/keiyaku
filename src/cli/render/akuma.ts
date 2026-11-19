@@ -1,39 +1,29 @@
-import type { AkumaId } from "../../akuma/identity.js";
 import type { AkumaAskResult, AkumaKillResult } from "../../akuma/selection-observation.js";
 import type { ForkResult, SpawnResult } from "../../library/akuma-creation.js";
-import {
-  actionReceipt,
-  killResultText,
-  callFailureLines,
-  askRawAnswer,
-  tellControlLines,
-  tellPayloadLines,
-} from "./akuma-activity.js";
-import { displayColumns, safeText, truncateDisplayText, type TextRenderContext } from "./terminal.js";
+import { actionReceipt, killResultText, callFailureLines, askRawAnswer, tellControlLines } from "./akuma-activity.js";
+import { exactIndentedLines, previewLines, safeText } from "./terminal.js";
 import type { AkumaStatus } from "../../akuma/akuma.js";
-import type { CurrentWork } from "../../akuma/status-projection.js";
+import type { AkumaId } from "../../akuma/identity.js";
 
-/** One current observation; only its work preview can truncate. */
-export function askCurrentWorkLine(
-  observed: Readonly<{ id: AkumaId; alias?: string; life?: AkumaStatus["life"]; summary?: CurrentWork["summary"] }>,
+/** A logical live row, encoded as single-cell ASCII for the existing one-row painter. */
+export function askFrame(
   elapsedMs: number,
-  context: TextRenderContext,
+  id: AkumaId,
+  alias: string | undefined,
+  status?: Pick<AkumaStatus, "life" | "work">,
 ): string {
-  const identity = `${observed.id}${observed.alias === undefined ? "" : ` (${safeText(observed.alias)})`}`;
-  const head = `${identity}${observed.life === undefined ? "" : ` · last observed ${observed.life}`}`;
-  const clock = ` · observing ${Math.floor(elapsedMs / 1_000)}s`;
-  const summary = observed.summary;
-  if (summary === undefined) return `${head}${clock}`;
-  const text = safeText(summary.text).replace(/\s+/gu, " ").trim();
-  const preview = truncateDisplayText(
-    summary.clipped === true ? `${text.replace(/…$/u, "")}…` : text,
-    Math.max(1, context.columns - displayColumns(`${head} · ${clock}`)),
+  const subject = alias === undefined ? id : `${id} (${alias})`;
+  const clock = `ask ${Math.floor(elapsedMs / 1_000)}s`;
+  const last = status === undefined ? "" : ` last ${status.life}`;
+  const work = status?.work.summary;
+  const frame = `${subject} ${clock}${last}${work === undefined ? "" : ` | activity ${work.id} ${work.text}`}`;
+  return frame.replace(/[^ -~]|\\/gu, (character) =>
+    character === "\\" ? "\\\\" : `\\u{${character.codePointAt(0)!.toString(16)}}`,
   );
-  return `${head} · ${preview}${clock}`;
 }
 
 /** Final native Ask facts, independent of any live observation or caller clock. */
-export function askResultText(result: AkumaAskResult, alias: string | undefined, context: TextRenderContext): string {
+export function askResultText(result: AkumaAskResult, alias: string | undefined): string {
   const mark =
     result.kind === "answered" ? "✓" : result.kind === "deadline" ? "⧗" : result.kind === "unanswered" ? "○" : "!";
   return actionReceipt({
@@ -43,18 +33,20 @@ export function askResultText(result: AkumaAskResult, alias: string | undefined,
     ...(alias === undefined ? {} : { alias }),
     evidence: [
       `input ${result.tellId}`,
-      ...tellControlLines(result, context),
-      ...(result.kind === "failed" || result.kind === "invalid-output" ? [safeText(result.diagnostic)] : []),
-      ...(result.kind === "invalid-output" ? ["invalid answer", ...result.answer.split("\n").map(safeText)] : []),
+      ...tellControlLines(result),
+      ...(result.kind === "failed" || result.kind === "invalid-output"
+        ? exactIndentedLines(result.diagnostic, "")
+        : []),
+      ...(result.kind === "invalid-output" ? ["invalid answer", ...exactIndentedLines(result.answer, "")] : []),
     ],
   }).join("\n");
 }
 
 /** Shared final text keeps the answer raw unless native controls require context. */
-export function renderAskText(result: AkumaAskResult, alias: string | undefined, context: TextRenderContext): string {
+export function renderAskText(result: AkumaAskResult, alias: string | undefined): string {
   const answer = askRawAnswer(result);
-  if (answer !== undefined && tellControlLines(result, context).length === 0) return answer;
-  return [askResultText(result, alias, context), ...(answer === undefined ? [] : [answer])].join("\n");
+  if (answer !== undefined && tellControlLines(result).length === 0) return answer;
+  return [askResultText(result, alias), ...(answer === undefined ? [] : [answer])].join("\n");
 }
 
 type SpawnPresentation = Readonly<{ prompt?: string; cwd?: string; alias?: string; contractId?: string }>;
@@ -83,51 +75,41 @@ function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): Sp
   };
 }
 
-function spawnEvidence(
-  result: SpawnResult,
-  context: TextRenderContext,
-  input: SpawnPresentation,
-  exceptional = false,
-): readonly string[] {
+function spawnEvidence(result: SpawnResult, input: SpawnPresentation, exceptional = false): readonly string[] {
   const head = spawnHead(result, input);
   const showInput = exceptional || result.kind === "failed" || result.action === undefined;
   return [
     ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
     ...(head.cwd === undefined ? [] : [safeText(head.cwd)]),
     ...head.facts,
-    ...tellControlLines({ action: result.action, wake: result.wake }, context),
+    ...tellControlLines({ action: result.action, wake: result.wake }),
     ...(result.tellId === undefined || !showInput ? [] : [`input ${result.tellId}`]),
     ...(result.tellId === undefined || input.prompt === undefined || !showInput
       ? []
-      : tellPayloadLines(input.prompt, context).map((line) => line.trimStart())),
-    ...(result.kind === "failed" ? callFailureLines(result.failures, context) : []),
+      : previewLines(input.prompt, "", 1).filter(Boolean)),
+    ...(result.kind === "failed" ? callFailureLines(result.failures) : []),
   ];
 }
 
-export function renderCallText(result: SpawnResult, context: TextRenderContext, input: SpawnPresentation = {}): string {
+export function renderCallText(result: SpawnResult, input: SpawnPresentation = {}): string {
   const head = spawnHead(result, input);
   return actionReceipt({
     mark: result.kind === "failed" ? "!" : "✓",
     verb: "spawned",
     id: result.akumaId,
     ...(head.alias === undefined ? {} : { alias: head.alias }),
-    evidence: spawnEvidence(result, context, input),
+    evidence: spawnEvidence(result, input),
   }).join("\n");
 }
 
-export function renderSpawnFailure(
-  result: SpawnResult,
-  diagnostic: string,
-  context: TextRenderContext,
-  input: SpawnPresentation = {},
-): string {
+export function renderSpawnFailure(result: SpawnResult, diagnostic: string, input: SpawnPresentation = {}): string {
   const head = spawnHead(result, input);
   return actionReceipt({
     mark: "!",
     verb: "spawn failed",
     id: result.akumaId,
     ...(head.alias === undefined ? {} : { alias: head.alias }),
-    evidence: [...spawnEvidence(result, context, input, true), `reason ${safeText(diagnostic)}`],
+    evidence: [...spawnEvidence(result, input, true), ...exactIndentedLines(`reason ${diagnostic}`, "")],
   }).join("\n");
 }
 
@@ -142,7 +124,12 @@ export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: str
           : receipt.diagnostic;
     const session =
       receipt.kind === "provider-forked-local-birth-failed" ? [`session ${JSON.stringify(receipt.session)}`] : [];
-    return actionReceipt({ mark: "!", verb: "fork", id: parent, evidence: [reason, ...session] }).join("\n");
+    return actionReceipt({
+      mark: "!",
+      verb: "fork",
+      id: parent,
+      evidence: [...exactIndentedLines(reason, ""), ...session],
+    }).join("\n");
   }
   return actionReceipt({
     mark: receipt.kind === "forked" ? "✓" : "!",
@@ -151,7 +138,7 @@ export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: str
     evidence: [
       `from ${parent}`,
       ...(receipt.kind === "failed"
-        ? callFailureLines([receipt.failure], { columns: 100, color: false })
+        ? callFailureLines([receipt.failure])
         : receipt.dispatchWarning === undefined
           ? []
           : [`dispatch lag ${safeText(receipt.dispatchWarning)}`]),
@@ -159,7 +146,6 @@ export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: str
   }).join("\n");
 }
 
-export function renderKillText(result: AkumaKillResult, alias: string | undefined, context: TextRenderContext): string {
-  void context;
+export function renderKillText(result: AkumaKillResult, alias: string | undefined): string {
   return result.results.map((member) => killResultText(member.id, member.outcome, alias)).join("\n");
 }

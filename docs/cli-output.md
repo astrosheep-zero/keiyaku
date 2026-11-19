@@ -48,7 +48,11 @@ recording, admitted testimony, reused testimony, and stopped recording remain
 distinct; delivery and review never imply a check ran.
 
 Stops and issues share native kinds as words and present labeled coordinates,
-reasons and bounded diagnostics. Every required issue and each optional issue
+reasons and the complete supplied diagnostics. Receipt rendering does not
+truncate diagnostic or recovery text, including when the producer supplies
+recovery prose in a diagnostic rather than a separate fact. Native recovery
+facts remain separate and complete; the renderer never infers a recovery call
+from prose. Every required issue and each optional issue
 carrying a path, recovery coordinate or diagnostic remains visible across ordinary,
 preview, terminal and exceptional receipts. Optional residue never changes the
 invocation disposition. Evidence stays in producer order, including repeats;
@@ -70,10 +74,9 @@ precision in text and retain full precision in JSON.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
 at that fact: a timeline admission uses a row, and Git movement uses a reference
-line. A frame rule appears only when content follows; no admission receipt adds
-an observation conclusion or claims a live state. Reset receipts enumerate
-owner-confirmed removals and explain retained coordination residue without
-claiming a world-wide transaction.
+line. No admission receipt adds an observation conclusion or claims a live
+state. Reset receipts enumerate owner-confirmed removals and explain retained
+coordination residue without claiming a world-wide transaction.
 
 ## Shared rendering
 
@@ -139,21 +142,22 @@ facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Rendering does not interpret foreign command or
-parameter dialects: retained commands and paths use the shared bounded
-payload discipline. Native tool rows keep their observed work preview together
-with the semantic trailer of read ranges, diffstats, and observed exit/error
-status within the terminal width. Tool starts and completions remain separate
-retained observations; rendering derives no duration from their timestamps. A
-row whose provider supplied no preview
+parameter dialects: observed arguments use the shared bounded preview while
+copyable paths stay whole. Native tool rows preserve the work preview and expose
+read ranges, diffstats, and observed exit or error status as separate facts.
+Tool starts and completions remain separate retained observations; rendering
+derives no duration from their timestamps. A row whose provider supplied no preview
 carries the tool identity alone; the truncation mark means a partial capture,
 never a missing one, and an explicitly empty argument object stays visibly
-empty. Status and World render the native owner's concrete current-action
-summary with its retained coordinate and visible clipping; renderers never
-reconstruct tool state or expand omitted activity. Native history
-keeps observed result diagnostics, expanding a cut inline diagnostic into a
-bounded continuation block. Diagnostics that fit are shown whole; longer
-captures name their omission. Status and catalogue rows state gate evidence in
-words beside the gate and requirement identity. Contract receipts and previews
+empty. Status and World render the native owner's already bounded current-action
+summary as supplied, with terminal-safe handling, its complete retained activity
+coordinate, and the owner's clipping intact. They do not clip it again,
+reconstruct tool state, or expand omitted activity. Exact retained activity
+remains separately addressed through history. Native history keeps observed
+result diagnostics in a separate bounded cause. Diagnostics within the preview
+aperture are shown whole; longer or partial captures name their omission.
+Status and catalogue rows state gate evidence in words beside the gate and
+requirement identity. Contract receipts and previews
 retain the native requirement evidence described above; JSON retains native
 values. Current declarations may be labeled by current one-based position while
 removed historical requirements retain stable identity. A raw
@@ -171,10 +175,12 @@ A Contract association prints as the bare Contract id inline; a free row states 
 association at all; the association carries a parenthetical only when the read
 established a reason a person can act on. A row prints its activity age only
 when it differs from the state age. Activity previews keep observed source
-punctuation, apply only terminal-safe handling, whitespace folding, and
-width-aware truncation, and never rewrite what an Akuma said. Width is counted
-in terminal cells for whole grapheme clusters. Debt dispositions render as
-words wherever debt rows appear; the stored dropping state reads as dropped.
+punctuation and never rewrite what an Akuma said. The aperture for previews of
+raw content is fixed in source lines and whole graphemes, independent of
+terminal width. It makes both presentation omission and owner-reported partial
+capture visible without treating authored punctuation as evidence of omission. Debt
+dispositions render as words wherever debt rows appear; the stored dropping
+state reads as dropped.
 
 Known Akuma selection conditions render as one compact caller fact naming the
 coordinate and the useful relation; they do not expose Heart birth terminology,
@@ -201,19 +207,24 @@ each member's native outcome in frozen selection order instead of collapsing
 partial failures into one verdict.
 
 Opaque configuration and observation values retain exact names, scalar types,
-collection membership, empty values, and provenance. Terminal-safe escaping is
-reversible. Refusal and recovery text keeps concrete causes, capabilities, and
-coordinates. Presentation may wrap or densify evidence but cannot truncate a
-copyable identity, replace a public discriminant with decoration, or remove
-evidence merely to hide internal terminology.
+collection membership, empty values, and provenance. Terminal-safe escaping,
+including on Settings scope coordinates that need it, is reversible. Refusal
+and recovery text keeps concrete causes, capabilities, and
+coordinates. Text uses a stable shape and lets the terminal wrap naturally.
+Layout never clips or splits a copyable coordinate, replaces a public
+discriminant with decoration, or removes evidence merely to hide internal
+terminology. Panels and receipts need no decorative separator. Full help and
+exact content do not use the preview aperture; exact text preserves source
+lines and indentation with terminal-safe handling where appropriate, and raw
+reads keep their bytes.
 
 Akuma panels place complete identity and known context before native work or
 chronological activity, life, changes, and diagnostics. Coordinates appear once;
 unknown facts stay absent. Status foregrounds retained activity age, never Turn
 opening or inferred liveness, and renders the owner's bounded current-action
 summary with exact detail coordinates. Status and World do not expand a chat
-timeline. Thin catalogue and World rows share the native projection; World current
-work is separately bounded. History and live observation preserve owner order,
+timeline. Thin catalogue and World rows share the native projection. History
+and live observation preserve owner order,
 selection, omissions, payloads, and attribution. Changes in the execution directory
 take priority over separately summarized outside changes; unknown directory keeps
 the unpartitioned summary. Identity, conclusion, changes, and actionable pending
@@ -237,8 +248,8 @@ and wait durations.
 
 Bounded free-text previews preserve multiline paragraphs and indentation, fold
 single-line whitespace, and keep speech, input, thought, and action distinct without
-invented quotation marks. Whole-grapheme wrapping prefers word boundaries, preserves
-selection and meaning, and names truncation. History previews keep the beginning;
+invented quotation marks. A preview ends only at a whole-grapheme boundary and
+names truncation. History previews keep the beginning;
 status and World show outcome coordinates and verdicts rather than answer previews.
 Akuma history exposes copyable report and Turn addresses even in narrow terminals,
 with outcome payloads below preserving relative indentation. Exact activity text
@@ -265,8 +276,10 @@ are ephemeral process observations, useful only when they report an actual
 boundary — never simulated progress, persisted facts, or a hidden alternative
 protocol. Four laws govern them. A command's durable output is one receipt,
 plus refusals; progress is not durable output. Progress lives only in the
-redrawable live frame and vanishes at completion. Verification retains bounded
-stdout and stderr suffixes for each observed phase and emits their labeled
+redrawable live frame and vanishes at completion. That frame is confined to one
+physical row and may display less than its logical text. It never changes the
+terminal's wrap setting or limits the subsequent receipt. Verification retains
+bounded stdout and stderr suffixes for each observed phase and emits their labeled
 blocks at the phase boundary, in stdout then stderr order. Each stream names
 the amount of earlier output omitted, preserving the latest failure evidence.
 An observed empty stream remains distinct from an absent stream.
@@ -293,14 +306,16 @@ second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
 Spawn, Tell, and kill return one final action receipt, without an answer or
-live observation frame. Ask shows one replaceable current-work line on a
-terminal: complete resolved identity, explicit last-observed life, the native
-owner's bounded work summary when available, and elapsed caller observation
-time. Admission may begin that clock before any life or work is observed.
-Each observation replaces the previous facts wholesale; Ask reconstructs no
-timeline, retains no activity rail, and flushes no unresolved rows. The clock
-proves observation time, never ongoing worker liveness. Off a terminal no
-running Ask activity appears, and JSON mode opens no frame.
+live observation frame. On a terminal, pending Ask's replaceable frame leads
+with the complete resolved identity and carries elapsed caller observation,
+last-observed life, and the native bounded current-work summary with its
+activity coordinate when supplied. Admission may start the clock before life
+or work is observed. Each observation replaces the prior life and work; Ask
+adds no second summary bound, reconstructs no timeline, and flushes no
+unresolved rows. A narrow display may show only
+part of the frame, without clipping the final receipt. The clock proves
+observation time, never ongoing worker liveness. Off a terminal no running Ask
+activity appears, and JSON mode opens no frame.
 
 Ask erases its live frame on every exit. Its final progress-channel receipt
 names the resolved Akuma, admitted input, exact native outcome and meaningful
