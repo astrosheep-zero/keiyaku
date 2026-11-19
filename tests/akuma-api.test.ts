@@ -289,24 +289,34 @@ test("bounded interrupt Tell keeps provider errors distinct", async (context) =>
   });
 });
 
-test("bounded interrupt Ask returns its own admitted Tell without awaiting predecessor settlement", async () => {
-  await withWaitedTellFixture(async ({ born }) => {
-    const value = await born("a1000022", answering("unused"));
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: WAITED_TELL_NOW });
-    try {
-      const started = performance.now();
-      const result = await waitTell(value, { body: "bounded interrupt", interrupt: true, timeoutMs: 0 });
-      assert.equal(result.kind, "deadline");
-      assert.equal(result.interrupt?.kind, "pending");
-      assert.ok(performance.now() - started < 200, "an expired Ask must not wait for predecessor settlement");
-      assert.equal((await readTell(value.allocated.paths, result.tellId))?.body, "bounded interrupt");
-      assert.equal((await readHeart(value.allocated.paths)).pause?.bodySequence, body.sequence);
-    } finally {
-      leash.release();
-    }
-  });
-});
+test(
+  "bounded interrupt Ask returns its own admitted Tell without awaiting predecessor settlement",
+  { timeout: 30_000 },
+  async () => {
+    await withWaitedTellFixture(async ({ born }) => {
+      const value = await born("a1000022", answering("unused"));
+      const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+      const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: WAITED_TELL_NOW });
+      try {
+        const result = await waitTell(value, { body: "bounded interrupt", interrupt: true, timeoutMs: 0 });
+        assert.equal(result.kind, "deadline");
+        assert.equal(result.interrupt?.kind, "pending");
+        assert.equal((await readTell(value.allocated.paths, result.tellId))?.body, "bounded interrupt");
+        const heart = await readHeart(value.allocated.paths);
+        assert.equal(heart.pause?.bodySequence, body.sequence);
+        assert.equal(heart.latestBody?.sequence, body.sequence, "the held predecessor Body is still the latest Body");
+        assert.equal(
+          heart.latestBody?.end,
+          undefined,
+          "the Ask returned before the predecessor Body had a durable end",
+        );
+        assert.equal(heart.latestBody?.hung, undefined, "the predecessor Body is still live, not hung");
+      } finally {
+        leash.release();
+      }
+    });
+  },
+);
 test("an exact canceled Ask is unanswered even after the same pending Tell binds a running successor", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-ask-canceled-");
   const value = await bornWorld(root, "ca1ce103");
