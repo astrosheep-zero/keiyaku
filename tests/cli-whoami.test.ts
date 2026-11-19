@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Square, harnessOwner } from "@astrosheep/square";
 import { Akuma, Keis, Repo, World } from "../src/index.js";
-import { HeldAkumaLeash, beginTurn, breakBody, endTurn } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, beginTurn, breakBody, endTurn, type Soul } from "../src/akuma/heart/index.js";
+import { LEASH_SCHEMA, HEART_SCHEMA } from "../src/akuma/heart/schema.js";
+import { encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { allocateAkumaDirectory, type AkumaId, type AkumaPaths } from "../src/akuma/identity.js";
+import {
+  GIT_REF,
+  readGitPaths,
+  repositoryAt,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeStateCommit,
+} from "../src/git/repository.js";
+import type { GitRepository } from "../src/git/process.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -439,4 +453,329 @@ test("an unestablished Git World is absent, and usage/help need no World", async
     assert.match(help.stdout, /whoami/u);
   }
   assert.deepEqual(readdirSync(root), []);
+});
+
+/**
+ * Retained v31 DDL derived from the checked-in v29 authority through the
+ * documented 30 and 31 schema steps: a cancelled Turn outcome and retained
+ * reports, with the retired request table removed.
+ */
+function legacyHeartV31Schema(): string {
+  return (
+    readFileSync("tests/fixtures/heart-v29.sql", "utf8")
+      .replace("version = 29", "version = 31")
+      .replace("VALUES (1, 29)", "VALUES (1, 31)")
+      .replace("'answered', 'failed', 'invalid-output'", "'answered', 'failed', 'invalid-output', 'canceled'")
+      .replace(
+        "    OR (outcome IS NULL",
+        `    OR (outcome = 'canceled' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
+      AND answer_json IS NULL AND diagnostic IS NULL)
+    OR (outcome IS NULL`,
+      )
+      .replace("'tell', 'turn-end'", "'tell', 'turn-end', 'report'") +
+    `
+      DROP TABLE requests;
+      CREATE TABLE reports (
+        sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
+        body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
+        turn_sequence INTEGER NOT NULL REFERENCES turns(sequence) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        at TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX reports_by_turn ON reports(turn_sequence);`
+  );
+}
+
+function custodyBytes(directory: string): Map<string, Buffer> {
+  return new Map(readdirSync(directory).sort().map((name) => [name, readFileSync(join(directory, name))]));
+}
+
+function schemaVersion(path: string): bigint | undefined {
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    const query = database.prepare("SELECT version FROM akuma_schema");
+    query.setReadBigInts(true);
+    return query.get()?.version as bigint | undefined;
+  } finally {
+    database.close();
+  }
+}
+
+/** One Soul with an open, non-hung Body and one open Turn carrying its initiator. */
+function seedOpenActor(database: DatabaseSync, soul: Soul, initiator: string): void {
+  database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+  database.prepare("INSERT INTO soul VALUES (1, ?)").run(...encodeSoulRow(soul));
+  database.prepare("INSERT INTO bodies VALUES (1, ?, NULL, NULL, NULL, NULL)").run(AT);
+  database.exec("INSERT INTO timeline VALUES (1, 'turn-start')");
+  database.prepare("INSERT INTO turns (sequence, body_sequence, started_at, initiator) VALUES (1, 1, ?, ?)").run(
+    AT,
+    initiator,
+  );
+  database.exec("COMMIT");
+}
+
+/** Move a committed WAL-mode seed into the actor custody, preserving its WAL. */
+function seedCustody(paths: AkumaPaths, seed: string, log: string): void {
+  const leash = new DatabaseSync(paths.leash);
+  try {
+    leash.exec(LEASH_SCHEMA);
+  } finally {
+    leash.close();
+  }
+  writeFileSync(paths.log, log);
+  for (const suffix of ["", "-wal", "-shm"]) copyFileSync(seed + suffix, paths.heart + suffix);
+}
+
+/** A repository World with one current-format Heart actor ready for authority composition. */
+async function currentAuthorityFixture(draw: string) {
+  const repository = repositoryWithCommit();
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker", draw: () => draw });
+  const soul: Soul = {
+    id: allocated.id,
+    akumaName: "worker",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: { model: "current-model" },
+    cwd: world,
+    origin: { kind: "direct" },
+    caller: { kind: "external", integration: "current", id: "parent" },
+    createdAt: AT,
+  };
+  const seed = join(world, "current-heart.db");
+  const database = new DatabaseSync(seed);
+  try {
+    database.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+    database.exec(HEART_SCHEMA);
+    seedOpenActor(database, soul, "CurrentSeat");
+    seedCustody(allocated.paths, seed, "current execution log\n");
+  } finally {
+    database.close();
+  }
+  return { repository, world, repo, allocated, soul };
+}
+
+function dispatchFactPath(akumaId: AkumaId): string {
+  return `dispatch/${createHash("sha256").update(akumaId).digest("hex")}.json`;
+}
+
+/** Replace one durable Dispatch fact, leaving every other state-tree entry intact. */
+async function corruptDispatchFact(repository: GitRepository, akumaId: AkumaId, bytes: string): Promise<void> {
+  const snapshot = await readGitPaths(repository, []);
+  const blob = await writeBlob(repository, Buffer.from(bytes));
+  const tree = await updateGitTree(repository, snapshot.tree, new Map([[dispatchFactPath(akumaId), { oid: blob }]]));
+  const commit = await writeStateCommit({
+    repository,
+    tree,
+    parent: snapshot.commit,
+    message: `corrupt ${akumaId}`,
+    at: new Date().toISOString(),
+  });
+  assert.deepEqual(
+    await updateRefsAtomically(repository, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }]),
+    { kind: "published" },
+  );
+}
+
+// The declared Core 03 successor makes ordinary reads refuse this predecessor;
+// on a v31 build the same fixture is current, so this regression is meaningful
+// only on that candidate.
+test("whoami observes a populated legacy Heart without converting it", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-whoami-legacy-"));
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker", draw: () => "1234abcd" });
+  const soul: Soul = {
+    id: allocated.id,
+    akumaName: "worker",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: { model: "legacy-model" },
+    cwd: world,
+    origin: { kind: "direct" },
+    caller: { kind: "external", integration: "legacy", id: "parent" },
+    createdAt: AT,
+  };
+  const seed = join(world, "legacy-heart.db");
+  const database = new DatabaseSync(seed);
+  try {
+    database.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+    database.exec(legacyHeartV31Schema());
+    seedOpenActor(database, soul, "LegacySeat");
+    seedCustody(allocated.paths, seed, "retained execution log\n");
+  } finally {
+    database.close();
+  }
+
+  const before = custodyBytes(allocated.paths.directory);
+  assert.ok(before.get("heart.db-wal")!.length > 0, "fixture retains a populated WAL");
+  const environment = { KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world };
+  const result = await cliJson<WhoamiFacts>(["-C", world, "whoami"], { environment });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.deepEqual(result.value.self, { kind: "akuma", akumaId: allocated.id, world });
+  const initiator = result.value.initiator;
+  assert.equal(typeof initiator === "object" ? initiator.kind : undefined, "unavailable");
+  if (typeof initiator === "object" && initiator.kind === "unavailable")
+    assert.match(initiator.diagnostic, /schema version must be 32; found 31/u);
+  assert.match(result.value.profileUnavailable ?? "", /schema version must be 32; found 31/u);
+  const text = await runCli(["-C", world, "whoami"], { environment });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.match(text.stdout, /initiator\s+unavailable · .*schema version must be 32; found 31/u);
+  assert.match(text.stdout, /profile\s+unavailable · .*schema version must be 32; found 31/u);
+
+  const after = custodyBytes(allocated.paths.directory);
+  for (const name of ["heart.db", "heart.db-wal", "leash.db", "stdio.log"])
+    assert.deepEqual(after.get(name), before.get(name), name);
+  const check = new DatabaseSync(allocated.paths.heart, { readOnly: true });
+  try {
+    const version = check.prepare("SELECT version FROM akuma_schema");
+    version.setReadBigInts(true);
+    assert.equal(version.get()?.version, 31n);
+    assert.deepEqual(check.prepare("SELECT name FROM sqlite_schema WHERE name = 'tell_terminal_receipts'").all(), []);
+  } finally {
+    check.close();
+  }
+});
+
+test("whoami observes a populated current Heart without changing its WAL", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-whoami-current-"));
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker", draw: () => "5678abcd" });
+  const soul: Soul = {
+    id: allocated.id,
+    akumaName: "worker",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: { model: "current-model" },
+    cwd: world,
+    origin: { kind: "direct" },
+    caller: { kind: "external", integration: "current", id: "parent" },
+    createdAt: AT,
+  };
+  const seed = join(world, "current-heart.db");
+  const database = new DatabaseSync(seed);
+  try {
+    database.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+    database.exec(HEART_SCHEMA);
+    seedOpenActor(database, soul, "CurrentSeat");
+    seedCustody(allocated.paths, seed, "current execution log\n");
+  } finally {
+    database.close();
+  }
+
+  const before = custodyBytes(allocated.paths.directory);
+  const versionBefore = schemaVersion(allocated.paths.heart);
+  assert.ok(before.get("heart.db-wal")!.length > 0, "fixture retains a populated WAL");
+  const environment = { KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world };
+  const result = await cliJson<WhoamiFacts>(["-C", world, "whoami"], { environment });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.deepEqual(result.value.self, { kind: "akuma", akumaId: allocated.id, world });
+  assert.equal(result.value.initiator, "CurrentSeat");
+  assert.equal(result.value.provider, "claude");
+  assert.equal(result.value.model, "current-model");
+  assert.equal(result.value.workdir, world);
+  assert.deepEqual(result.value.birthCaller, { kind: "external", id: "current:parent" });
+  assert.equal(result.value.profileUnavailable, undefined);
+  assert.equal(schemaVersion(allocated.paths.heart), versionBefore);
+
+  const after = custodyBytes(allocated.paths.directory);
+  for (const name of ["heart.db", "heart.db-wal", "leash.db", "stdio.log"])
+    assert.deepEqual(after.get(name), before.get(name), name);
+});
+
+test("whoami keeps Alias and Dispatch facts when the actor Heart is unavailable", async () => {
+  const repository = repositoryWithCommit();
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker", draw: () => "9abc1234" });
+  const soul: Soul = {
+    id: allocated.id,
+    akumaName: "worker",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: { model: "legacy-model" },
+    cwd: world,
+    origin: { kind: "direct" },
+    caller: { kind: "external", integration: "legacy", id: "parent" },
+    createdAt: AT,
+  };
+  const seed = join(world, "legacy-heart.db");
+  const database = new DatabaseSync(seed);
+  try {
+    database.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+    database.exec(legacyHeartV31Schema());
+    seedOpenActor(database, soul, "LegacySeat");
+    seedCustody(allocated.paths, seed, "retained execution log\n");
+  } finally {
+    database.close();
+  }
+  await moveAlias({ world, alias: parseAkumaAlias("@legacy"), akumaId: allocated.id });
+  const contract = contractId("kei/dispatched-authority");
+  const publication = await publishDispatch({ repository: scopeForRepo(repo), akumaId: allocated.id, contractId: contract });
+  assert.equal(publication.kind, "dispatched");
+
+  const environment = { KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world };
+  const result = await cliJson<WhoamiFacts>(["-C", world, "whoami"], { environment });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.deepEqual(result.value.self, { kind: "akuma", akumaId: allocated.id, world });
+  assert.deepEqual(result.value.aliases, ["@legacy"]);
+  assert.equal(result.value.dispatchContract, contract);
+  assert.match(result.value.profileUnavailable ?? "", /schema version must be 32; found 31/u);
+  assert.equal(typeof result.value.initiator === "object" ? result.value.initiator.kind : undefined, "unavailable");
+  assert.equal(result.value.provider, undefined);
+  assert.equal(result.value.workdir, undefined);
+  assert.equal(schemaVersion(allocated.paths.heart), 31n);
+
+  const text = await runCli(["-C", world, "whoami"], { environment });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.match(text.stdout, /\(@legacy\) · kei\/dispatched-authority/u);
+  assert.match(text.stdout, /profile\s+unavailable · .*schema version must be 32; found 31/u);
+});
+
+test("whoami keeps Dispatch and Heart profile when Alias authority is corrupt", async () => {
+  const fixture = await currentAuthorityFixture("a1b2c3d4");
+  const contract = contractId("kei/alias-corrupt-dispatch");
+  assert.equal(
+    (await publishDispatch({ repository: scopeForRepo(fixture.repo), akumaId: fixture.allocated.id, contractId: contract }))
+      .kind,
+    "dispatched",
+  );
+  writeFileSync(join(fixture.world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");
+
+  const environment = { KEIYAKU_ACTOR_ID: fixture.allocated.id, KEIYAKU_ACTOR_WORLD: fixture.world };
+  const result = await cliJson<WhoamiFacts>(["-C", fixture.world, "whoami"], { environment });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.equal(result.value.aliases, undefined);
+  assert.equal(result.value.dispatchContract, contract);
+  assert.match(result.value.profileUnavailable ?? "", /invalid Alias JSON/u);
+  assert.equal(result.value.provider, "claude");
+  assert.equal(result.value.model, "current-model");
+  assert.equal(result.value.workdir, fixture.world);
+  assert.deepEqual(result.value.birthCaller, { kind: "external", id: "current:parent" });
+  assert.equal(result.value.initiator, "CurrentSeat");
+  const text = await runCli(["-C", fixture.world, "whoami"], { environment });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /profile\s+unavailable · .*invalid Alias JSON[\s\S]*runtime\s+claude · current-model/u,
+  );
+});
+
+test("whoami keeps Alias and Heart profile when Dispatch authority is corrupt", async () => {
+  const fixture = await currentAuthorityFixture("b2c3d4e5");
+  await moveAlias({ world: fixture.world, alias: parseAkumaAlias("@kept"), akumaId: fixture.allocated.id });
+  const contract = contractId("kei/dispatch-corrupt-alias");
+  assert.equal(
+    (await publishDispatch({ repository: scopeForRepo(fixture.repo), akumaId: fixture.allocated.id, contractId: contract }))
+      .kind,
+    "dispatched",
+  );
+  const repository = await repositoryAt(fixture.world);
+  await corruptDispatchFact(repository, fixture.allocated.id, '{"akumaId":"aku/worker/00000002","contractId":"kei/x"}\n');
+
+  const environment = { KEIYAKU_ACTOR_ID: fixture.allocated.id, KEIYAKU_ACTOR_WORLD: fixture.world };
+  const result = await cliJson<WhoamiFacts>(["-C", fixture.world, "whoami"], { environment });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.deepEqual(result.value.aliases, ["@kept"]);
+  assert.equal(result.value.dispatchContract, undefined);
+  assert.match(result.value.profileUnavailable ?? "", /Dispatch has invalid fields/u);
+  assert.equal(result.value.provider, "claude");
+  assert.equal(result.value.model, "current-model");
+  assert.equal(result.value.workdir, fixture.world);
+  assert.deepEqual(result.value.birthCaller, { kind: "external", id: "current:parent" });
+  assert.equal(result.value.initiator, "CurrentSeat");
 });

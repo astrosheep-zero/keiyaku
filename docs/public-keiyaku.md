@@ -104,6 +104,17 @@ retain their full opaque identity as Square external attribution rather than
 collapsing distinct hosts or inventing sessions. Existing durable facts are never
 rewritten.
 
+Identity observation is one strict, read-only observation of the effective
+actor's own Heart: it observes the Soul and the open Turn of the current open,
+non-hung Body in one transaction whose schema judgment never authorizes
+supported conversion, establishes no lifecycle custody, and writes no Heart,
+leash, or World fact. A schema-incompatible or unreadable Heart yields
+unavailable observation for the facts that Heart owns, while caller, World, and
+Contract facts observed independently remain visible. Such observation never
+falls back to converted data, provider startup, a historical Turn, or a prior
+initiator; an absent Heart remains an absent actor life. The same composition
+serves every invocation face.
+
 Notification attribution is independent of actor selection. An explicit
 nonblank environment redirect wins, followed by the supplied host Owner, then
 the existing environment-only recipient selection. An actor never substitutes

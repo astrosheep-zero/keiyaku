@@ -754,6 +754,34 @@ export async function readHeart(paths: AkumaPaths, signal?: AbortSignal): Promis
   }
 }
 
+/**
+ * The actor's identity and current open Turn from one strict, read-only Heart
+ * transaction. The ordinary Heart read never authorizes supported conversion,
+ * so a Heart this build cannot decode stays an observation failure rather than
+ * being upgraded behind the caller's back. Only an open, non-hung latest Body
+ * supplies a current Turn; an ended or hung Body contributes none.
+ */
+export type ActorObservation = Readonly<{ soul: Soul | null; turn: TurnFact | null }>;
+
+export async function readActorObservation(paths: AkumaPaths, signal?: AbortSignal): Promise<ActorObservation> {
+  try {
+    return await withReadOnlyHeart(
+      paths,
+      (heart) => {
+        const soul = soulFact(heart);
+        const body = latestBodyFact(heart);
+        const open = body === null || body.end !== undefined || body.hung !== undefined ? null : body;
+        const turn = open === null ? null : latestTurnFactForBody(heart, open.sequence);
+        return { soul, turn: turn !== null && turn.end === undefined ? turn : null };
+      },
+      signal,
+    );
+  } catch (error) {
+    if (isHeartAbsent(error)) return { soul: null, turn: null };
+    throw error;
+  }
+}
+
 export async function readLastAnsweredTurn(paths: AkumaPaths): Promise<TurnFact | null> {
   return await withReadOnlyHeart(paths, lastAnsweredTurnFact);
 }

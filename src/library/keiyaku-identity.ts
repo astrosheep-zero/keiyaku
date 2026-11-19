@@ -2,15 +2,15 @@
 import { z } from "zod";
 import { decodeHarnessOwner, harnessOwner, type Owner } from "@astrosheep/square";
 import { contractIdSchema } from "../git/identity.js";
-import { AkumaOwner } from "../akuma/akuma-owner.js";
+import { AkumaNotBornError } from "../akuma/akuma-errors.js";
 import { KeiyakuError } from "../errors.js";
-import { readHeart, readLatestTurnForBody } from "../akuma/heart/index.js";
+import { readActorObservation, type ActorObservation } from "../akuma/heart/index.js";
 import { akumaIdSchema, parseAkumaId, pathsForAkumaId } from "../akuma/identity.js";
 import { Keis } from "./contract-composition.js";
 import { NoGitWorldError, Repo } from "./repo.js";
 import { observeNamedAddress } from "./address.js";
 import { dispatchAssociations } from "./selection.js";
-import { akumaCallerSchema, decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { akumaCallerSchema, decodeAkumaCaller, projectAkumaBirth, type AkumaCaller } from "../akuma/caller.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
 
 function callerFromOwner(owner: Owner): AkumaCaller {
@@ -113,6 +113,7 @@ type Profile = Pick<
   | "forkOrigin"
   | "profileUnavailable"
 >;
+type MutableProfile = { -readonly [Key in keyof Profile]: Profile[Key] };
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -159,56 +160,81 @@ async function callerRepo(
   }
 }
 
-async function currentTurn(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<WhoamiFacts["initiator"]> {
+type ActorState = Readonly<{ observation?: ActorObservation; unavailable?: string }>;
+
+async function observeActor(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<ActorState> {
   try {
-    const paths = pathsForAkumaId(self.world, self.akumaId);
-    const body = (await readHeart(paths)).latestBody;
-    if (body === null || body.end !== undefined || body.hung !== undefined) return undefined;
-    const turn = await readLatestTurnForBody(paths, body.sequence);
-    if (turn === null || turn.end !== undefined) return undefined;
-    // A later Body cannot attribute this older Turn to the current execution.
-    const latest = (await readHeart(paths)).latestBody;
-    return latest?.sequence === body.sequence && latest.end === undefined && latest.hung === undefined
-      ? turn.initiator
-      : undefined;
+    return { observation: await readActorObservation(pathsForAkumaId(self.world, self.akumaId)) };
   } catch (error) {
-    return { kind: "unavailable", diagnostic: reason(error) };
+    return { unavailable: reason(error) };
   }
+}
+
+/** The initiator is the open Turn of the current Body, and nothing else. */
+function currentInitiator(actor: ActorState): WhoamiFacts["initiator"] {
+  if (actor.unavailable !== undefined) return { kind: "unavailable", diagnostic: actor.unavailable };
+  return actor.observation?.turn?.initiator;
 }
 
 async function callerProfile(
   caller: Extract<AkumaCaller, { kind: "akuma" }>,
+  actor: ActorState,
   coordinates: WhoamiCoordinates,
   environment: NodeJS.ProcessEnv,
 ): Promise<Profile> {
+  let id: ReturnType<typeof parseAkumaId>;
   try {
-    if (!(await World.established(caller.world))) throw new Error("caller World is not established");
-    const id = parseAkumaId(caller.akumaId);
-    const [status, aliases, repo] = await Promise.all([
-      new AkumaOwner(id.id, caller.world).status(),
-      observeNamedAddress({ world: caller.world, repo: null, selectors: [] }),
-      callerRepo(caller.world, coordinates, environment),
-    ]);
-    if (aliases.aliases.kind !== "present") {
-      throw new Error(aliases.aliases.kind === "failed" ? aliases.aliases.failure.message : "aliases unavailable");
-    }
-    const dispatch = (await dispatchAssociations(repo, [id.id])).get(id.id)!;
-    if (dispatch.kind === "failed") throw new Error(dispatch.diagnostic);
-    const bindings = aliases.aliases.value
-      .filter((binding) => binding.akumaId === id.id)
-      .map((binding) => binding.alias);
-    return {
-      ...(bindings.length === 0 ? {} : { aliases: bindings }),
-      ...(status.provider === undefined ? {} : { provider: status.provider }),
-      ...(status.model === undefined ? {} : { model: status.model }),
-      ...(status.cwd === undefined ? {} : { workdir: status.cwd }),
-      ...(dispatch.kind === "associated" ? { dispatchContract: dispatch.contractId } : {}),
-      birthCaller: status.birth.caller.kind === "unknown" ? status.birth.caller : callerFact(status.birth.caller),
-      ...(status.birth.origin.kind === "fork" ? { forkOrigin: status.birth.origin.parent } : {}),
-    };
+    if (!(await World.established(caller.world))) return { profileUnavailable: "caller World is not established" };
+    id = parseAkumaId(caller.akumaId);
   } catch (error) {
     return { profileUnavailable: reason(error) };
   }
+
+  const profile: MutableProfile = {};
+  const failures: string[] = [];
+
+  try {
+    const aliases = await observeNamedAddress({ world: caller.world, repo: null, selectors: [] });
+    if (aliases.aliases.kind === "present") {
+      const bindings = aliases.aliases.value
+        .filter((binding) => binding.akumaId === id.id)
+        .map((binding) => binding.alias);
+      if (bindings.length > 0) profile.aliases = bindings;
+    } else {
+      failures.push(aliases.aliases.kind === "failed" ? aliases.aliases.failure.message : "aliases unavailable");
+    }
+  } catch (error) {
+    failures.push(reason(error));
+  }
+
+  try {
+    const repo = await callerRepo(caller.world, coordinates, environment);
+    const dispatch = (await dispatchAssociations(repo, [id.id])).get(id.id)!;
+    if (dispatch.kind === "failed") failures.push(dispatch.diagnostic);
+    else if (dispatch.kind === "associated") profile.dispatchContract = dispatch.contractId;
+  } catch (error) {
+    failures.push(reason(error));
+  }
+
+  // Alias, Dispatch and the Heart profile are independent observations; only
+  // the failing authority becomes unavailable while every known fact stays.
+  if (actor.unavailable !== undefined) failures.push(actor.unavailable);
+  else {
+    const soul = actor.observation?.soul ?? null;
+    if (soul === null) failures.push(new AkumaNotBornError(id.id).message);
+    else if (soul.id !== id.id) failures.push("Akuma soul does not match its coordinate");
+    else {
+      const birth = projectAkumaBirth(soul);
+      profile.provider = soul.provider.name;
+      if (soul.options.model !== undefined) profile.model = soul.options.model;
+      profile.workdir = soul.cwd;
+      profile.birthCaller = birth.caller.kind === "unknown" ? birth.caller : callerFact(birth.caller);
+      if (soul.origin.kind === "fork") profile.forkOrigin = soul.origin.parent;
+    }
+  }
+
+  if (failures.length > 0) profile.profileUnavailable = failures.join("; ");
+  return profile;
 }
 
 export async function whoami(
@@ -221,12 +247,16 @@ export async function whoami(
     selfFrom(environment, owner),
     contextualContract(coordinates, world),
   ]);
-  const initiator = self.kind === "akuma" ? await currentTurn(self) : undefined;
+  const worldFact = world === null || (self.kind === "akuma" && self.world === world) ? {} : { world };
+  const contextFact = contextContract === undefined ? {} : { contextContract };
+  if (self.kind !== "akuma") return { self, ...worldFact, ...contextFact };
+  const actor = await observeActor(self);
+  const initiator = currentInitiator(actor);
   return {
     self,
-    ...(world === null || (self.kind === "akuma" && self.world === world) ? {} : { world }),
-    ...(contextContract === undefined ? {} : { contextContract }),
+    ...worldFact,
+    ...contextFact,
     ...(initiator === undefined ? {} : { initiator }),
-    ...(self.kind === "akuma" ? await callerProfile(self, coordinates, environment) : {}),
+    ...(await callerProfile(self, actor, coordinates, environment)),
   };
 }

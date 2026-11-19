@@ -46,7 +46,8 @@ export function renderWhoami(facts: WhoamiFacts): string {
   if (context !== facts.dispatchContract) lines.push(row("context", context));
   if (self.kind === "akuma") {
     if (facts.profileUnavailable !== undefined) lines.push(row("profile", `unavailable · ${facts.profileUnavailable}`));
-    else lines.push(row("runtime", `${facts.provider ?? "unknown"} · ${facts.model ?? "unknown"}`));
+    if (facts.profileUnavailable === undefined || facts.provider !== undefined || facts.model !== undefined)
+      lines.push(row("runtime", `${facts.provider ?? "unknown"} · ${facts.model ?? "unknown"}`));
   }
   return lines.join("\n");
 }
