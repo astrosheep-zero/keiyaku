@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HeartAuthorityCorruptionError } from "./facts.js";
 
-const HEART_SCHEMA_VERSION = 31n;
+const HEART_SCHEMA_VERSION = 32n;
 const LEASH_SCHEMA_VERSION = 4;
 
-export class UnsupportedHistoricalHeartError extends Error {}
+export class UnsupportedHeartSchemaError extends Error {}
+export class UnsupportedHistoricalHeartError extends UnsupportedHeartSchemaError {}
+export class HeartNeedsUpgradeError extends UnsupportedHistoricalHeartError {}
 
 function heartSchemaVersion(database: DatabaseSync): bigint | undefined {
   const query = database.prepare("SELECT version FROM akuma_schema WHERE singleton = 1");
@@ -13,13 +15,15 @@ function heartSchemaVersion(database: DatabaseSync): bigint | undefined {
   return typeof version === "bigint" ? version : undefined;
 }
 
-export function assertHeartSchemaVersion(database: DatabaseSync, path: string): void {
+export function checkHeartSchema(database: DatabaseSync, path: string, allowUpgrade = false): boolean {
   const version = heartSchemaVersion(database);
-  if (version === HEART_SCHEMA_VERSION) return;
+  if (version === HEART_SCHEMA_VERSION) return false;
+  if (allowUpgrade && version === 31n) return true;
   if (version === undefined || version < 1n)
     throw new HeartAuthorityCorruptionError(`Akuma heart schema version is corrupt: ${path}`);
   const diagnostic = `Akuma heart schema version must be ${HEART_SCHEMA_VERSION}; found ${version}: ${path}`;
-  if (version !== 29n && version !== 30n) throw new Error(diagnostic);
+  if (version === 31n) throw new HeartNeedsUpgradeError(`${diagnostic}. Upgrade requires a Heart write.`);
+  if (version !== 29n && version !== 30n) throw new UnsupportedHeartSchemaError(diagnostic);
   throw new UnsupportedHistoricalHeartError(
     `${diagnostic}. No converter in this build. Stop all writers via their owning build before copying the entire ` +
       `custody directory (heart.db, any heart.db-wal/heart.db-shm, leash.db, stdio.log). Leave the original untouched. ` +
@@ -33,14 +37,6 @@ export function assertLeashSchemaVersion(database: DatabaseSync): void {
     throw new Error(`Akuma leash schema version must be ${LEASH_SCHEMA_VERSION}`);
 }
 
-export function heartSchemaIsCurrent(database: DatabaseSync): boolean {
-  try {
-    return heartSchemaVersion(database) === HEART_SCHEMA_VERSION;
-  } catch {
-    return false;
-  }
-}
-
 const VERSION_SCHEMA = `
   CREATE TABLE IF NOT EXISTS akuma_schema (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -48,6 +44,34 @@ const VERSION_SCHEMA = `
   ) STRICT;
   INSERT OR IGNORE INTO akuma_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
 `;
+
+const TERMINAL_TELL_TABLE = `tell_terminal_receipts (
+  tell_id TEXT NOT NULL REFERENCES tells(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  undelivered INTEGER NOT NULL CHECK (undelivered = 0 OR (undelivered = 1 AND kind = 'undelivered')),
+  PRIMARY KEY (tell_id, kind)
+) STRICT;`;
+
+/** A writer has rechecked the exact predecessor in its transaction. */
+export function upgradeHeartSchema(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE ${TERMINAL_TELL_TABLE}
+    INSERT INTO tell_terminal_receipts (tell_id, kind, received_at, undelivered)
+    SELECT tell_id, kind, MIN(received_at), MAX(undelivered) FROM (
+      SELECT tell_id, kind, received_at, kind = 'undelivered' AS undelivered FROM tell_receipts WHERE evidence = 'exact'
+      UNION ALL
+      SELECT d.tell_id, r.kind, r.received_at, 0 FROM tell_receipts r
+        JOIN tell_deliveries d USING (turn_sequence, fence) WHERE r.evidence = 'fence'
+      UNION ALL
+      SELECT tell_id, COALESCE(receipt, route), delivered_at, 0 FROM tell_deliveries
+        WHERE route = 'launch' OR receipt = 'unavailable'
+    ) GROUP BY tell_id, kind;
+  `);
+  if (database.prepare("PRAGMA foreign_key_check").get() !== undefined)
+    throw new Error("Akuma Heart upgrade found broken foreign key relationships");
+  database.exec(`DROP TABLE akuma_schema; ${VERSION_SCHEMA}`);
+}
 
 const TURN_SCHEMA = `
   CREATE TABLE IF NOT EXISTS turns (
@@ -160,23 +184,7 @@ export const HEART_SCHEMA = `
     CHECK ((route = 'launch' AND receipt IS NULL) OR (route = 'live' AND receipt IS NOT NULL)),
     UNIQUE (tell_id, turn_sequence, fence)
   ) STRICT;
-  CREATE TABLE IF NOT EXISTS tell_receipts (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    evidence TEXT NOT NULL CHECK (evidence IN ('exact', 'fence')),
-    tell_id TEXT REFERENCES tells(id) ON DELETE CASCADE,
-    turn_sequence INTEGER REFERENCES turns(sequence) ON DELETE CASCADE,
-    fence TEXT,
-    kind TEXT NOT NULL,
-    received_at TEXT NOT NULL,
-    CHECK (
-      (evidence = 'exact' AND tell_id IS NOT NULL AND turn_sequence IS NULL AND fence IS NULL)
-      OR (evidence = 'fence' AND tell_id IS NULL AND turn_sequence IS NOT NULL AND fence IS NOT NULL)
-    )
-  ) STRICT;
-  CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_exact
-    ON tell_receipts(tell_id, kind);
-  CREATE UNIQUE INDEX IF NOT EXISTS tell_receipts_fence
-    ON tell_receipts(turn_sequence, fence, kind);
+  CREATE TABLE IF NOT EXISTS ${TERMINAL_TELL_TABLE}
   CREATE TABLE IF NOT EXISTS tell_dispositions (
     body_sequence INTEGER PRIMARY KEY REFERENCES bodies(sequence),
     decided_at TEXT NOT NULL,

@@ -19,6 +19,7 @@ import {
   activitySlice,
   appendActivity,
   beginTurn,
+  bindTellsToTurn,
   breakBody,
   finishBodyIfIdle,
   endTurn,
@@ -256,25 +257,13 @@ test("timeline decoding batches Tell witnesses and rejects missing retained fact
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-    const db = new DatabaseSync(paths.heart);
-    try {
-      db.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
-      for (let index = 0; index < 100; index += 1) {
-        const tellId = `tell-${index}`;
-        insertTellFact(db, { kind: "tell", id: tellId, body: tellId, recordedAt: value.soul.createdAt });
-        db.prepare("INSERT INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)").run(
-          tellId,
-          turn.sequence,
-          value.soul.createdAt,
-        );
-        db.prepare(
-          "INSERT INTO tell_deliveries(tell_id, turn_sequence, route, fence, delivered_at) VALUES (?, ?, 'launch', ?, ?)",
-        ).run(tellId, turn.sequence, tellId, value.soul.createdAt);
-      }
-      db.exec("COMMIT");
-    } finally {
-      db.close();
-    }
+    const at = value.soul.createdAt;
+    const tellIds = Array.from({ length: 100 }, (_, index) => `tell-${index}`);
+    for (const id of tellIds) await recordTell(paths, { id, body: id, recordedAt: at });
+    await bindTellsToTurn(paths, { tellIds, turnSequence: turn.sequence, boundAt: at });
+    await recordTellDeliveries(paths, tellIds.map((tellId) => ({
+      tellId, turnSequence: turn.sequence, route: "launch", fence: tellId, deliveredAt: at,
+    })));
     const prepare = DatabaseSync.prototype.prepare;
     let queries = 0;
     context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {

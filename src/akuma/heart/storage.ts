@@ -17,9 +17,10 @@ import { BodyControlledError } from "./facts.js";
 import {
   HEART_SCHEMA,
   LEASH_SCHEMA,
-  assertHeartSchemaVersion,
+  UnsupportedHeartSchemaError,
   assertLeashSchemaVersion,
-  heartSchemaIsCurrent,
+  checkHeartSchema,
+  upgradeHeartSchema,
 } from "./schema.js";
 import {
   deleteStopControl,
@@ -82,18 +83,14 @@ async function openExistingDatabase(path: string, timeout?: number, mode: "rw" |
   }
 }
 
-export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" | "unsupported"> {
-  let database: DatabaseSync;
+export async function classifyHeartSchema(paths: AkumaPaths): Promise<"supported" | "unsupported"> {
   try {
-    database = await openExistingDatabase(paths.heart);
+    using database = await openExistingDatabase(paths.heart, 0, "ro");
+    await acquire(() => checkHeartSchema(database, paths.heart, true));
+    return "supported";
   } catch (error) {
-    if (isHeartAbsent(error)) return "unsupported";
+    if (isHeartAbsent(error) || error instanceof UnsupportedHeartSchemaError) return "unsupported";
     throw error;
-  }
-  try {
-    return heartSchemaIsCurrent(database) ? "current" : "unsupported";
-  } finally {
-    database.close();
   }
 }
 
@@ -123,12 +120,12 @@ async function beginTransaction(
   path: string,
   mode: "read" | "write",
   signal?: AbortSignal,
-): Promise<void> {
-  await acquire(() => {
+): Promise<boolean> {
+  return await acquire(() => {
     try {
       database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
       // DEFERRED acquires its snapshot on the first read, not on BEGIN.
-      assertHeartSchemaVersion(database, path);
+      return checkHeartSchema(database, path, mode === "write");
     } catch (error) {
       rollbackTransaction(database);
       throw error;
@@ -218,20 +215,13 @@ export async function withHeartTransaction<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
-  const reader = await openExistingDatabase(paths.heart, 0, "ro");
-  try {
-    await acquire(() => assertHeartSchemaVersion(reader, paths.heart), signal);
-  } finally {
-    reader.close();
-  }
+  using reader = await openExistingDatabase(paths.heart, 0, "ro");
+  // Pin the predecessor's WAL through a possible rollback; current writers close normally.
+  if (!(await acquire(() => checkHeartSchema(reader, paths.heart, true), signal))) reader.close();
   signal?.throwIfAborted();
-  const database = await openExistingDatabase(paths.heart, 0);
-  try {
-    await beginTransaction(database, paths.heart, "write", signal);
-    return finishTransaction(database, body);
-  } finally {
-    database.close();
-  }
+  using database = await openExistingDatabase(paths.heart, 0);
+  const upgrade = await beginTransaction(database, paths.heart, "write", signal);
+  return finishTransaction(database, body, upgrade);
 }
 
 function rollbackTransaction(database: DatabaseSync): void {
@@ -242,10 +232,19 @@ function rollbackTransaction(database: DatabaseSync): void {
   }
 }
 
-function finishTransaction<T>(database: DatabaseSync, body: (database: DatabaseSync) => T): T {
+function finishTransaction<T>(database: DatabaseSync, body: (database: DatabaseSync) => T, upgrade = false): T {
   try {
+    let changes: ReturnType<DatabaseSync["prepare"]> | undefined;
+    if (upgrade) {
+      database.exec("PRAGMA cache_spill=OFF");
+      upgradeHeartSchema(database);
+      changes = database.prepare("SELECT total_changes() AS count");
+      changes.setReadBigInts(true);
+    }
+    const before = changes?.get()?.count;
     const result = body(database);
-    database.exec("COMMIT");
+    // The writer's own fact changes, not its result shape, justify publishing the conversion.
+    database.exec(changes !== undefined && changes.get()?.count === before ? "ROLLBACK" : "COMMIT");
     return result;
   } catch (error) {
     rollbackTransaction(database);
@@ -268,7 +267,7 @@ export async function initializeHeart(paths: AkumaPaths): Promise<void> {
   try {
     heart.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
     heart.exec(HEART_SCHEMA);
-    assertHeartSchemaVersion(heart, paths.heart);
+    checkHeartSchema(heart, paths.heart);
   } finally {
     heart.close();
   }

@@ -77,7 +77,7 @@ test("malformed and future Heart versions fail distinctly instead of becoming ab
       database.exec("INSERT INTO akuma_schema VALUES (1, '29')");
       await assert.rejects(readHeart(paths), { category: "authority-corruption" });
       database.exec("UPDATE akuma_schema SET version = 2147483648");
-      await assert.rejects(readHeart(paths), /heart schema version must be 31; found 2147483648/u);
+      await assert.rejects(readHeart(paths), /heart schema version must be 32; found 2147483648/u);
     } finally {
       database.close();
     }

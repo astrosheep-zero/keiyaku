@@ -132,14 +132,16 @@ input, or recovery service; a later ordinary Tell can wake retained work.
 
 Tell admission is atomic with Soul existence, so unborn targets refuse without
 leaving future input behind. Body records delivery only after provider submission
-evidence and provider terminal receipts only from provider evidence. Tell is
-at-least-once by stable identity, not exactly-once: lost unrecorded submission
-remains pending, while any terminal witness settles it without rollback.
-Historical undelivered terminal witnesses retain their meaning; queued input
-never creates new ones. Native live Tell remains optional and uses the adapter's
-submission and receipt evidence; without it ordinary input waits for the current
-Turn to complete. Explicit interrupt is the preemption operation. Kill never
-discards a Tell or launches recovery. A durable resume
+evidence. Proven launch delivery or live delivery without a native receipt
+channel settles the Tell; where a native receipt is required, submission alone
+does not settle it. Heart admits a terminal witness for each exact Tell proven
+by delivery or correlated native receipt. Tell is at-least-once by stable
+identity, not exactly-once: lost unrecorded submission remains pending, while a
+terminal witness settles it without rollback. Historical undelivered terminal
+witnesses retain their meaning; queued input never creates new ones. Native
+live Tell remains optional; without it ordinary input waits for the current Turn
+to complete. Explicit interrupt is the preemption operation. Kill never discards
+a Tell or launches recovery. A durable resume
 promise with no adapter resume capability refuses without starting fresh, deleting
 the promise, or creating a recovery machine. There is no public resume verb.
 

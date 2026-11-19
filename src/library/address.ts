@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { KeiyakuError, errorCategory } from "../errors.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
-import { readAkumaCompleteRoster } from "../akuma/akuma.js";
+import { knownAkuma, readAkumaCompleteRoster } from "../akuma/akuma.js";
 import { akumaAddressability, requireBornAkuma } from "../akuma/akuma-probe.js";
 import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
@@ -171,12 +171,12 @@ type AddressedAkuma = Readonly<{
 }>;
 
 /** Resolve one selector and prove its birth through the native addressability owner. */
-export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
+export async function addressAkuma(input: UncheckedAkumaAddressInput, forWrite = false): Promise<AddressedAkuma> {
   const values = requireInput(input, "Akuma address input", ["path", "akuma", "repo"]);
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
   const id = await directId(path, nonblank(values.akuma, "akuma"));
-  await requireBornAkuma(path, id);
+  await requireBornAkuma(path, id, forWrite);
   return { path, id };
 }
 
@@ -269,7 +269,7 @@ function canonicalAkumaOrder(selected: ReadonlySet<AkumaId>): readonly AkumaId[]
   return ids;
 }
 
-type AkumaSetOptions = Readonly<{ contractSelectors?: boolean }>;
+type AkumaSetOptions = Readonly<{ contractSelectors?: boolean; forWrite?: boolean }>;
 
 async function readAkumaSet(input: UncheckedAkumaAddressInput, options: AkumaSetOptions): Promise<ResolvedAkumaSet> {
   const values = requireInput(input, "Akuma set address input", ["path", "akuma", "repo"]);
@@ -285,6 +285,14 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput, options: AkumaSet
   const rosterIds = hasSelectorKind(selectors, "glob")
     ? (await readAkumaCompleteRoster(path)).rows.map((row) => row.id)
     : [];
+  if (options.forWrite && hasSelectorKind(selectors, "glob")) {
+    // Keep the observed roster order; supported predecessors have no readable activity order yet.
+    const observed = new Set(rosterIds);
+    for (const { id } of (await knownAkuma(path)).rows) {
+      if (observed.has(id) || !selectors.some((s) => s.kind === "glob" && matchesAkumaGlob(s.value, id))) continue;
+      if ((await akumaAddressability(path, id)).kind === "needs-upgrade") rosterIds.push(id);
+    }
+  }
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akumaId]))
     : new Map<AkumaAlias, AkumaId>();
@@ -309,7 +317,7 @@ export async function addressAkumaSet(
   options: AkumaSetOptions = {},
 ): Promise<Pick<ResolvedAkumaSet, "path" | "ids" | "orderedIds" | "selections">> {
   const resolved = await readAkumaSet(input, options);
-  for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id);
+  for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id, options.forWrite);
   await refuseForeignContractMembers(resolved.path, resolved.ids, resolved.contractMembers);
   return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds, selections: resolved.selections };
 }

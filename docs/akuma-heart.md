@@ -26,7 +26,14 @@ ordinary access refuses them before acquiring a Heart writer. Wait surfaces that
 permanent refusal without retrying it. Read-only SQLite bookkeeping can leave
 empty transaction companions or update its coordination cache; it never
 checkpoints or changes retained history. This build has no converter for those
-versions. Current-format observation stays read-only.
+versions. Current-format observation stays read-only. Reading a directly
+supported predecessor reports that an upgrade is required without changing its
+retained history or checkpointing its transaction log. Only an explicit Heart
+write transaction can convert that predecessor. Conversion and version
+publication commit only with an actual admitted fact change, preserving retained
+facts, their relationships, and allocation high-water marks. Refusal, failure,
+and an operation that changes no facts leave the predecessor and its retained
+history intact.
 
 To recover history, first stop all writers through their owning build. Once
 quiescent, copy the entire Akuma custody directory, including the Heart's
@@ -171,13 +178,22 @@ latest admitted Turn of one exact Body after that Body's terminal fact is durabl
 no Turn, or a latest Turn without participants, yields no audience and never
 falls back to an earlier Turn or runtime context.
 
-Tell facts retain admission and only named delivery/terminal-receipt witnesses.
-They fold to `pending` or `told`; these are read models, not durable stages.
-Pending selection is governed by the absence of a terminal receipt, independently
-of historical Turn binding. Admitted Tell and that absence are the ordinary
-queue; no second durable pending-input record is needed. A successful Turn can
-be followed by another under the same Body after provider closure; failed
-execution leaves unrelated input pending for an ordinary wake. Binding is Turn-side
+Heart normalizes terminal evidence to the exact Tell at admission. A native
+fence names only the Tells mapped to that fence in that Turn; missing mapping
+refuses the receipt. Repeated evidence of the same kind for a Tell preserves
+the first admitted timestamp. Only an exact undelivered witness is negative;
+a matching opaque native kind cannot supply that meaning. Pending and told are
+read models, not durable stages; only the absence of terminal evidence makes a
+Tell pending. Terminal evidence follows the Tell's own retention, not the
+retention of the Turn that supplied it.
+Supported historical conversion preserves the original delivery, binding and
+receipt evidence, including receipts with no retained mapping, and derives
+terminal witnesses only for retained Tells.
+
+Admitted Tell and that absence are the ordinary queue; no second durable
+pending-input record is needed. A successful Turn can be followed by another
+under the same Body after provider closure; failed execution leaves unrelated
+input pending for an ordinary wake. Binding is Turn-side
 evidence: a Tell may retain bindings for multiple historical Turns, and a
 successor may bind and deliver the same stable Tell identity after a crash
 between binding and delivery. A binding on an open Turn of the currently
@@ -205,8 +221,15 @@ Body nor projection supplies a competing event interpretation. Validation of
 retained activity preserves historical acceptance and never manufactures
 execution, resume, fork, or recovery evidence.
 
-Heart owns durable fact decoding and conditional judgments. Provider owns native
+Heart owns durable fact decoding and conditional judgments. Addressed Tell, Ask,
+and Kill may carry a proved need for supported conversion to their native
+admission without treating it as proof of birth. Addressing itself never
+converts the Heart or interprets unsupported facts. Provider owns native
 execution evidence; [akuma-provider.md](akuma-provider.md) defines its boundary.
 The public surface consumes Heart's pure projection without accessing database
-handles. Reset can classify unsupported recognized custody without interpreting
-its facts, as owned by [akuma.md](akuma.md) and [world.md](world.md).
+handles. Reset can classify predecessor custody without converting it. A supported
+predecessor remains subject to the same stop and leash proof as current custody;
+if observation requires an upgrade, reset stops before deletion. A failed
+inspection is not proof of an unsupported format. Unsupported historical
+custody is classified without interpreting its facts, as owned by
+[akuma.md](akuma.md) and [world.md](world.md).

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { akumaIdSchema, turnHistoryIdSchema } from "../akuma/identity.js";
 import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
+import { HeartUnbornError } from "../akuma/heart/facts.js";
 import { AkumaOwner, historyInputSchemas } from "../akuma/akuma-owner.js";
 import { durationSchema, validateTellObservation, validateAkumaInput } from "../akuma/call-input.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
@@ -277,15 +278,14 @@ export async function killAkuma(input: AkumaKillInput & Readonly<{ path: WorldRo
   if (typeof values.akuma !== "string" || values.akuma.trim().length === 0)
     throw new KeiyakuError("invalid-input", "akuma must be a nonblank string");
   const callerSignal = optionalSignal(values.signal);
-  const addressed = await addressAkumaSet({
-    path: values.path,
-    akuma: [values.akuma],
-    ...(values.repo === undefined ? {} : { repo: values.repo }),
-  });
+  const addressed = await addressAkumaSet({ ...addressInput(values), akuma: [values.akuma] }, { forWrite: true });
   return await executeKillAkuma({
     path: addressed.path,
     ids: addressed.orderedIds,
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+  }).catch((error: unknown) => {
+    if (error instanceof HeartUnbornError) throw new AkumaNotBornError(error.id);
+    throw error;
   });
 }
 
@@ -310,7 +310,7 @@ export async function tellAkuma(
     throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
   validateTellObservation(values);
   const callerSignal = optionalSignal(values.signal);
-  const addressed = await addressAkuma(addressInput(values));
+  const addressed = await addressAkuma(addressInput(values), true);
   const execution = {
     spawn,
     path: addressed.path,
@@ -357,7 +357,7 @@ export async function askAkuma(
     throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
   const schema = canonicalDocument(input.schema);
   const callerSignal = optionalSignal(values.signal);
-  const addressed = await addressAkuma(addressInput(values));
+  const addressed = await addressAkuma(addressInput(values), true);
   return await withAkumaWaitDeferrals(
     { world: addressed.path, reportDiagnostic },
     { akumaIds: [addressed.id] },

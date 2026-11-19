@@ -237,23 +237,17 @@ async function retireProviderCustody(
   return { kind: "hung" };
 }
 
-function pumpReceipts(writers: TurnWriters): Promise<void> {
+async function pumpReceipts(writers: TurnWriters): Promise<void> {
   const { input, turnSequence, drive, writeWitness, mayWrite } = writers;
-  return (async () => {
-    if (drive.receipts === undefined) return;
-    for await (const receipt of drive.receipts) {
+  if (drive.receipts === undefined) return;
+  for await (const receipt of drive.receipts) {
+    if (!mayWrite()) return;
+    await writeWitness(async () => {
       if (!mayWrite()) return;
-      await writeWitness(async () => {
-        if (!mayWrite()) return;
-        await recordTellReceipt(
-          input.paths,
-          receipt.evidence === "exact"
-            ? { ...receipt, receivedAt: input.now() }
-            : { ...receipt, turnSequence, receivedAt: input.now() },
-        );
-      });
-    }
-  })();
+      const witness = { ...receipt, turnSequence, receivedAt: input.now() };
+      await recordTellReceipt(input.paths, witness);
+    });
+  }
 }
 
 async function submitPendingLiveTells(

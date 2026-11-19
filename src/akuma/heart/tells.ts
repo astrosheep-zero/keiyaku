@@ -1,106 +1,57 @@
-import type { DatabaseSync } from "node:sqlite";
-import type { PauseFact, TellBinding, TellDelivery, TellDeliveryInput, TellFact, TellReceiptInput } from "./facts.js";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import type { PauseFact, TellBinding, TellDelivery, TellDeliveryInput, TellFact } from "./facts.js";
 
-type TellRow = Readonly<{
-  sequence: number;
-  id: string;
-  body: string;
-  schema_json: string | null;
+type TellRow = Pick<TellFact, "sequence" | "id" | "body" | "recordedAt" | "state"> & {
+  schemaJson: string | null;
   initiator: string | null;
-  recorded_at: string;
-  state: TellFact["state"];
-}>;
+  deliveries: string;
+  binding: string | null;
+};
 
-type TellDeliveryRow = Readonly<{
-  turn_sequence: number;
-  route: TellDelivery["route"];
-  receipt: TellDelivery["receipt"] | null;
-  delivered_at: string;
-}>;
+export const tellStateSql = `CASE WHEN EXISTS (
+  SELECT 1 FROM tell_terminal_receipts WHERE tell_id = tells.id
+) THEN 'told' ELSE 'pending' END`;
 
-export const tellStateSql = `CASE
-  WHEN EXISTS (
-    SELECT 1 FROM tell_deliveries d
-    WHERE d.tell_id = tells.id AND (d.route = 'launch' OR d.receipt = 'unavailable')
-  ) THEN 'told'
-  WHEN EXISTS (SELECT 1 FROM tell_receipts r WHERE r.evidence = 'exact' AND r.tell_id = tells.id) THEN 'told'
-  WHEN EXISTS (
-    SELECT 1 FROM tell_receipts r
-    JOIN tell_deliveries d ON d.turn_sequence = r.turn_sequence AND d.fence = r.fence
-    WHERE r.evidence = 'fence' AND d.tell_id = tells.id
-  ) THEN 'told'
-  ELSE 'pending'
-END`;
-
-type TellBatch = Readonly<{
-  rows: readonly TellRow[];
-  deliveries: readonly (TellDeliveryRow & { sequence: number; tell_id: string; fence: string })[];
-  bindings: readonly { sequence: number; tell_id: string; turn_sequence: number; bound_at: string }[];
-}>;
-
-function readTellBatch(database: DatabaseSync, rows: readonly TellRow[]): TellBatch {
-  if (rows.length === 0) return { rows, deliveries: [], bindings: [] };
-  const ids = JSON.stringify(rows.map((row) => row.id));
-  const deliveries = database
+function readTellBatch(database: DatabaseSync, selection: string, ...args: SQLInputValue[]): readonly TellRow[] {
+  return database
     .prepare(
-      `SELECT sequence, tell_id, turn_sequence, fence, route, receipt, delivered_at
-    FROM tell_deliveries WHERE tell_id IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+      `SELECT sequence, id, body, initiator, schema_json AS schemaJson, recorded_at AS recordedAt,
+         ${tellStateSql} AS state,
+         (SELECT json_group_array(json_patch(
+           json_object('turnSequence', turn_sequence, 'route', route, 'deliveredAt', delivered_at),
+           json_object('receipt', receipt)) ORDER BY tell_deliveries.sequence)
+          FROM tell_deliveries WHERE tell_id = tells.id) AS deliveries,
+         (SELECT json_object('turnSequence', turn_sequence, 'boundAt', bound_at)
+          FROM tell_bindings WHERE tell_id = tells.id ORDER BY tell_bindings.sequence DESC LIMIT 1) AS binding
+       FROM tells WHERE ${selection} ORDER BY sequence`,
     )
-    .all(ids) as unknown as TellBatch["deliveries"];
-  const bindings = database
-    .prepare(
-      `SELECT sequence, tell_id, turn_sequence, bound_at FROM tell_bindings
-    WHERE sequence IN (
-      SELECT MAX(sequence) FROM tell_bindings
-      WHERE tell_id IN (SELECT value FROM json_each(?)) GROUP BY tell_id
-    ) ORDER BY sequence`,
-    )
-    .all(ids) as unknown as TellBatch["bindings"];
-  return { rows, deliveries, bindings };
+    .all(...args) as unknown as readonly TellRow[];
 }
 
-export function decodeTellBatch(batch: TellBatch): readonly TellFact[] {
-  const deliveries = new Map<string, TellDelivery[]>();
-  for (const row of batch.deliveries) {
-    const group = deliveries.get(row.tell_id) ?? [];
-    group.push({
-      turnSequence: row.turn_sequence,
-      route: row.route,
-      deliveredAt: row.delivered_at,
-      ...(row.receipt == null ? {} : { receipt: row.receipt }),
-    });
-    deliveries.set(row.tell_id, group);
-  }
-  const bindings = new Map<string, TellBinding>();
-  for (const row of batch.bindings)
-    bindings.set(row.tell_id, { turnSequence: row.turn_sequence, boundAt: row.bound_at });
-  return batch.rows.map((row) => ({
-    kind: "tell",
-    sequence: row.sequence,
-    id: row.id,
-    body: row.body,
-    ...(row.initiator === null ? {} : { initiator: row.initiator }),
-    ...(row.schema_json === null ? {} : { schemaJson: row.schema_json }),
-    state: row.state,
-    recordedAt: row.recorded_at,
-    deliveries: deliveries.get(row.id) ?? [],
-    ...(bindings.has(row.id) ? { binding: bindings.get(row.id)! } : {}),
-  }));
-}
-
-function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): readonly TellFact[] {
-  return decodeTellBatch(readTellBatch(database, rows));
-}
-
-export function tellBatchAtSequences(database: DatabaseSync, sequences: readonly number[]): TellBatch {
-  if (sequences.length === 0) return { rows: [], deliveries: [], bindings: [] };
-  const rows = database
-    .prepare(
-      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state
-    FROM tells WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+export function decodeTellBatch(batch: readonly TellRow[]): readonly TellFact[] {
+  return batch.map(({ initiator, schemaJson, deliveries, binding, ...tell }) => {
+    const delivered = JSON.parse(deliveries) as TellDelivery[];
+    const bound = binding === null ? undefined : (JSON.parse(binding) as TellBinding);
+    if (
+      delivered.some(({ turnSequence }) => !Number.isSafeInteger(turnSequence)) ||
+      (bound !== undefined && !Number.isSafeInteger(bound.turnSequence))
     )
-    .all(JSON.stringify(sequences)) as unknown as readonly TellRow[];
-  return readTellBatch(database, rows);
+      throw new RangeError("Akuma Tell references a Turn outside the safe integer range");
+    return {
+      kind: "tell",
+      ...tell,
+      ...(initiator === null ? {} : { initiator }),
+      ...(schemaJson === null ? {} : { schemaJson }),
+      deliveries: delivered,
+      ...(bound === undefined ? {} : { binding: bound }),
+    };
+  });
+}
+
+export function tellBatchAtSequences(database: DatabaseSync, sequences: readonly number[]): readonly TellRow[] {
+  return sequences.length === 0
+    ? []
+    : readTellBatch(database, "sequence IN (SELECT value FROM json_each(?))", JSON.stringify(sequences));
 }
 
 export function hasPendingTell(database: DatabaseSync): boolean {
@@ -119,82 +70,42 @@ export function insertTellFact(
 }
 
 export function tellFact(database: DatabaseSync, id: string): TellFact | null {
-  const row = database
-    .prepare(
-      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state
-    FROM tells WHERE id = ?`,
-    )
-    .get(id) as TellRow | undefined;
-  return row === undefined ? null : decodeTellRows(database, [row])[0]!;
+  return decodeTellBatch(readTellBatch(database, "id = ?", id))[0] ?? null;
+}
+
+export function requireTell(database: DatabaseSync, id: string): void {
+  if (database.prepare("SELECT 1 FROM tells WHERE id = ?").get(id) === undefined) throw new Error(`unknown tell ${id}`);
 }
 
 export function tellWasUndelivered(database: DatabaseSync, id: string): boolean {
-  return (
-    database
-      .prepare("SELECT 1 FROM tell_receipts WHERE tell_id = ? AND evidence = 'exact' AND kind = 'undelivered'")
-      .get(id) !== undefined
+  const query = database.prepare(
+    "SELECT undelivered FROM tell_terminal_receipts WHERE tell_id = ? AND kind = 'undelivered'",
   );
-}
-
-export function sameTellInput(
-  existing: TellFact,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
-): boolean {
-  return (
-    existing.body === tell.body &&
-    existing.recordedAt === tell.recordedAt &&
-    existing.schemaJson === tell.schemaJson &&
-    existing.initiator === tell.initiator
-  );
+  return query.get(id)?.undelivered === 1;
 }
 
 export function insertTellDeliveryFact(database: DatabaseSync, input: TellDeliveryInput): boolean {
-  const result = database
-    .prepare(
-      `INSERT OR IGNORE INTO tell_deliveries(
-    tell_id, route, turn_sequence, fence, receipt, delivered_at
-  ) VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.tellId,
-      input.route,
-      input.turnSequence,
-      input.fence,
-      input.route === "live" ? input.receipt : null,
-      input.deliveredAt,
-    );
-  const row = database
-    .prepare(
-      `SELECT route, receipt FROM tell_deliveries
-    WHERE tell_id = ? AND turn_sequence = ? AND fence = ?`,
-    )
-    .get(input.tellId, input.turnSequence, input.fence) as { route: string; receipt: string | null } | undefined;
-  if (
-    row === undefined ||
-    (result.changes === 0 &&
-      (row.route !== input.route || row.receipt !== (input.route === "live" ? input.receipt : null)))
-  ) {
-    throw new Error(`tell delivery ${input.tellId} has conflicting evidence`);
+  const { tellId, turnSequence, fence, route, deliveredAt } = input;
+  const receipt = input.route === "live" ? input.receipt : null;
+  const insert = database.prepare(`INSERT OR IGNORE INTO tell_deliveries
+    (tell_id, turn_sequence, fence, route, receipt, delivered_at) VALUES (?, ?, ?, ?, ?, ?)`);
+  if (insert.run(tellId, turnSequence, fence, route, receipt, deliveredAt).changes === 0) {
+    const existing = database
+      .prepare("SELECT route, receipt FROM tell_deliveries WHERE tell_id = ? AND turn_sequence = ? AND fence = ?")
+      .get(tellId, turnSequence, fence);
+    if (existing?.route !== route || existing?.receipt !== receipt)
+      throw new Error(`tell delivery ${tellId} has conflicting evidence`);
+    return false;
   }
-  return result.changes !== 0;
+  if (receipt !== "required") tellTerminalWriter(database, receipt ?? route, deliveredAt)(tellId);
+  return true;
 }
 
-export function insertTellReceiptFact(database: DatabaseSync, input: TellReceiptInput): boolean {
-  const result = database
-    .prepare(
-      `INSERT OR IGNORE INTO tell_receipts(
-    evidence, tell_id, turn_sequence, fence, kind, received_at
-  ) VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.evidence,
-      input.evidence === "exact" ? input.tellId : null,
-      input.evidence === "fence" ? input.turnSequence : null,
-      input.evidence === "fence" ? input.fence : null,
-      input.kind,
-      input.receivedAt,
-    );
-  return result.changes !== 0;
+export function tellTerminalWriter(database: DatabaseSync, kind: string, at: string, exact = false) {
+  const insert =
+    database.prepare(`INSERT INTO tell_terminal_receipts(tell_id, kind, received_at, undelivered) VALUES (?, ?, ?, ?)
+    ON CONFLICT(tell_id, kind) DO UPDATE SET undelivered = 1 WHERE excluded.undelivered > undelivered`);
+  return (id: string) => insert.run(id, kind, at, Number(exact && kind === "undelivered")).changes !== 0;
 }
 
 export function tellIdsForFence(database: DatabaseSync, turnSequence: number, fence: string): readonly string[] {
@@ -208,28 +119,16 @@ export function tellIdsForFence(database: DatabaseSync, turnSequence: number, fe
 }
 
 export function pendingTellFacts(database: DatabaseSync): readonly TellFact[] {
-  const rows = database
-    .prepare(
-      `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state FROM tells
-    WHERE ${tellStateSql} = 'pending' ORDER BY sequence`,
-    )
-    .all() as unknown as readonly TellRow[];
-  return decodeTellRows(database, rows);
+  return decodeTellBatch(readTellBatch(database, `${tellStateSql} = 'pending'`));
 }
 
 export function insertTellBindingFact(
   database: DatabaseSync,
   input: Readonly<{ tellId: string; turnSequence: number; boundAt: string }>,
 ): void {
-  const result = database
-    .prepare("INSERT OR IGNORE INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)")
-    .run(input.tellId, input.turnSequence, input.boundAt);
-  if (result.changes === 0) {
-    const row = database
-      .prepare("SELECT 1 FROM tell_bindings WHERE tell_id = ? AND turn_sequence = ?")
-      .get(input.tellId, input.turnSequence);
-    if (row === undefined) throw new Error(`tell ${input.tellId} binding was not retained`);
-  }
+  const insert = database.prepare(`INSERT INTO tell_bindings(tell_id, turn_sequence, bound_at) VALUES (?, ?, ?)
+    ON CONFLICT(tell_id, turn_sequence) DO NOTHING`);
+  insert.run(input.tellId, input.turnSequence, input.boundAt);
 }
 
 export function turnParticipants(database: DatabaseSync, turnSequence: number): readonly string[] {

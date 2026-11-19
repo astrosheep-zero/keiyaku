@@ -1,6 +1,6 @@
+import { basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { AkumaPaths } from "../identity.js";
-import { parsePublicHistoryId } from "../identity.js";
+import { akumaIdFromDirectoryName, parsePublicHistoryId, type AkumaPaths } from "../identity.js";
 import { decodeRuntimeModel, withoutModel } from "../provider-recipe.js";
 import type {
   BodyEnd,
@@ -21,7 +21,7 @@ import type {
   TurnStartFact,
   ReportAdmission,
 } from "./facts.js";
-import { BodyControlledError, HeartAuthorityCorruptionError } from "./facts.js";
+import { BodyControlledError, HeartAuthorityCorruptionError, HeartUnbornError } from "./facts.js";
 import {
   answeredTurnFact,
   bodyFact,
@@ -56,13 +56,13 @@ import type { AgentEvent } from "./activity-schema.js";
 import {
   insertTellDeliveryFact,
   insertTellBindingFact,
-  insertTellReceiptFact,
   openBoundTurns,
   pendingTellFacts,
   hasPendingTell,
-  sameTellInput,
+  requireTell,
   tellFact,
   tellIdsForFence,
+  tellTerminalWriter,
   tellWasUndelivered,
   turnParticipants,
 } from "./tells.js";
@@ -350,7 +350,12 @@ type TellAdmissionInputs = Readonly<{
 
 function judgeExistingTell(inputs: TellAdmissionInputs, existing: TellFact): TellAdmission | InterruptTellAdmission {
   const { heart, tell, body, pause, interrupt } = inputs;
-  if (!sameTellInput(existing, interrupt ? { ...tell, recordedAt: existing.recordedAt } : tell))
+  if (
+    existing.body !== tell.body ||
+    existing.schemaJson !== tell.schemaJson ||
+    existing.initiator !== tell.initiator ||
+    (!interrupt && existing.recordedAt !== tell.recordedAt)
+  )
     throw new Error(`tell ${tell.id} reused different input`);
   if (!interrupt) return { kind: "recorded", tell: existing };
   const barrier =
@@ -383,6 +388,13 @@ function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTel
   return recordPendingTell(heart, tell);
 }
 
+function birthMatches(heart: DatabaseSync, id: Soul["id"]): boolean {
+  const soul = soulFact(heart);
+  if (soul !== null && soul.id !== id)
+    throw new HeartAuthorityCorruptionError("Akuma soul does not match its coordinate");
+  return soul !== null;
+}
+
 export function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
@@ -402,7 +414,7 @@ export async function recordTell(
   return await withHeartTransaction(
     paths,
     (heart) => {
-      if (soulFact(heart) === null) return { kind: "not-born" };
+      if (!birthMatches(heart, akumaIdFromDirectoryName(basename(paths.directory)).id)) return { kind: "not-born" };
       const existing = tellFact(heart, tell.id);
       const body = latestBodyFact(heart);
       const pause = interrupt ? pauseFact(heart) : null;
@@ -486,16 +498,15 @@ export async function readTellAction(paths: AkumaPaths, id: string, signal?: Abo
 
 export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly TellDeliveryInput[]): Promise<void> {
   await withHeartTransaction(paths, (heart) => {
+    let changed = false;
     for (const input of inputs) {
-      const current = tellFact(heart, input.tellId);
-      if (current === null) throw new Error(`unknown tell ${input.tellId}`);
+      requireTell(heart, input.tellId);
       const turn = turnFact(heart, input.turnSequence);
       if (turn === null) throw new Error(`unknown Akuma Turn ${input.turnSequence}`);
       if (isTellProtectedByPause(heart, input.tellId, turn.bodySequence)) throw new BodyControlledError();
+      changed = insertTellDeliveryFact(heart, input) || changed;
     }
-    let changed = false;
-    for (const input of inputs) changed = insertTellDeliveryFact(heart, input) || changed;
-    pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
+    if (changed) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
   });
 }
 
@@ -505,12 +516,14 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
       input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
     if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
     const pause = pauseFact(heart);
+    const write = tellTerminalWriter(heart, input.kind, input.receivedAt, input.evidence === "exact");
+    let changed = false;
     for (const tellId of tellIds) {
-      if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
+      requireTell(heart, tellId);
       if (pause !== null && isTellProtectedByPause(heart, tellId, pause.bodySequence)) throw new BodyControlledError();
+      changed = write(tellId) || changed;
     }
-    const changed = insertTellReceiptFact(heart, input);
-    pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
+    if (changed) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
   });
 }
 
@@ -540,6 +553,8 @@ export async function requestStop(
   return await withHeartTransaction(
     paths,
     (heart) => {
+      const id = akumaIdFromDirectoryName(basename(paths.directory)).id;
+      if (!birthMatches(heart, id)) throw new HeartUnbornError(id);
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
       if (body.hung !== undefined) return { kind: "hung", body };
@@ -553,10 +568,8 @@ export async function requestStop(
         return { kind: "already-stopped", body };
       }
       const existing = stopFact(heart);
-      if (existing !== null && existing.bodySequence !== body.sequence) {
-        throw new Error("Akuma stop target is not the latest Body");
-      }
-      insertStopControl(heart, body.sequence, at);
+      if (existing === null) insertStopControl(heart, body.sequence, at);
+      else if (existing.bodySequence !== body.sequence) throw new Error("Akuma stop target is not the latest Body");
       return { kind: "requested", body };
     },
     signal,
@@ -592,7 +605,7 @@ export async function cancelBodyTurns(
         completedAt: input.at,
       });
     endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-    pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
+    if (sequences.length > 0) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
     return { canceled: sequences };
   });
 }
@@ -618,11 +631,10 @@ export async function bindTellsToTurn(
     const turn = turnFact(heart, input.turnSequence);
     if (turn === null) throw new Error(`Akuma Turn ${input.turnSequence} is missing`);
     for (const tellId of input.tellIds) {
-      if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
+      requireTell(heart, tellId);
       if (isTellProtectedByPause(heart, tellId, turn.bodySequence)) throw new BodyControlledError();
       insertTellBindingFact(heart, { tellId, turnSequence: input.turnSequence, boundAt: input.boundAt });
     }
-    pruneActivityFacts(heart, ACTIVITY_LIMIT);
   });
 }
 
@@ -644,7 +656,7 @@ export async function failOpenBoundTurns(
         completedAt: input.completedAt,
       });
     }
-    pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
+    if (sequences.length > 0) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
     return sequences;
   });
 }

@@ -686,90 +686,66 @@ test("an unrelated Body cannot hide actual launch failure", async () => {
   }
 });
 
-test("live receipts are terminal only under their exact Heart correlation", async () => {
+test("terminal Tell evidence is admitted once for each exact Tell and kind", async () => {
   const value = await fixture();
+  const { paths } = value.allocated;
+  const at = "2026-08-08T00:00:03.000Z";
+  const receivedAt = "2026-08-08T00:00:05.000Z";
+  const duplicateAt = "2026-08-08T00:00:07.000Z";
+  const holder = (await HeldAkumaLeash.try(paths))!;
+  const ids = ["required-1", "required-2", "unavailable", "exact"];
+  const pending = async () => (await readHeart(paths)).pending.map((tell) => tell.id);
   try {
-    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await body.birth(value.allocated.paths, value.soul);
-    const firstBody = await body.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    const firstTurn = await beginTurn(value.allocated.paths, {
-      bodySequence: firstBody.sequence,
-      startedAt: "2026-08-08T00:00:00.000Z",
-    });
-    const required = await recordTell(value.allocated.paths, {
-      id: "tell-required",
-      body: "wait for receipt",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    const unavailable = await recordTell(value.allocated.paths, {
-      id: "tell-unavailable",
-      body: "ack is terminal",
-      recordedAt: "2026-08-08T00:00:02.000Z",
-    });
-    assert.equal(required.kind, "recorded");
-    assert.equal(unavailable.kind, "recorded");
-    await recordTellDeliveries(value.allocated.paths, [
-      {
-        tellId: "tell-required",
-        route: "live",
-        receipt: "required",
-        turnSequence: firstTurn.sequence,
-        fence: "shared-fence",
-        deliveredAt: "2026-08-08T00:00:03.000Z",
-      },
-      {
-        tellId: "tell-unavailable",
-        route: "live",
-        receipt: "unavailable",
-        turnSequence: firstTurn.sequence,
-        fence: "ack-fence",
-        deliveredAt: "2026-08-08T00:00:03.000Z",
-      },
+    await holder.birth(paths, value.soul);
+    const body = await holder.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    for (const id of ids) assert.equal((await recordTell(paths, { id, body: id, recordedAt: at })).kind, "recorded");
+    await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ids, boundAt: at });
+    assert.deepEqual(await pending(), ids, "binding alone does not settle input");
+    const fenceReceipt = { evidence: "fence" as const, turnSequence: turn.sequence, fence: "shared", kind: "accepted", receivedAt };
+    await assert.rejects(recordTellReceipt(paths, fenceReceipt), /no delivery mapping/u);
+    const delivery = { route: "live" as const, turnSequence: turn.sequence, deliveredAt: at };
+    const required = { ...delivery, tellId: "required-1", receipt: "required" as const, fence: "shared" };
+    await recordTellDeliveries(paths, [
+      required,
+      { ...required, tellId: "required-2" },
+      { ...delivery, tellId: "unavailable", receipt: "unavailable", fence: "other" },
     ]);
-    assert.deepEqual(
-      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
-      ["tell-required"],
-    );
+    assert.deepEqual(await pending(), ["required-1", "required-2", "exact"]);
     await assert.rejects(
-      recordTellReceipt(value.allocated.paths, {
-        evidence: "fence",
-        turnSequence: firstTurn.sequence + 1,
-        fence: "shared-fence",
-        kind: "accepted",
-        receivedAt: "2026-08-08T00:00:04.000Z",
-      }),
-      /no delivery mapping/u,
+      recordTellDeliveries(paths, [
+        { ...delivery, route: "launch", tellId: "exact", fence: "launch" },
+        { ...required, receipt: "unavailable" },
+      ]),
+      /conflicting evidence/u,
     );
-    assert.deepEqual(
-      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
-      ["tell-required"],
-    );
-    await recordTellReceipt(value.allocated.paths, {
-      evidence: "fence",
-      turnSequence: firstTurn.sequence,
-      fence: "shared-fence",
-      kind: "accepted",
-      receivedAt: "2026-08-08T00:00:05.000Z",
-    });
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+    assert.deepEqual((await readTell(paths, "exact"))?.deliveries, [], "a rejected batch records no partial delivery");
+    await assert.rejects(recordTellReceipt(paths, { ...fenceReceipt, turnSequence: turn.sequence + 1 }), /no delivery mapping/u);
+    assert.deepEqual(await pending(), ["required-1", "required-2", "exact"]);
+    await recordTellReceipt(paths, fenceReceipt);
+    await recordTellReceipt(paths, { ...fenceReceipt, receivedAt: duplicateAt });
+    assert.deepEqual(await pending(), ["exact"], "the fence settles only its mapped Tells");
 
-    const exact = await recordTell(value.allocated.paths, {
-      id: "tell-exact",
-      body: "exact",
-      recordedAt: "2026-08-08T00:00:06.000Z",
-    });
-    assert.equal(exact.kind, "recorded");
-    await recordTellReceipt(value.allocated.paths, {
-      evidence: "exact",
-      tellId: "tell-exact",
-      kind: "consumed",
-      receivedAt: "2026-08-08T00:00:07.000Z",
-    });
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    body.release();
+    const exactReceipt = { evidence: "exact" as const, tellId: "exact", kind: "consumed", receivedAt };
+    await assert.rejects(recordTellReceipt(paths, { ...exactReceipt, tellId: "missing" }), /unknown tell missing/u);
+    await recordTellReceipt(paths, exactReceipt);
+    await recordTellReceipt(paths, { ...exactReceipt, receivedAt: duplicateAt });
+    await recordTellReceipt(paths, { ...exactReceipt, tellId: "required-1", kind: "accepted", receivedAt: duplicateAt });
+    assert.deepEqual(await pending(), []);
+    const database = new DatabaseSync(paths.heart, { readOnly: true });
+    try {
+      const witnesses = database.prepare("SELECT * FROM tell_terminal_receipts ORDER BY tell_id, kind").all();
+      assert.deepEqual(witnesses.map(({ tell_id, kind, received_at }) => [tell_id, kind, received_at]), [
+        ["exact", "consumed", receivedAt],
+        ["required-1", "accepted", receivedAt],
+        ["required-2", "accepted", receivedAt],
+        ["unavailable", "unavailable", at],
+      ]);
+    } finally {
+      database.close();
+    }
   } finally {
+    holder.release();
     value.close();
   }
 });
@@ -1016,12 +992,12 @@ test("kill witnesses a stranded Body and leaves its pending Tell for an ordinary
   }
 });
 
-test("heart schema version 31 and leash schema version 4 hard-refuse unknown authority", async (context) => {
+test("heart schema version 32 and leash schema version 4 hard-refuse unknown authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "30000000" });
   seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
   seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
-  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 31/u);
+  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 32/u);
   await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });
 
@@ -1983,6 +1959,7 @@ test("pruning preserves historical Tell references and their terminal evidence",
     await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune" }, at });
 
     assert.equal(await readTell(paths, "unreferenced"), null);
+    assert.equal(database.prepare("SELECT 1 FROM tell_terminal_receipts WHERE tell_id = 'unreferenced'").get(), undefined);
     assert.equal((await readTell(paths, "delivered"))?.state, "told");
     assert.equal((await readTell(paths, "undelivered"))?.state, "told");
     assert.deepEqual((await readHeart(paths)).pending, []);

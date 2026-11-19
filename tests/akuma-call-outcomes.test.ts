@@ -11,7 +11,7 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
-import { HeldAkumaLeash, readSoul, readTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, beginTurn, endTurn, finishBodyIfIdle, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { readAliases, moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -141,6 +141,34 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent, undefined);
   assert.deepEqual(response.content, [{ type: "text", text: `failed\n${text}` }]);
+});
+
+test("Ask returns its own Turn answer, not an earlier retained answer", async (t) => {
+  const root = temporaryDirectory(t, "exact-ask-receipt-");
+  const fixture = await bornWorld(root, "feeda111");
+  const { id, paths } = fixture.allocated;
+  const at = "2026-11-11T00:00:00.000Z";
+  const holder = (await HeldAkumaLeash.try(paths))!;
+  try {
+    const body = await holder.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, call: "earlier work" });
+    await endTurn(paths, {
+      turnSequence: turn.sequence, completedAt: at,
+      outcome: { kind: "answered", answer: '{"answer":"earlier"}', session: { sessionId: "earlier" } },
+    });
+    assert.equal((await finishBodyIfIdle(paths, { sequence: body.sequence, at })).kind, "finished");
+  } finally {
+    holder.release();
+  }
+  const bodies: Promise<unknown>[] = [];
+  t.after(() => settleFixtureBodies(bodies));
+  const launcher = fixtureLauncher(bodies, new Map([[paths.directory, { adapter: answering('{"answer":"own"}'), now: at }]]));
+  const result = await akumasWithLauncher(fixture.world, launcher).ask({ akuma: id, body: "own work", schema: {} });
+  assert.equal(result.kind, "answered");
+  assert.deepEqual(result.answer, { answer: "own" });
+  const tell = await readTell(paths, result.tellId);
+  assert.equal(tell?.body, "own work");
+  assert.equal(tell.state, "told");
 });
 
 test("Tell failure and exact Ask precedence retain answer and historical wake recovery evidence", async (t) => {

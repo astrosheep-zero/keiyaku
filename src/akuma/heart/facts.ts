@@ -14,6 +14,12 @@ export class HeartAuthorityCorruptionError extends KeiyakuError {
 }
 
 const originText = z.string().refine((value) => value.trim().length > 0);
+export class HeartUnbornError extends Error {
+  constructor(readonly id: AkumaId) {
+    super(`Akuma ${id} is not born`);
+  }
+}
+
 export const akumaOriginSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("direct") }),
 
