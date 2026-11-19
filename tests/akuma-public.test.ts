@@ -2,6 +2,7 @@ import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
+import { waitForCondition } from "./support/process.js";
 import {
   activityFact,
   allocatedHeart,
@@ -1135,6 +1136,20 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
     const status = await new AkumaOwner(receipt.childAkumaId, world).status();
     assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
+    await waitForCondition(
+      `the exact fork child ${receipt.childAkumaId} akuma.born line in ${output}`,
+      () => readFileSync(output, "utf8")
+        .split("\n")
+        .some((line) => {
+          if (line.length === 0) return false;
+          try {
+            const signal = JSON.parse(line) as { kind?: unknown; akumaId?: unknown };
+            return signal.kind === "akuma.born" && signal.akumaId === receipt.childAkumaId;
+          } catch {
+            return false;
+          }
+        }),
+    );
     const signals = readFileSync(output, "utf8")
       .trim()
       .split("\n")
