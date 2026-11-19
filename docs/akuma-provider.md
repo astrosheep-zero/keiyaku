@@ -151,17 +151,19 @@ transcript; history is not an additional active identity, and preserving it does
 not disable fork. Unsupported native capabilities remain explicit; no adapter
 silently discards requested context or invents a system channel.
 
-The OpenCode adapter uses the matching native client and checks native readiness,
-not a successful response from the server's web application. A private serve
-carries the Body's actor through its native launch environment; an ordinary
-configured local MCP process that does not author those reserved variables
-inherits the current pair. Keiyaku does not parse, rewrite, or supplement
-authored native configuration; effective
-commands, unrelated configuration, and remote servers retain native semantics.
-Its live event feed is volatile. A disconnect or stream failure ends observation
-without reconnection, prompt replay, or an inferred answer. An observed foreign input
-consumed during the same execution makes exact attribution unavailable; the
-adapter fails rather than adopting that writer's answer.
+The matching OpenCode client interprets the native protocol; the adapter does
+not maintain a parallel client dialect. The adapter owns one physical attempt
+lifetime, from native setup through retirement of its server and connections.
+Native readiness is not a successful response from the server's web application.
+A private serve carries the Body's actor through its native launch environment;
+an ordinary configured local MCP process that does not author those reserved
+variables inherits the current pair. Keiyaku does not parse, rewrite, or
+supplement authored native configuration; effective commands, unrelated
+configuration, and remote servers retain native semantics.
+The live event feed is volatile: disconnect or stream failure ends observation
+honestly without reconnection, prompt replay, or an inferred answer. An observed
+foreign input consumed during the same execution makes exact attribution
+unavailable; the adapter fails rather than adopting that writer's answer.
 
 A completed answer retains the exact native boundary immediately after that
 answer for historical fork. This is a native coordinate, not a reconstructed

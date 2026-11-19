@@ -1,4 +1,4 @@
-import { opencodeFixture } from "./support/opencode-v2.js";
+import { failDispatcherRetirement, nativeEndpoint, opencodeFixture, ownedOpenCode } from "./support/opencode-v2.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import type { Query, SDKMessage, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import { z } from "zod";
@@ -30,16 +30,10 @@ import {
 import { KeiyakuError } from "../src/errors.js";
 import { encodeActivityEvent, decodeActivityRow } from "../src/akuma/heart/rows.js";
 import { decodeResumeCoordinate } from "../src/akuma/coordinate.js";
-import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
-import {
-  composeHeadlessPermissionConfig,
-  loadOpencode,
-  OPENCODE_SDK_PROVIDER,
-  type OpencodeSdkLoader,
-} from "../src/akuma/providers/opencode-sdk/session.js";
+import { composeHeadlessPermissionConfig } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider, decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
@@ -922,34 +916,30 @@ test("ProviderAttempt rejects ownership after establishment settles", async () =
   await attempt.closed;
 });
 
-function fakeOpencode() {
-  const native = opencodeFixture();
-  const executions: ProviderExecution[] = [];
-  const prompt = native.session.prompt;
-  const loader: OpencodeSdkLoader = async (cwd, execution, signal) => {
-    executions.push(execution);
-    const loaded = await native.loader(cwd, execution, signal);
-    return {
-      ...loaded,
-      client: {
-        ...loaded.client,
-        session: { ...loaded.client.session, async prompt(input) {
-          const response = await prompt(input);
-          native.admitted(input.body.id);
-          native.delivered(input.body.id);
-          native.step();
-          native.push("session.tool.input.started", { assistantMessageID: "msg_assistant", id: "tool-1", name: "shell" });
-          native.push("session.tool.called", { assistantMessageID: "msg_assistant", id: "tool-1", input: { command: "npm test" }, executed: false });
-          native.push("session.tool.success", { assistantMessageID: "msg_assistant", id: "tool-1", content: [{ type: "text", text: "ok" }], executed: false });
-          native.push("session.reasoning.ended", { assistantMessageID: "msg_assistant", ordinal: 0, text: "checked" });
-          native.push("session.future", { secret: "drop" });
-          native.complete();
-          return response;
-        } },
-      },
-    };
+function finishingOpenCode(context: TestContext) {
+  const native = opencodeFixture(context);
+  native.controls.onPrompt = (id) => {
+    native.admitted(id);
+    native.delivered(id);
+    native.step();
+    native.push("session.tool.input.started", { assistantMessageID: "msg_assistant", id: "tool-1", name: "shell" });
+    native.push("session.tool.called", {
+      assistantMessageID: "msg_assistant",
+      id: "tool-1",
+      input: { command: "npm test" },
+      executed: false,
+    });
+    native.push("session.tool.success", {
+      assistantMessageID: "msg_assistant",
+      id: "tool-1",
+      content: [{ type: "text", text: "ok" }],
+      executed: false,
+    });
+    native.push("session.reasoning.ended", { assistantMessageID: "msg_assistant", ordinal: 0, text: "checked" });
+    native.push("session.future", { secret: "drop" });
+    native.complete();
   };
-  return { loader, closed: native.closed, executions, prompts: native.prompts };
+  return native;
 }
 
 test("a throwing terminal flush fences duplicates, ends narration, and still wins retirement", async () => {
@@ -1949,14 +1939,15 @@ function fakePiSdk(
   };
 }
 
-test("OpenCode v2 adapter admits and completes from native execution evidence", async () => {
-  const fake = fakeOpencode();
-  const provider = createOpencodeProvider({ loader: fake.loader });
+test("OpenCode v2 adapter admits and completes from native execution evidence", async (t) => {
+  const native = finishingOpenCode(t);
+  const provider = createOpencodeProvider(undefined, native.open);
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
     freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }] }),
   ).result;
-  assert.equal(drive.admission.fence, fake.prompts[0]!.body.id);
+  assert.equal(drive.admission.fence, native.prompts[0]!.body.id);
+  assert.equal(native.prompts[0]!.body.text, "build\n\nalso check");
   const observed = await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "msg_terminal" });
   assert.deepEqual(
@@ -1968,7 +1959,7 @@ test("OpenCode v2 adapter admits and completes from native execution evidence", 
   assert.ok(completedTool?.type === "tool" && completedTool.phase === "completed");
   assert.deepEqual(completedTool.call, { kind: "run", command: "npm test" });
   assert.deepEqual(completedTool.result, { status: "ok", output: "ok" }, "the completed state's output survives");
-  assert.equal(fake.closed(), 1);
+  await native.retired();
 });
 
 test("OpenCode v2 composes headless permission rules below caller actions", () => {
@@ -1990,38 +1981,34 @@ test("OpenCode v2 composes headless permission rules below caller actions", () =
   assert.throws(() => composeHeadlessPermissionConfig({ permissions: "allow" }), /ruleset/u);
 });
 
-test("OpenCode always carries the headless permission base layer into the spawned server environment", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-opencode-headless-");
-  const recorded = join(root, "environment.json");
-  const executable = join(root, "opencode");
-  writeFileSync(
-    executable,
-    [
-      "#!/usr/bin/env node",
-      "const { writeFileSync } = require('node:fs');",
-      `writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.env));`,
-      "setInterval(() => {}, 1000);",
-    ].join("\n"),
-  );
-  chmodSync(executable, 0o755);
-  const spawnedEnvironment = async (env?: Readonly<Record<string, string>>, executionCoordinate?: { akumaId: string; world: string }) => {
-    rmSync(recorded, { force: true });
+test("OpenCode composes the spawned environment and proves child exit when cancelled before readiness", async (t) => {
+  const world = temporaryDirectory(t, "keiyaku-opencode-world-");
+  const spawnedEnvironment = async (
+    env?: Readonly<Record<string, string>>,
+    executionCoordinate?: { akumaId: string; world: string },
+  ) => {
+    const root = temporaryDirectory(t, "keiyaku-opencode-headless-");
+    const owned = ownedOpenCode(t, root);
     const controller = new AbortController();
-    const loading = loadOpencode({
-      execution: {
-        name: OPENCODE_SDK_PROVIDER,
-        kind: "opencode-sdk",
-        executable,
-        ...(env === undefined ? {} : { env }),
-      },
-      cwd: root,
-      signal: controller.signal,
-      ...(executionCoordinate === undefined ? {} : { executionCoordinate }),
-    });
-    await waitForFixtureFile(recorded);
+    const attempt = createOpencodeProvider({
+      name: "opencode-sdk",
+      kind: "opencode-sdk",
+      executable: owned.executable,
+      env: { OPEN_CODE_FIXTURE_STALL: "readiness", ...env },
+    }).start(
+      freshInput("never submit", {
+        cwd: root,
+        signal: controller.signal,
+        ...(executionCoordinate === undefined ? {} : { execution: executionCoordinate }),
+      }),
+    );
+    const refused = assert.rejects(attempt.result, /aborted/u);
+    const child = await owned.child();
     controller.abort();
-    await assert.rejects(loading, /aborted/u);
-    return JSON.parse(readFileSync(recorded, "utf8")) as Record<string, string>;
+    await refused;
+    await attempt.closed;
+    assert.equal(processExists(child.pid), false, "closure proves actual child exit");
+    return child.env;
   };
 
   const base = await spawnedEnvironment();
@@ -2031,104 +2018,66 @@ test("OpenCode always carries the headless permission base layer into the spawne
     OPENCODE_CONFIG_CONTENT: literal,
     KEIYAKU_ACTOR_WORLD: "/wrong",
     KEIYAKU_ACTOR_ID: "aku/parent/1234abcd",
-  }, { akumaId: "aku/worker/4321abcd", world: root });
+  }, { akumaId: "aku/worker/4321abcd", world });
   assert.equal(overridden.OPENCODE_CONFIG_CONTENT, literal);
-  assert.equal(overridden.KEIYAKU_ACTOR_WORLD, root);
+  assert.equal(overridden.KEIYAKU_ACTOR_WORLD, world);
   assert.equal(overridden.KEIYAKU_ACTOR_ID, "aku/worker/4321abcd");
 });
 
-test("OpenCode start and resume reject closed when readiness cleanup fails", async () => {
+test("OpenCode start and resume reject closed when readiness cleanup fails", async (t) => {
   for (const mode of ["start", "resume"] as const) {
-    const ready = deferred<void>();
-    let closed = 0;
-    const provider = createOpencodeProvider({
-      loader: async () => ({
-        client: { session: {} as never, event: {} as never },
-        close: async () => {
-          closed += 1;
-          throw new Error("OpenCode runtime close failed");
-        },
-        ready: ready.promise,
-      }),
+    await t.test(mode, async (context) => {
+      const waiting = promiseBarrier<void>();
+      const requests: string[] = [];
+      const native = nativeEndpoint(context, (request) => {
+        requests.push(request.url!);
+        waiting.resolve();
+      });
+      const destroyed = failDispatcherRetirement(context, "OpenCode dispatcher close failed");
+      const provider = createOpencodeProvider(undefined, native.open);
+      const input = freshInput("wait");
+      const attempt =
+        mode === "start"
+          ? provider.start(input)
+          : provider.resume!({
+              ...input,
+              session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
+            });
+      const refused = assert.rejects(attempt.result, /OpenCode dispatcher close failed/u);
+      await waiting.promise;
+      await assert.rejects(attempt.forceDispose(), /OpenCode dispatcher close failed/u);
+      await refused;
+      await assert.rejects(attempt.closed, /OpenCode dispatcher close failed/u);
+      await native.retired();
+      assert.equal(destroyed.mock.callCount(), 1);
+      assert.deepEqual(requests, ["/api/info"]);
     });
-    const attempt =
-      mode === "start"
-        ? provider.start(freshInput("wait"))
-        : provider.resume!({
-            ...DRIVE_DEFAULTS,
-            body: "wait",
-            launchTells: [],
-            cwd: "/tmp",
-            options: {},
-            session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
-          });
-
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await assert.rejects(attempt.forceDispose(), /OpenCode runtime close failed/u);
-    await assert.rejects(attempt.result, /OpenCode runtime close failed/u);
-    await assert.rejects(attempt.closed, /OpenCode runtime close failed/u);
-    assert.equal(closed, 1);
   }
 });
 
-test("OpenCode v2 adapter resumes the supplied coordinate and forks the exact point", async () => {
-  const fake = fakeOpencode();
-  const provider = createOpencodeProvider({ loader: fake.loader });
-  const drive = await provider.resume!({
-    ...DRIVE_DEFAULTS,
-    body: "continue",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    session: { kind: "resume", coordinate: { sessionId: "ses_fixture" } },
-  }).result;
-  assert.equal((await drive.completion).kind, "answered");
-  assert.deepEqual(
-    await provider.fork!({ session: { sessionId: "ses_fixture" }, at: "msg_terminal", cwd: "/tmp" }).result,
-    {
-      session: { sessionId: "ses_child" },
-    },
-  );
-});
-
-test("OpenCode fork force-disposes a runtime held at readiness before publishing a result", async () => {
-  const ready = deferred<void>();
-  let closed = 0;
-  let forked = 0;
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session: {
-          async fork() {
-            forked += 1;
-            return { data: { id: "session-child" } };
-          },
-        } as never,
-        event: {} as never,
-      },
-      close: async () => {
-        closed += 1;
-      },
-      ready: ready.promise,
-    }),
+test("OpenCode fork force-disposes a runtime held at readiness before publishing a result", async (t) => {
+  const waiting = promiseBarrier<void>();
+  const requests: string[] = [];
+  const native = nativeEndpoint(t, (request) => {
+    requests.push(request.url!);
+    waiting.resolve();
   });
+  const provider = createOpencodeProvider(undefined, native.open);
   const attempt = provider.fork!({ session: { sessionId: "session-source" }, at: "message-1", cwd: "/tmp" });
-
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  const refused = assert.rejects(attempt.result, /provider attempt retired/u);
+  await waiting.promise;
   await attempt.forceDispose();
-  await assert.rejects(attempt.result, /provider attempt retired/u);
+  await refused;
   await attempt.closed;
-  assert.equal(closed, 1);
-  assert.equal(forked, 0);
+  await native.retired();
+  assert.deepEqual(requests, ["/api/info"]);
 });
 
 test("OpenCode v2 refuses a Pi coordinate before loading its native runtime", async () => {
   let loaded = false;
-  const provider = createOpencodeProvider({
-    loader: async () => {
-      loaded = true;
-      throw new Error("must not load");
-    },
+  const provider = createOpencodeProvider(undefined, async () => {
+    loaded = true;
+    throw new Error("must not load");
   });
   await assert.rejects(
     attemptResult(
@@ -2150,32 +2099,30 @@ test("OpenCode v2 refuses a Pi coordinate before loading its native runtime", as
   assert.equal(loaded, false);
 });
 
-test("OpenCode v2 rejects failed prompt admission and cleans up", async () => {
-  const native = opencodeFixture();
-  native.rejectPrompt(new Error("prompt rejected"));
-  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("fail"));
+test("OpenCode v2 rejects failed prompt admission and cleans up", async (t) => {
+  const native = opencodeFixture(t);
+  native.controls.rejectPrompt = "prompt rejected";
+  const attempt = createOpencodeProvider(undefined, native.open).start(freshInput("fail"));
   await assert.rejects(attempt.result, /prompt rejected/u);
   await attempt.closed;
-  assert.equal(native.closed(), 1);
+  await native.retired();
 });
 
-test("OpenCode v2 fails terminal observation without native assistant evidence", async () => {
-  const native = opencodeFixture();
-  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("idle"));
-  const drive = await attempt.result;
+test("OpenCode v2 fails terminal observation without native assistant evidence", async (t) => {
+  const native = opencodeFixture(t);
+  const drive = await createOpencodeProvider(undefined, native.open).start(freshInput("idle")).result;
   native.admitted(native.prompts[0]!.body.id);
   native.delivered(native.prompts[0]!.body.id);
   native.push("session.execution.succeeded");
   assert.deepEqual(await drive.completion, {
     kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input",
   });
-  await attempt.closed;
-  assert.equal(native.closed(), 1);
+  await native.retired();
 });
 
-test("OpenCode preserves model, permission replies and retry causes across ignored native traffic", async () => {
-  const native = opencodeFixture();
-  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("work"));
+test("OpenCode preserves model, permission replies and retry causes across ignored native traffic", async (t) => {
+  const native = opencodeFixture(t);
+  const attempt = createOpencodeProvider(undefined, native.open).start(freshInput("work"));
   const session = await attempt.result;
   const observed: AgentEvent[] = [];
   const asked = promiseBarrier<void>();
@@ -2212,9 +2159,9 @@ test("OpenCode preserves model, permission replies and retry causes across ignor
   ]);
 });
 
-test("OpenCode v2 isolates other sessions and accepts the current execution error", async () => {
-  const native = opencodeFixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(freshInput("fail")).result;
+test("OpenCode v2 isolates other sessions and accepts the current execution error", async (t) => {
+  const native = opencodeFixture(t);
+  const drive = await createOpencodeProvider(undefined, native.open).start(freshInput("fail")).result;
   native.push("session.execution.failed", { sessionID: "ses_other", error: { message: "unrelated" } });
   native.admitted(native.prompts[0]!.body.id);
   native.delivered(native.prompts[0]!.body.id);

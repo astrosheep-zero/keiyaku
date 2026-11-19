@@ -27,14 +27,14 @@ test("native permission waits reach public status, clear on reply, and end with 
   }));
   const world = await World.at(root);
   const allocated = await allocatedHeart(root, "opencode", "99840001");
-  const native = opencodeFixture();
+  const native = opencodeFixture(t);
   const controller = new AbortController();
   const body = driveAkumaBody({
     paths: allocated.paths,
     seed: { id: allocated.id, akumaName: "opencode", provider: { name: "opencode", kind: "opencode-sdk" },
       options: {}, cwd: root, origin: { kind: "direct" } },
     initialBody: "read outside the working directory",
-  }, createOpencodeProvider({ loader: native.loader }), { world, signal: controller.signal });
+  }, createOpencodeProvider(undefined, native.open), { world, signal: controller.signal });
   const handle = Akuma.select(world, allocated.id);
   const path = "/outside/work/secret.txt";
   try {
