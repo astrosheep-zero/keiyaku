@@ -160,13 +160,29 @@ It never erases a confirmed leading admission or its cleanup residue.
 
 ## Repository Test Isolation
 
-The repository test runner owns a fresh temporary Square host ledger for each
-invocation, replacing any inherited host-ledger location. Test children and their
-descendants share that invocation's ledger; nested runners create their own.
-The runner removes its ledger after owned test children terminate, on passing and
-failing runs alike. Tests never add synthetic presence to the caller's live ledger.
-This is test-harness isolation, not a change to Verification's inherited-environment
-contract or to production provider environments.
+The repository test runner owns one fresh temporary fixture root for each
+invocation, replacing any inherited Square-ledger, process-home, and
+Keiyaku-home location. That root serves as the fixture home and owns the
+invocation's Square ledger. Test children and their descendants begin with that
+fixture context rather than the caller's and share its owned ledger; nested
+runners create their own root instead of reusing a parent's. Unrelated ambient
+environment continues to pass through, including network proxy configuration and
+neutral fixture inputs. The reserved caller environment does not: Keiyaku
+configuration and identity, Square, Paseo, Codex, OpenCode, Pi, and Claude native
+host sessions including OAuth and session material, and the exact Claude host
+marker are removed before the fixture home and owned Square ledger are installed,
+including Windows key-case variants. Only documented test selectors survive that
+removal.
+A fixture that models an actor or other caller input supplies it explicitly
+after that boundary. The packaged MCP fixture invoked directly outside the
+runner uses the same boundary and owned ledger; other direct packaged CLI
+invocations are outside this rule. Manually requested live Paseo experiments use
+their own temporary Paseo home and port; no repository test route forwards
+ambient Paseo values. The runner removes its fixture root after owned test
+children terminate, on passing and failing runs alike. Tests never add synthetic
+presence to the caller's live ledger or Heart. This is test-harness isolation, not
+a change to Verification's inherited-environment contract, a permission sandbox,
+or a production provider environment.
 
 ## Ownership
 

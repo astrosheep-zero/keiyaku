@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, globSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { isolatedTestEnvironment } from "./test-environment.mjs";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 import { orderSweepEntries } from "./test-plan.mjs";
 
@@ -118,9 +119,8 @@ if (compiled && runtimeFiles.some((file) => !existsSync(file))) {
   process.exit(1);
 }
 const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
-const ledgerRoot = mkdtempSync(join(tmpdir(), "keiyaku-test-square-ledger-"));
-/** @type {NodeJS.ProcessEnv} */
-const environment = { ...process.env, SQUARE_DELIVERY: join(ledgerRoot, "delivery.sqlite") };
+const fixtureHome = mkdtempSync(join(tmpdir(), "keiyaku-test-home-"));
+const environment = isolatedTestEnvironment(process.env, fixtureHome);
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();
@@ -210,7 +210,7 @@ try {
     process.exitCode = result.status ?? 1;
   }
 } finally {
-  rmSync(ledgerRoot, { recursive: true, force: true });
+  rmSync(fixtureHome, { recursive: true, force: true });
 }
 if (suite !== undefined) {
   process.once("beforeExit", () =>

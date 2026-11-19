@@ -17,13 +17,45 @@ const { TEST_MANIFESTS } = (await import(
   pathToFileURL(resolve("scripts/test-manifests.mjs")).href
 )) as TestManifestsModule;
 
+type TestEnvironmentModule = {
+  CALLER_ENVIRONMENT_PREFIXES: readonly string[];
+  CALLER_ENVIRONMENT_NAMES: readonly string[];
+  TEST_ENVIRONMENT_SELECTORS: readonly string[];
+  isCallerEnvironmentKey(key: string, platform?: NodeJS.Platform): boolean;
+};
+
+const {
+  CALLER_ENVIRONMENT_PREFIXES,
+  CALLER_ENVIRONMENT_NAMES,
+  TEST_ENVIRONMENT_SELECTORS,
+  isCallerEnvironmentKey,
+} = (await import(pathToFileURL(resolve("scripts/test-environment.mjs")).href)) as TestEnvironmentModule;
+
 const root = process.cwd();
 
-test("test runner preserves the inherited environment", () => {
+test("test environment scrub recognizes caller namespaces and Windows key case", () => {
+  for (const prefix of CALLER_ENVIRONMENT_PREFIXES) {
+    assert.equal(isCallerEnvironmentKey(`${prefix}ANY`), true, prefix);
+  }
+  for (const name of CALLER_ENVIRONMENT_NAMES) assert.equal(isCallerEnvironmentKey(name), true, name);
+  assert.equal(isCallerEnvironmentKey("keiyaku_actor_id", "win32"), true);
+  assert.equal(isCallerEnvironmentKey("Keiyaku_Actor_Id", "win32"), true);
+  assert.equal(isCallerEnvironmentKey("keiyaku_actor_id", "linux"), false);
+  assert.equal(isCallerEnvironmentKey("CLAUDECODE_EXTRA"), false);
+  assert.equal(isCallerEnvironmentKey("TEST_SENTINEL"), false);
+  for (const selector of TEST_ENVIRONMENT_SELECTORS) {
+    assert.equal(isCallerEnvironmentKey(selector), false, selector);
+    assert.equal(isCallerEnvironmentKey(selector.toLowerCase(), "win32"), false, selector);
+  }
+});
+
+test("test runner preserves unrelated inherited environment", () => {
   for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      KEIYAKU_TEST_SENTINEL: sentinel,
+      TEST_SENTINEL: sentinel,
+      KEIYAKU_SCRUBBED_SENTINEL: "must not survive",
+      [TEST_ENVIRONMENT_SELECTORS[0]!]: "fixture-public-package",
     };
     // A deliberately nested runner must not inherit Node's recursion guard.
     delete env.NODE_TEST_CONTEXT;
@@ -38,9 +70,102 @@ test("test runner preserves the inherited environment", () => {
       { cwd: root, encoding: "utf8", env },
     );
     assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
-    assert.match(result.stdout + result.stderr, /repository test environment preserves inherited values/u);
+    assert.match(result.stdout + result.stderr, /repository test environment preserves selected values and scrubs reserved ones/u);
     assert.match(result.stdout + result.stderr, /# tests 1/u);
   }
+});
+
+test("focused and sweep test children own a fresh home without caller namespaces", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-identity-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const parentHome = join(directory, "parent-home");
+  mkdirSync(parentHome);
+  writeFileSync(join(parentHome, "sentinel"), "untouched");
+  const poisonedWorld = join(directory, "poisoned-world");
+  mkdirSync(join(poisonedWorld, ".keiyaku"), { recursive: true });
+  const poisonedHeart = join(poisonedWorld, ".keiyaku", "heart.db");
+  writeFileSync(poisonedHeart, "poisoned parent heart bytes\n");
+  const ambientLedger = join(directory, "ambient", "delivery.sqlite");
+  mkdirSync(join(directory, "ambient"));
+  const record = join(directory, "environment.json");
+  const descendantRecord = join(directory, "descendant.json");
+  const poisonedCallerKeys = [
+    ...CALLER_ENVIRONMENT_PREFIXES.map((prefix) => `${prefix}POISONED`),
+    ...CALLER_ENVIRONMENT_NAMES,
+  ];
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  writeFileSync(join(directory, "tests", "environment.test.ts"), "// fixture source\n");
+  writeFileSync(join(directory, ".test-build", "tests", "environment.test.js"), `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const assert = require('node:assert/strict');
+    require('node:test')('owned test environment', () => {
+      const home = process.env.HOME;
+      assert.equal(process.env.USERPROFILE, home);
+      assert.equal(process.env.KEIYAKU_HOME, home);
+      assert.ok(fs.existsSync(home));
+      assert.notEqual(home, ${JSON.stringify(parentHome)});
+      assert.equal(process.env.HTTPS_PROXY, "http://127.0.0.1:6152");
+      assert.equal(process.env.TEST_SENTINEL, "sentinel bytes");
+      assert.equal(process.env.SQUARE_DELIVERY, path.join(home, 'delivery.sqlite'));
+      assert.notEqual(process.env.SQUARE_DELIVERY, ${JSON.stringify(ambientLedger)});
+      for (const key of ${JSON.stringify(poisonedCallerKeys)}) {
+        assert.equal(process.env[key], undefined, key);
+      }
+      assert.equal(process.env.KEIYAKU_ACTOR_ID, undefined);
+      assert.equal(process.env.KEIYAKU_ACTOR_WORLD, undefined);
+      assert.equal(process.env.PASEO_HOME, undefined);
+      assert.equal(process.env.PASEO_PASSWORD, undefined);
+      const child = require('node:child_process').spawnSync(process.execPath, ['-e',
+        "require('node:fs').writeFileSync(process.env.TEST_DESCENDANT_RECORD, JSON.stringify({ home: process.env.HOME, actor: process.env.KEIYAKU_ACTOR_ID }))"],
+        { encoding: 'utf8' });
+      assert.equal(child.status, 0, child.stderr);
+      assert.equal(fs.readFileSync(process.env.TEST_DESCENDANT_RECORD, 'utf8'), JSON.stringify({ home }));
+      fs.writeFileSync(process.env.TEST_ENVIRONMENT_RECORD, JSON.stringify({ home }));
+    });
+  `);
+  const ambient: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: parentHome,
+    USERPROFILE: parentHome,
+    KEIYAKU_HOME: parentHome,
+    HTTPS_PROXY: "http://127.0.0.1:6152",
+    SQUARE_DELIVERY: ambientLedger,
+    TEST_SENTINEL: "sentinel bytes",
+    TEST_ENVIRONMENT_RECORD: record,
+    TEST_DESCENDANT_RECORD: descendantRecord,
+    PASEO_HOME: join(directory, "live-paseo-home"),
+    PASEO_PASSWORD: "live-paseo-password",
+  };
+  for (const key of poisonedCallerKeys) ambient[key] = `poisoned-${key}`;
+  ambient.KEIYAKU_ACTOR_ID = "aku/probe/1234abcd";
+  ambient.KEIYAKU_ACTOR_WORLD = poisonedWorld;
+  delete ambient.NODE_TEST_CONTEXT;
+  const homes: string[] = [];
+  for (const sweep of [false, true]) {
+    rmSync(record, { force: true });
+    rmSync(descendantRecord, { force: true });
+    const result = spawnSync(
+      process.execPath,
+      [
+        resolve(root, "scripts/run-tests.mjs"),
+        "--compiled",
+        ...(sweep ? ["--test-concurrency=1"] : ["tests/environment.test.ts"]),
+      ],
+      { cwd: directory, encoding: "utf8", env: ambient },
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const observed = JSON.parse(readFileSync(record, "utf8")) as { home: string };
+    assert.equal(existsSync(observed.home), false, "runner returned before fixture home cleanup");
+    assert.notEqual(observed.home, parentHome);
+    assert.notEqual(observed.home, process.env.HOME, "a nested runner must own its home");
+    homes.push(observed.home);
+    assert.deepEqual(readdirSync(parentHome), ["sentinel"]);
+    assert.equal(readFileSync(join(parentHome, "sentinel"), "utf8"), "untouched");
+    assert.equal(readFileSync(poisonedHeart, "utf8"), "poisoned parent heart bytes\n");
+  }
+  assert.notEqual(homes[0], homes[1]);
 });
 
 test("focused and sweep runners isolate Square ledgers through descendant exit and clean failures", (context) => {
