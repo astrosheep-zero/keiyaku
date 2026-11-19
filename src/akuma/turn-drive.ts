@@ -95,11 +95,7 @@ export type DriveTurnInput = Readonly<{
   soul: Soul;
   adapter: ProviderAdapter;
   bodySequence: number;
-  body: string;
-  call?: string;
   launchTells: readonly TellFact[];
-  initiator?: string;
-  schemaJson?: string;
   supervisor: BodySupervisor;
   world: import("../world.js").WorldRoot;
   executionAssociation?: ExecutionAssociationReader;
@@ -158,35 +154,6 @@ async function writeProviderEvent(
   if (!input.supervisor.signal.aborted)
     await appendActivity(input.paths, { turnSequence, event: encodeAgentEvent(event), at });
   return event.type === "session" ? event.coordinate : undefined;
-}
-
-function startProviderAttempt(
-  input: DriveTurnInput,
-  setup: Readonly<{
-    recipe: Awaited<ReturnType<typeof turnRecipe>>;
-    tells: readonly TellFact[];
-    signal: AbortSignal;
-    schemaJson: string | undefined;
-    runtimeInstructions: string | undefined;
-  }>,
-): ProviderAttempt<Session> {
-  const { cwd, options, session } = setup.recipe;
-  const driveInput = {
-    body: input.body,
-    launchTells: setup.tells.map((tell) => ({ id: tell.id, text: tell.body })),
-    cwd,
-    options,
-    signal: setup.signal,
-    execution: {
-      akumaId: input.soul.id,
-      world: input.world,
-    },
-    ...(setup.runtimeInstructions === undefined ? {} : { runtimeInstructions: setup.runtimeInstructions }),
-    ...(setup.schemaJson === undefined ? {} : { schemaJson: setup.schemaJson }),
-  };
-  return session === undefined
-    ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
-    : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
 }
 
 async function retireProviderCustody(
@@ -354,25 +321,38 @@ function createTurnWakeups(signal: AbortSignal) {
   };
 }
 
-async function prepareTurn(input: DriveTurnInput) {
+async function prepareTurn(input: DriveTurnInput, recipe: Pick<Soul, "cwd" | "options">) {
+  const [opening] = input.launchTells;
+  if (opening === undefined) throw new Error("Cannot start a Turn without an admitted Tell");
+  const { initiator, schemaJson } = opening;
+  const schema = schemaJson === undefined ? {} : { schemaJson };
   const runtimeInstructions = keiyakuExecutionInstructions(
     input.soul,
     input.soul.bare !== false ? undefined : await input.executionAssociation?.(),
   );
-  const tells = drainPendingTells(input.launchTells);
-  const schemaJson = input.schemaJson ?? tells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
-  const initiator = input.call === undefined ? tells[0]?.initiator : input.initiator;
   const { sequence: turnSequence } = await beginTurn(input.paths, {
     ...(initiator === undefined ? {} : { initiator }),
     bodySequence: input.bodySequence,
     startedAt: input.now(),
-    ...(input.call === undefined ? {} : { call: input.call }),
-    ...(schemaJson === undefined ? {} : { schemaJson }),
+    ...schema,
   });
-  const tellIds = tells.map((tell) => tell.id);
-  if (tellIds.length > 0) await bindTellsToTurn(input.paths, { turnSequence, tellIds, boundAt: input.now() });
+  const launchTells = input.launchTells.map((tell) => ({ id: tell.id, text: tell.body }));
+  const tellIds = launchTells.map((tell) => tell.id);
+  await bindTellsToTurn(input.paths, { turnSequence, tellIds, boundAt: input.now() });
   await input.turnStarted.emit(turnSequence);
-  return { turnSequence, tells, tellIds, schemaJson, runtimeInstructions };
+  const providerInput = {
+    launchTells,
+    cwd: recipe.cwd,
+    options: recipe.options,
+    signal: input.supervisor.signal,
+    execution: {
+      akumaId: input.soul.id,
+      world: input.world,
+    },
+    ...(runtimeInstructions === undefined ? {} : { runtimeInstructions }),
+    ...schema,
+  };
+  return { turnSequence, tellIds, providerInput };
 }
 
 async function openAdmittedSession(
@@ -382,17 +362,16 @@ async function openAdmittedSession(
 ): Promise<AsyncIterator<AgentEvent> | undefined> {
   const { input, turnSequence, drive, mayWrite } = writers;
   wakeups.arm("completion", drive.completion);
-  if (tellIds.length > 0)
-    await recordTellDeliveries(
-      input.paths,
-      tellIds.map((tellId) => ({
-        tellId,
-        route: "launch",
-        turnSequence,
-        fence: drive.admission.fence,
-        deliveredAt: input.now(),
-      })),
-    );
+  await recordTellDeliveries(
+    input.paths,
+    tellIds.map((tellId) => ({
+      tellId,
+      route: "launch",
+      turnSequence,
+      fence: drive.admission.fence,
+      deliveredAt: input.now(),
+    })),
+  );
   if (!mayWrite()) return undefined;
   wakeups.arm("receipt-failure", pumpReceipts(writers));
   const iterator = drive.events[Symbol.asyncIterator]();
@@ -402,7 +381,7 @@ async function openAdmittedSession(
 
 async function consumeTurn(
   input: DriveTurnInput,
-  { turnSequence, tellIds }: Awaited<ReturnType<typeof prepareTurn>>,
+  { turnSequence, tellIds, providerInput }: Awaited<ReturnType<typeof prepareTurn>>,
   recipe: Awaited<ReturnType<typeof turnRecipe>>,
   heart: BodyControlSnapshot,
   wakeups: ReturnType<typeof createTurnWakeups>,
@@ -442,7 +421,7 @@ async function consumeTurn(
       case "admission":
         writers = { input, turnSequence, drive: wake.value, writeWitness, mayWrite };
         iterator = await openAdmittedSession(writers, tellIds, wakeups);
-        if (input.schemaJson === undefined) tellLive = wake.value.tell;
+        if (iterator !== undefined && providerInput.schemaJson === undefined) tellLive = wake.value.tell;
         break;
       case "event":
         if (wake.value.done) {
@@ -488,12 +467,17 @@ export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult>
   let ending: TurnDriveResult = { kind: "stopped" };
   try {
     const recipe = await turnRecipe(input.paths, input.soul);
-    if (recipe.session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
-    const prepared = await prepareTurn(input);
+    const { session } = recipe;
+    if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
+    const prepared = await prepareTurn(input, recipe);
     if (supervisor.signal.aborted) return ending;
     const heart = supervisor.current();
     startingTurn = prepared.turnSequence;
-    const attempt = startProviderAttempt(input, { ...prepared, recipe, signal: supervisor.signal });
+    const { providerInput } = prepared;
+    const attempt =
+      session === undefined
+        ? input.adapter.start({ ...providerInput, session: { kind: "fresh" } })
+        : input.adapter.resume!({ ...providerInput, session: { kind: "resume", coordinate: session } });
     owned = { attempt, turnSequence: startingTurn };
     wakeups.arm("admission", attempt.result);
     wakeups.arm("closed", attempt.closed);

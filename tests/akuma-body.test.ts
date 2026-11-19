@@ -1,6 +1,6 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { allocatedHeart, claudeBodyLaunch, recordTell, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
+import { allocatedHeart, claudeBodyLaunch, driveWithTell, recordTell, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import {
   expectBodySettles, installAkumaBodyIdleFinishBarrier, installAkumaBodyPidReceipt,
   settlementProbe, waitForCondition, waitForPidReceiptExit,
@@ -355,8 +355,11 @@ async function waitUntilLatestBody(
   settlement?: Promise<unknown>,
 ): Promise<void> {
   await waitForCondition(
-    "the first Body recorded in Heart",
-    async () => (await readHeart(paths)).latestBody !== null,
+    "the active Body recorded in Heart",
+    async () => {
+      const { latestBody } = await readHeart(paths);
+      return latestBody !== null && latestBody.end === undefined;
+    },
     settlement === undefined
       ? {}
       : { terminalState: settlementProbe(settlement, () => "the driving Body pump settled without a recorded Body") },
@@ -395,7 +398,6 @@ function adapter(
     result: TurnResult;
     starts: Array<
       Readonly<{
-        body: string;
         launchTells: readonly Readonly<{ id: string; text: string }>[];
         schemaJson?: string;
         options: ProviderOptions;
@@ -411,7 +413,6 @@ function adapter(
     const sessionId = call.session.kind === "fresh" ? "fresh" : call.session.coordinate.sessionId;
     if (sessionId !== "fresh") assert.ok(sessionId);
     input.starts.push({
-      body: call.body,
       launchTells: call.launchTells,
       ...(call.schemaJson === undefined ? {} : { schemaJson: call.schemaJson }),
       options: call.options,
@@ -455,10 +456,10 @@ test("birth observes durable Soul and Body once, without Turn ownership or repla
     birth: { package: "./plugins/birth.mjs", config: { output } },
   } }));
   const allocated = await allocatedHeart(world, "claude", "b1700001");
-  const launch = claudeBodyLaunch(allocated, root, "work", { birthInitiator: "Submitter", completion: { contractId: "kei/birth" } });
-  // Empty publication: birth attribution must not become an opening Turn's owner.
-  const { initialBody: _body, ...empty } = launch;
-  await driveAkumaBody(empty, undefined);
+  const empty = claudeBodyLaunch(allocated, root, { birthInitiator: "Submitter", completion: { contractId: "kei/birth" } });
+  const starts: Parameters<typeof adapter>[0]["starts"] = [];
+  await driveAkumaBody(empty, adapter({ starts, events: [], result: { kind: "failed", diagnostic: "unexpected drive" } }));
+  assert.deepEqual(starts, [], "prompt-free birth never invokes the provider");
   const observations = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(observations.length, 1);
   assert.deepEqual(observations[0].signal, {
@@ -479,7 +480,7 @@ test("birth observes durable Soul and Body once, without Turn ownership or repla
   const leash = (await HeldAkumaLeash.try(sealed.paths))!;
   await leash.sealIfUnborn(sealed.paths, { evidence: "sealed", at: new Date().toISOString() });
   leash.release();
-  await driveAkumaBody(claudeBodyLaunch(sealed, root, "ignored"), undefined);
+  await driveAkumaBody(claudeBodyLaunch(sealed, root), undefined);
   assert.equal((await readHeart(sealed.paths)).soul, null);
   assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
 
@@ -503,22 +504,16 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     const recorder = installTurnOutcomeRecorder(allocated.paths);
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
-    const launch: BodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
+    const launch = claudeBodyLaunch(allocated, root, {
       completion: { contractId: "kei/example" },
-      initiator: "Alice",
+      birthInitiator: "Submitter",
     });
-    assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(launch))).sort(), [
-      "completion",
-      "initialBody",
-      "initiator",
-      "paths",
-      "seed",
-    ]);
-
-    await driveAkumaBody(
+    const starts: Parameters<typeof adapter>[0]["starts"] = [];
+    await driveWithTell(
       launch,
+      { id: "opening", body: "build it", initiator: "Alice" },
       adapter({
-        starts: [],
+        starts,
         events: [{ type: "session", coordinate: { sessionId: "plugin-session" } }],
         result: { kind: "answered", answer: "done", historyId: "plugin-history" },
       }),
@@ -527,13 +522,19 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
 
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
     await eventually(() => recorder.activations === 1 && recorder.observations.length === 1);
+    const firstTurn = (await committedTurnSequences(allocated.paths))[0];
+    const opening = await readTell(allocated.paths, "opening");
+    assert.deepEqual(starts[0]?.launchTells, [{ id: "opening", text: "build it" }]);
+    assert.equal(opening?.binding?.turnSequence, firstTurn);
+    assert.deepEqual(opening?.deliveries.map((delivery) => delivery.route), ["launch"]);
+    assert.equal(opening?.state, "told");
     assert.deepEqual(recorder.observations, [
       {
         signal: {
           kind: "akuma.turn-outcome",
           akumaId: allocated.id,
-          bodySequence: 1,
-          turnSequence: 1,
+          bodySequence: 2,
+          turnSequence: firstTurn,
           at: "2026-08-08T00:00:00.000Z",
           outcome: { kind: "answered", text: "done" },
           initiator: "Alice",
@@ -563,9 +564,9 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       recordedAt: "2026-08-08T00:00:01.001Z",
     });
     await driveAkumaBody(
-      { paths: allocated.paths, initiator: "Alice" },
+      { paths: allocated.paths },
       adapter({
-        starts: [],
+        starts,
         events: [{ type: "session", coordinate: { sessionId: "plugin-session-2" } }],
         result: { kind: "answered", answer: "adjusted" },
       }),
@@ -575,6 +576,10 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
     await eventually(() => recorder.activations === 1 && recorder.observations.length === 2);
     const sequences = await committedTurnSequences(allocated.paths);
+    assert.deepEqual(starts[1]?.launchTells, [
+      { id: "plugin-tell", text: "adjust it" },
+      { id: "plugin-coalesced-tell", text: "also check tests" },
+    ]);
     assert.deepEqual(
       recorder.observations.map(({ signal }) =>
         signal.kind === "akuma.turn-outcome" ? signal.turnSequence : undefined,
@@ -585,7 +590,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       signal: {
         kind: "akuma.turn-outcome",
         akumaId: allocated.id,
-        bodySequence: 2,
+        bodySequence: 3,
         turnSequence: sequences[1],
         at: "2026-08-08T00:00:02.000Z",
         outcome: { kind: "answered", text: "adjusted" },
@@ -618,7 +623,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       recordedAt: "2026-08-08T00:00:03.001Z",
     });
     await driveAkumaBody(
-      { paths: allocated.paths, initiator: "Alice" },
+      { paths: allocated.paths },
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "plugin-session-3" } }],
@@ -644,8 +649,9 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
 
-    await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "build it"),
+    await driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "build it",
       adapter({ starts: [], events: [], result: { kind: "failed", diagnostic: "provider failed" } }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
@@ -659,8 +665,8 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
         signal: {
           kind: "akuma.turn-outcome",
           akumaId: allocated.id,
-          bodySequence: 1,
-          turnSequence: 1,
+          bodySequence: 2,
+          turnSequence: (await committedTurnSequences(allocated.paths))[0],
           at: "2026-08-08T00:00:00.000Z",
           outcome: { kind: "failed", reason: "provider failed" },
         },
@@ -708,7 +714,7 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
       custody.own(sessionResource(session.completion));
       return session;
     });
-    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "build it", { initiator: "Alice" }), scenarioProvider(session, { resume: session }), {
+    const body = driveWithTell(claudeBodyLaunch(allocated, root), { body: "build it", initiator: "Alice" }, scenarioProvider(session, { resume: session }), {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await awaitProviderSession(() => started, body, "the provider session to start after the bounded signal wait");
@@ -720,14 +726,14 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
     release();
     await body;
     const sequences = await committedTurnSequences(allocated.paths);
-    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
     await eventually(() => signals.length === 4);
     assert.deepEqual(signals, [
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[0], initiator: "Alice" },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[0], at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[0], at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[1] },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[1], at: "2026-08-08T00:00:00.000Z", outcome: { kind: "failed", reason: "provider failed" } },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[1], at: "2026-08-08T00:00:00.000Z", outcome: { kind: "failed", reason: "provider failed" } }
     ]);
     /* The first Turn's started handler hung and the second Turn's threw; both Turns still began and ended. */
     await eventually(() => readFileSync(allocated.paths.log, "utf8").includes("timed out after 5000ms") && readFileSync(allocated.paths.log, "utf8").includes("started observer failure"), 15_000);
@@ -751,8 +757,9 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
     };
     bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder = recorder;
 
-    await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "first", { initiator: "Alice" }),
+    await driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      { body: "first", initiator: "Alice" },
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "body-one" } }],
@@ -761,13 +768,16 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
     await recordTell(allocated.paths, {
+      id: "second", body: "second", initiator: "Bob", recordedAt: "2026-08-08T00:00:00.200Z",
+    });
+    await recordTell(allocated.paths, {
       id: "body-end-teller",
       body: "extra input",
       initiator: "Carol",
       recordedAt: "2026-08-08T00:00:00.500Z",
     });
     await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "second", { initiator: "Bob" }),
+      { paths: allocated.paths },
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "body-two" } }],
@@ -775,6 +785,7 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       }),
       { now: () => "2026-08-08T00:00:01.000Z" },
     );
+    await recordTell(allocated.paths, { id: "third", body: "third", recordedAt: "2026-08-08T00:00:01.200Z" });
     await recordTell(allocated.paths, {
       id: "body-end-ownerless-teller",
       body: "third input",
@@ -782,7 +793,7 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       recordedAt: "2026-08-08T00:00:01.500Z",
     });
     await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "third"),
+      { paths: allocated.paths },
       adapter({
         starts: [],
         events: [{ type: "session", coordinate: { sessionId: "body-three" } }],
@@ -791,11 +802,11 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       { now: () => "2026-08-08T00:00:02.000Z" },
     );
 
-    // A Body that never admits a Turn carries no attribution even though its launch named one.
-    // The recipe resumes the predecessor session, and this adapter has no resume path, so the
-    // Body breaks off before any Turn is admitted.
-    await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "fourth", { initiator: "Carol" }),
+    // The pending Tell cannot supply attribution to a Body that never admits a Turn.
+    // The recipe requires resume, which this adapter does not support.
+    await driveWithTell(
+      { paths: allocated.paths },
+      { body: "fourth", initiator: "Carol" },
       {
         admitOptions: (options) => ({ kind: "admitted", options }),
         start() {
@@ -806,10 +817,11 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
     );
 
     assert.deepEqual(recorder.signals, [
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", at: "2026-08-08T00:00:01.000Z", initiator: "Bob", participants: ["Bob", "Carol"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", at: "2026-08-08T00:00:02.000Z", participants: ["Dana"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "broke-off", at: "2026-08-08T00:00:03.000Z" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", at: "2026-08-08T00:00:00.000Z" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", at: "2026-08-08T00:00:01.000Z", initiator: "Bob", participants: ["Bob", "Carol"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "exited", at: "2026-08-08T00:00:02.000Z", participants: ["Dana"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 5, end: "broke-off", at: "2026-08-08T00:00:03.000Z" },
     ]);
   } finally {
     delete bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder;
@@ -859,22 +871,16 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
         custody.own(sessionResource(session.completion));
         return session;
     }));
-    const launch = claudeBodyLaunch(allocated, root, "work", { initiator: "Alice" });
-    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-    try {
-      await leash.birth(allocated.paths, { ...launch.seed!, createdAt: "2026-08-08T00:00:00.000Z" });
-    } finally {
-      leash.release();
-    }
+    const runtime = { now: () => "2026-08-08T00:00:00.000Z" };
+    await driveAkumaBody(claudeBodyLaunch(allocated, root), live, runtime);
+    await recordTell(allocated.paths, { id: "opening", body: "work", initiator: "Alice", recordedAt: runtime.now() });
     await recordTell(allocated.paths, {
       id: "tell-launch",
       body: "coalesced",
       initiator: "Carol",
       recordedAt: "2026-08-08T00:00:00.000Z",
     });
-    body = driveAkumaBody(launch, live, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
+    body = driveAkumaBody({ paths: allocated.paths }, live, runtime);
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
       () => sessionStarted,
@@ -932,7 +938,7 @@ test("Claude's receipt-free live acknowledgement settles the Tell in the current
         return query;
       },
     }));
-    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), live, {
+    body = driveWithTell(claudeBodyLaunch(allocated, root), "work", live, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
@@ -973,7 +979,7 @@ test("Claude's receipt-free live acknowledgement settles the Tell in the current
     releaseEvents();
     await body;
     assert.equal((await afterAcknowledgement).done, true);
-    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
   } finally {
     releaseEvents();
     await body;
@@ -1022,24 +1028,23 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = driveAkumaBody({
+    const body = driveWithTell({
       paths: allocated.paths,
       seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
-      initialBody: "work",
-    }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
+    }, "work", createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
       () => sessionStarted,
       body,
       "the Pi session to start before recording the live Tell",
     );
-    const initialTurn = await readLatestTurnForBody(allocated.paths, 1);
+    const initialTurn = await readLatestTurnForBody(allocated.paths, 2);
     assert.ok(initialTurn !== null);
     await recordTell(allocated.paths, { id: "pi-live", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z" });
     await waitForCondition("Pi to queue the native steer", () => steered !== undefined, { terminalState: settlementProbe(body, () => "Body settled before native steer") });
     assert.deepEqual(steered?.content, [{ type: "text", text: "steer" }]);
     assert.equal((await readTell(allocated.paths, "pi-live"))?.state, "pending");
-    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     session.listener?.({ type: "agent_end", messages: [], willRetry: false });
     assert.equal((await readTell(allocated.paths, "pi-live"))?.state, "pending");
     for (const listener of nativeListeners) listener({ type: "message_end", message: steered });
@@ -1049,7 +1054,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     assert.equal(turnSequence, initialTurn.sequence);
     release();
     await body;
-    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.equal((await readTurn(allocated.paths, turnSequence!))?.end?.outcome.kind, "answered");
     assert.equal(nativeListeners.size, 0);
   } finally {
@@ -1105,11 +1110,10 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = driveAkumaBody({
+    const body = driveWithTell({
       paths: allocated.paths,
       seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
-      initialBody: "work",
-    }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
+    }, "work", createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
       () => sessionStarted,
@@ -1127,7 +1131,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     assert.deepEqual(tell?.deliveries.map((delivery) => delivery.route), ["launch"]);
     assert.equal(sessions, 2);
     assert.deepEqual(prompts, ["work", "late input"]);
-    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.equal(nativeListeners.size, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1158,7 +1162,7 @@ for (const phase of ["setup", "execution"] as const) {
           completion,
         };
       }));
-      body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), failing, { signal: t.signal });
+      body = driveWithTell(claudeBodyLaunch(allocated, root), { id: "opening", body: "work" }, failing, { signal: t.signal });
       await expectBodySettles(started.promise, "provider never began setup");
       const predecessor = (await readHeart(allocated.paths)).latestBody!;
       await recordTell(allocated.paths, { id: "queued", body: "retain me", recordedAt: new Date().toISOString() });
@@ -1168,8 +1172,9 @@ for (const phase of ["setup", "execution"] as const) {
       assert.equal(stranded.latestBody?.sequence, predecessor.sequence);
       assert.equal(stranded.latestBody?.end, "broke-off");
       assert.deepEqual(await outcomes(allocated.paths), [{ kind: "failed", diagnostic }]);
-      assert.deepEqual(stranded.pending.map((tell) => tell.id), ["queued"]);
-      assert.equal(stranded.pending[0]?.binding, undefined);
+      const retained = phase === "setup" ? ["opening", "queued"] : ["queued"];
+      assert.deepEqual(stranded.pending.map((tell) => tell.id), retained);
+      assert.equal(stranded.pending.at(-1)?.binding, undefined);
       assert.deepEqual(await owner.tellOutcome("queued", { timeoutMs: 0 }), {
         reason: "completed", outcome: null, completedAt: null,
       });
@@ -1192,7 +1197,7 @@ for (const phase of ["setup", "execution"] as const) {
         },
       }, { signal: t.signal });
       await woken;
-      assert.deepEqual(starts[0]?.launchTells.map((tell) => tell.id), ["queued", "next"]);
+      assert.deepEqual(starts[0]?.launchTells.map((tell) => tell.id), [...retained, "next"]);
       const settled = await readHeart(allocated.paths);
       assert.equal(settled.latestBody?.sequence, predecessor.sequence + 1);
       assert.equal(settled.latestBody?.end, "exited");
@@ -1212,8 +1217,9 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let aborted = false;
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "work",
       scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
           const session = {
             admission: { fence: "launch" },
@@ -1259,8 +1265,9 @@ test("an answer without an admitted or resumed session is retained as a failed t
   const root = bodyTestDirectory("keiyaku-akuma-sessionless-answer-");
   try {
     const allocated = await allocatedHeart(root, "claude", "decafbad");
-    await driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "start"),
+    await driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "start",
       adapter({
         starts: [],
         events: [],
@@ -1346,8 +1353,9 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffed00");
     const { promise: started, resolve: setupStarted } = promiseBarrier<void>();
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      { id: "opening", body: "work" },
       scenarioProvider((input) => createProviderAttempt(input.signal, async () => {
           setupStarted();
           await new Promise<void>((_resolve, reject) => {
@@ -1368,6 +1376,10 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
+    const input = await readTell(allocated.paths, "opening");
+    assert.deepEqual(input && { id: input.id, body: input.body, state: input.state }, {
+      id: "opening", body: "work", state: "pending",
+    });
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1384,7 +1396,7 @@ test("kill publishes cancellation only after provider closure and emits that com
     const allocated = await allocatedHeart(root, "claude", "ca1ce102");
     configureTurnOutcomePlugins(root);
     const recorder = installTurnOutcomeRecorder(allocated.paths);
-    driven = driveAkumaBody(claudeBodyLaunch(allocated, root, "direct call", { initiator: "Alice" }),
+    driven = driveWithTell(claudeBodyLaunch(allocated, root), { body: "opening work", initiator: "Alice" },
       scenarioProvider(() => {
         start();
         return {
@@ -1464,7 +1476,7 @@ test("public kill supervises an answered Turn until Attempt closure proof", asyn
       });
       return session;
     }));
-    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+    body = driveWithTell(claudeBodyLaunch(allocated, root), "work", running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1524,7 +1536,7 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
       });
       return session;
     }));
-    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+    body = driveWithTell(claudeBodyLaunch(allocated, root), "work", running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1568,8 +1580,7 @@ test(
     let launch: LiveBodyLaunch | undefined;
     try {
       const allocated = await allocatedHeart(root, "claude", "c3000000");
-      const { initialBody: _, ...empty } = claudeBodyLaunch(allocated, root, "unused");
-      launch = await spawnAkumaBody(empty);
+      launch = await spawnAkumaBody(claudeBodyLaunch(allocated, root));
       await waitForCondition(
         "detached Body at both fixture gates",
         () => existsSync(join(barrier, "idle-ready")) && existsSync(join(barrier, "observation-ready")),
@@ -1671,7 +1682,7 @@ test("ordinary wake recovers an interrupt admitted before its caller disappears"
       custody.own({ closed, abort: async () => releaseClosed(), forceDispose: async () => releaseClosed() });
       return session;
     }));
-    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), oldProvider, {
+    body = driveWithTell(claudeBodyLaunch(allocated, root), "work", oldProvider, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1760,7 +1771,7 @@ test("pause aborts the current drive and records the body as put down", async ()
         }));
         return session;
     }));
-    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+    const body = driveWithTell(claudeBodyLaunch(allocated, root), "work", running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await started;
@@ -1782,8 +1793,9 @@ test("forced disposal failure records hung and broke-off before the Body returns
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee06");
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "work",
       scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
           const session = {
             admission: { fence: "hung-fixture-turn" },
@@ -1829,8 +1841,9 @@ test("provider closure failure enters Body supervision before session completion
     const allocated = await allocatedHeart(root, "claude", "c0ffee07");
     const { promise: closed, reject: rejectClosed } = promiseBarrier<void>();
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "work",
       scenarioProvider(() => {
           markStarted();
           return {
@@ -1869,8 +1882,9 @@ test("Claude SDK startup exit retains its native failure and releases Body custo
   const root = bodyTestDirectory("keiyaku-claude-startup-exit-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee09");
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "work",
       createClaudeProvider({ executable: "/usr/bin/false" }),
     );
     await expectBodySettles(body, "Body did not settle failed Claude startup");
@@ -1920,7 +1934,7 @@ lines.on('close', () => {
 `);
     const admitted = promiseBarrier<Session>();
     const provider = createClaudeProvider({ executable });
-    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), scenarioProvider((input) => {
+    const body = driveWithTell(claudeBodyLaunch(allocated, root), "work", scenarioProvider((input) => {
       const attempt = provider.start(input);
       void attempt.result.then(admitted.resolve, admitted.reject);
       return attempt;
@@ -1941,7 +1955,10 @@ lines.on('close', () => {
     const heart = await readHeart(allocated.paths);
     assert.match(heart.latestBody?.hung?.diagnostic ?? "", /code 7.*native teardown failed/su);
     assert.equal(heart.latestBody?.end, "broke-off");
-    assert.equal((await readLatestTurnForBody(allocated.paths, heart.latestBody!.sequence))?.end, undefined);
+    assert.deepEqual((await readLatestTurnForBody(allocated.paths, heart.latestBody!.sequence))?.end?.outcome, {
+      kind: "failed",
+      diagnostic: "Body hung with open bound Turns",
+    });
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1961,8 +1978,9 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     const { promise: returned, resolve: tellReturned } = promiseBarrier<void>();
     const { promise: completion, resolve: settle } = promiseBarrier<TurnResult>();
     let sessionStarted = false;
-    const body = driveAkumaBody(
-      claudeBodyLaunch(allocated, root, "work"),
+    const body = driveWithTell(
+      claudeBodyLaunch(allocated, root),
+      "work",
       scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
           sessionStarted = true;
           const session = {
@@ -2136,7 +2154,7 @@ test("Body launch validates the real argv value without minting World or process
   const root = mkdtempSync(join(tmpdir(), "keiyaku-launch-schema-"));
   try {
     const allocated = await allocatedHeart(root, "claude", "1234abcd");
-    const launch = claudeBodyLaunch(allocated, root, "work");
+    const launch = claudeBodyLaunch(allocated, root);
     const input = await bodyProcessInput(launch);
     const raw: unknown = JSON.parse(Buffer.from(input.argv.at(-1)!, "base64url").toString("utf8"));
     assert.deepEqual(bodyLaunchSchema.parse(raw), launch);
@@ -2151,10 +2169,11 @@ test("a confirmed native model is the one selection every later Turn resumes wit
   const root = bodyTestDirectory("keiyaku-runtime-model-turn-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c42");
-    const launch = claudeBodyLaunch(allocated, root, "first");
+    const launch = claudeBodyLaunch(allocated, root);
     const starts: Parameters<typeof adapter>[0]["starts"] = [];
-    await driveAkumaBody(
+    await driveWithTell(
       { ...launch, seed: { ...launch.seed!, options: { model: "claude-requested" } } },
+      "first",
       adapter({
         starts,
         events: [
@@ -2236,7 +2255,7 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
   const root = bodyTestDirectory("keiyaku-runtime-model-overflow-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c99");
-    const launch = claudeBodyLaunch(allocated, root, "first");
+    const launch = claudeBodyLaunch(allocated, root);
     const starts: ProviderOptions[] = [];
     const drive = (
       call:
@@ -2262,8 +2281,9 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
     });
     const provider: ProviderAdapter = scenarioProvider(drive, { resume: drive });
 
-    await driveAkumaBody(
+    await driveWithTell(
       { ...launch, seed: { ...launch.seed!, options: { model: "claude-requested" } } },
+      "first",
       provider,
       { now: () => "2026-08-08T00:00:10.000Z" },
     );

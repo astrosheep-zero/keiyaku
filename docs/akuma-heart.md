@@ -167,8 +167,11 @@ process. A normally exited Body remains already stopped without a witness, and
 a witnessed Body remains already killed. Hung custody is not a stop, even if an
 end has been recorded.
 
-Tell admission retains its optional submitting initiator alongside its input;
-this is opaque integration attribution, with no participant lookup or historical
+Admitted Tells are the sole authority for input to new Turns. Historical Call
+facts remain readable history, not a source of executable input; their retained
+outcomes and native fork points remain unchanged. Tell admission retains the
+input and its optional submitting initiator under the original Tell identity.
+This is opaque integration attribution, with no participant lookup or historical
 identity rewriting. Reusing the same Tell identity cannot replace that attribution. Turn admission
 retains the opening input's initiator independently of later Tell retention,
 Body succession, or the process producing its outcome. Binding a Tell to a Turn

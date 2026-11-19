@@ -126,18 +126,25 @@ async function bornSoul(
   return { soul: born, created: result === "born" };
 }
 
-function parseSchemaAnswerJson(
-  raw: string,
-): Readonly<{ kind: "json"; json: string }> | Readonly<{ kind: "invalid"; diagnostic: string }> {
+function outcomeForTell(
+  result: DrivenTurn,
+  schemaJson: string | undefined,
+): Exclude<TurnOutcome, { kind: "canceled" }> {
+  if (result.kind === "failed") return { kind: "failed", diagnostic: result.diagnostic };
+  const { answer, historyId, session } = result;
+  if (session === undefined) return { kind: "failed", diagnostic: "Provider answered without a resumable session" };
+  const evidence = { answer, session, ...(historyId === undefined ? {} : { historyId }) };
+  if (schemaJson === undefined) return { kind: "answered", ...evidence };
   try {
-    JSON.parse(raw);
-    return { kind: "json", json: raw };
+    JSON.parse(answer);
   } catch (error) {
     return {
-      kind: "invalid",
+      kind: "invalid-output",
       diagnostic: error instanceof Error ? error.message : "Answer is not valid JSON",
+      ...evidence,
     };
   }
+  return { kind: "answered", ...evidence, answerJson: answer };
 }
 
 async function persistTurn(
@@ -145,45 +152,12 @@ async function persistTurn(
   turnSequence: number,
   result: DrivenTurn,
   completedAt: string,
-): Promise<CommittedOutcome> {
+): Promise<string | undefined> {
   const turn = await readTurn(paths, turnSequence);
-  const schemaJson = turn?.schemaJson;
-  if (result.kind === "answered" && result.session !== undefined) {
-    let answerJson: string | undefined;
-    if (schemaJson !== undefined) {
-      const parsed = parseSchemaAnswerJson(result.answer);
-      if (parsed.kind === "invalid") {
-        const outcome: TurnOutcome = {
-          kind: "invalid-output",
-          diagnostic: parsed.diagnostic,
-          answer: result.answer,
-          session: result.session,
-          ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
-        };
-        await endTurn(paths, { turnSequence, outcome, completedAt });
-        return { outcome: "failed", diagnostic: parsed.diagnostic };
-      }
-      answerJson = parsed.json;
-    }
-    await endTurn(paths, {
-      turnSequence,
-      outcome: {
-        kind: "answered",
-        session: result.session,
-        answer: result.answer,
-        ...(answerJson === undefined ? {} : { answerJson }),
-        ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
-      },
-      completedAt,
-    });
-    return { outcome: "answered" };
-  }
-  const diagnostic = result.kind === "answered" ? "Provider answered without a resumable session" : result.diagnostic;
-  await endTurn(paths, { turnSequence, outcome: { kind: "failed", diagnostic }, completedAt });
-  return { outcome: "failed", diagnostic };
+  const outcome = outcomeForTell(result, turn?.schemaJson);
+  await endTurn(paths, { turnSequence, outcome, completedAt });
+  return outcome.kind === "answered" ? undefined : outcome.diagnostic;
 }
-
-type CommittedOutcome = Readonly<{ outcome: "answered" }> | Readonly<{ outcome: "failed"; diagnostic: string }>;
 
 function boundedDiagnostic(error: unknown): string {
   const text = diagnostic(error);
@@ -231,7 +205,7 @@ async function prepareBodyExecution(
   if (birth === null) return null;
   const { soul } = birth;
   if (!(await prepareBodyStart(launch.paths, leash))) return null;
-  if (launch.seed === undefined && launch.initialBody === undefined) {
+  if (launch.seed === undefined) {
     if ((await readHeart(launch.paths)).pending.length === 0) return null;
   }
   runtime.signal?.throwIfAborted();
@@ -370,7 +344,6 @@ function bodyEndEmitter(
 
 async function runBodyTurns(input: BodyExecution): Promise<void> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime, turnStarted, turnOutcome } = input;
-  let initial = launch.initialBody;
   for (;;) {
     const control = supervisor.current();
     const launchTells = drainPendingTells(
@@ -383,7 +356,7 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now, turnOutcome);
       return;
     }
-    if (initial === undefined && launchTells.length === 0) {
+    if (launchTells.length === 0) {
       const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });
       if (finished.kind === "finished") return;
       if (finished.kind === "controlled") {
@@ -394,20 +367,13 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       await supervisor.refresh();
       continue;
     }
-    const schema =
-      launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson ??
-      (initial === undefined ? undefined : launch.initialSchemaJson);
     const result = await driveTurn({
       paths: launch.paths,
       soul,
       adapter,
       bodySequence,
       supervisor,
-      body: initial ?? "",
-      ...(initial === undefined ? {} : { call: initial }),
-      ...(launch.initiator === undefined ? {} : { initiator: launch.initiator }),
       launchTells,
-      ...(schema === undefined ? {} : { schemaJson: schema }),
       world: runtime.world,
       ...(runtime.executionAssociation === undefined ? {} : { executionAssociation: runtime.executionAssociation }),
       now: runtime.now,
@@ -431,15 +397,14 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }
-    const outcome = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
+    const failure = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
     await turnOutcome.emit(result.turnSequence);
-    if (outcome.outcome === "failed") {
-      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, outcome.diagnostic, runtime.now());
+    if (failure !== undefined) {
+      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, failure, runtime.now());
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
       return;
     }
     await supervisor.refresh();
-    initial = undefined;
   }
 }
 

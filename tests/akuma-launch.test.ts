@@ -234,7 +234,8 @@ test("live Tell confirms exact steering, not a binding, receipt, or answer", { t
       receipts: { async *[Symbol.asyncIterator]() { await answer.promise; } },
     };
   }));
-  const running = driveAkumaBody({ paths, initialBody: "opening" }, adapter);
+  await recordTell(paths, { kind: "tell", id: "opening", body: "opening", recordedAt: new Date().toISOString() });
+  const running = driveAkumaBody({ paths }, adapter);
   t.after(async () => { accept.resolve(); answer.resolve(); await running; });
   try {
     await providerReady.promise;

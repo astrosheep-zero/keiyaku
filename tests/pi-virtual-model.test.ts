@@ -121,8 +121,7 @@ test("Pi's native service bootstrap registers virtual models before selection an
   };
   const provider = createPiProvider(undefined, async () => nativeSdk);
   const attempt = provider.start({
-    body: "Fixture only",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "Fixture only" }],
     cwd: root,
     options: { model: "dot-router/dots-dot" },
     session: { kind: "fresh" },

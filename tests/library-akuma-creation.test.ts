@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { AkumaNameError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { harnessOwner } from "@astrosheep/square";
@@ -659,15 +660,23 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
   let akumaId: string | undefined;
   let admissionCalls = 0;
   let operationFailed = true;
-  const refusal = `initial Tell's Heart write failed`;
-  t.mock.method(AkumaOwner.prototype, "admitTell", async () => {
+  const admitTell = AkumaOwner.prototype.admitTell;
+  t.mock.method(AkumaOwner.prototype, "admitTell", async function (this: AkumaOwner, ...args: Parameters<typeof admitTell>) {
     admissionCalls += 1;
-    throw new Error(refusal);
+    const paths = pathsForAkumaId(world, this.id);
+    assert.equal((await readHeart(paths)).latestBody?.end, "exited");
+    const writer = new DatabaseSync(paths.heart);
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      return await admitTell.apply(this, args);
+    } finally {
+      writer.close();
+    }
   });
   try {
     const result = await Akumas.of(world).spawn({
       akumaName: "worker",
-      body: "terminal-birth-schema-call",
+      body: "first Tell blocked by Heart writer",
       cwd: world,
       ...configured.placement,
       mode: "detach",
@@ -677,9 +686,11 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
     if (result.kind !== "failed") assert.fail("expected initial Tell failure");
     assert.equal(result.failures[0].stage, "tell");
     if (result.failures[0].stage !== "tell") assert.fail("expected Tell stage");
-    assert.equal(result.failures[0].diagnostic, refusal);
+    assert.match(result.failures[0].diagnostic, /database is locked/u);
     assert.equal(admissionCalls, 1);
-    const history = await PublicAkuma.select(world, result.akumaId).history();
+    const child = PublicAkuma.select(world, result.akumaId);
+    assert.equal((await child.status()).life, "asleep");
+    const history = await child.history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
     operationFailed = false;
   } finally {

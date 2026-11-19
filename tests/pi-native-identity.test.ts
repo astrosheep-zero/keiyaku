@@ -76,8 +76,7 @@ async function withNativeBashTool<T>(
   const fake = await nativePiSdk();
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const attempt = provider.start({
-    body: "work",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "work" }],
     cwd: root,
     options: {},
     signal: new AbortController().signal,

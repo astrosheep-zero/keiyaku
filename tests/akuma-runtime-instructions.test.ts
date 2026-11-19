@@ -9,6 +9,7 @@ import { allocateAkumaDirectory, parseAkumaId } from "../src/akuma/identity.js";
 import { AgentEventChannel, createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { World } from "../src/world.js";
 import { bodyExecutionContext } from "../src/body-host.js";
+import { driveWithTell } from "./support/akuma-fixtures.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { contractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -48,7 +49,7 @@ test("Body regenerates one runtime section on start and wake, separate from froz
   const adapter = recordingProvider(seen);
   const runtime = { world,
     executionAssociation: async () => ({ contractId: "kei/work-1234" }) };
-  await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "first" }, adapter, runtime);
+  await driveWithTell({ paths: allocated.paths, seed }, "first", adapter, runtime);
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, {
     world,
@@ -61,7 +62,6 @@ test("Body regenerates one runtime section on start and wake, separate from froz
   assert.match(instructions, new RegExp(allocated.id));
   assert.match(instructions, /Contract context \(not a Dispatch receipt\): kei\/work-1234/u);
   assert.match(instructions, /Use `keiyaku report "\.\.\."` to share updates without stopping your work\./u);
-  assert.equal(seen[1]!.body, "");
   assert.deepEqual(seen[1]!.launchTells, [{ id: "next", text: "second" }]);
   assert.deepEqual(seen[1]!.options, options);
   assert.deepEqual((await readHeart(allocated.paths)).soul?.options, options);
@@ -84,9 +84,7 @@ test("Body composition observes later Dispatch without treating launch metadata 
   assert.equal(admitted.kind, "dispatched");
   assert.deepEqual(await composition.executionAssociation(), { contractId: "kei/persisted-owner" },
     "a later read resolves actual Dispatch rather than freezing launch intent");
-  await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "work" }, recordingProvider([]), {
-    world,
-  });
+  await driveWithTell({ paths: allocated.paths, seed }, "work", recordingProvider([]), { world });
   const recovered = await bodyExecutionContext({ paths: allocated.paths });
   assert.deepEqual(await recovered.executionAssociation(), { contractId: "kei/persisted-owner" });
   assert.equal("contractId" in (await readHeart(allocated.paths)).soul!, false);
@@ -105,9 +103,7 @@ test("bare is frozen in Soul and omits only runtime instructions through wake", 
     cwd: root, origin: { kind: "direct" as const }, bare: true,
   };
   const adapter = recordingProvider(seen);
-  await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "first" }, adapter, {
-    world,
-  });
+  await driveWithTell({ paths: allocated.paths, seed }, "first", adapter, { world });
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, {
     world,
@@ -137,10 +133,10 @@ test("a prefeature Soul resumes without retrofitting instructions or requiring o
   const adapter = recordingProvider(seen);
   const runtime = { world,
     executionAssociation: async () => { throw new Error("legacy execution does not need association"); } };
-  await driveAkumaBody({ paths: allocated.paths, seed: {
+  await driveWithTell({ paths: allocated.paths, seed: {
     id: allocated.id, akumaName: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {}, cwd: root, origin: { kind: "direct" },
-  }, initialBody: "first" }, adapter, runtime);
+  } }, "first", adapter, runtime);
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, runtime);
   assert.equal(seen.length, 2);

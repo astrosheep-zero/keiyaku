@@ -164,7 +164,9 @@ text observer of invalid schema output sees the same failure diagnostic as the
 timeline. Tell may explicitly observe the exact text answer instead of using the
 ordinary confirmation window. Both answer observations distinguish answer,
 failure, absence, and deadline. A deadline or caller signal stops observation
-without retracting the input. Schema belongs only to ask.
+without retracting the input. Schema belongs only to ask. The first Tell of a
+spawn is admitted only after clean prompt-free birth; later submission or
+observation failure does not withdraw that input.
 
 Ordinary Tell uses native live submission when available; otherwise its input
 can drain in another Turn under the same Body. Failed execution

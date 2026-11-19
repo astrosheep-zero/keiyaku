@@ -247,7 +247,7 @@ export async function startAcpSession(
     void agent
       .request(acp.methods.agent.session.prompt, {
         sessionId,
-        prompt: [{ type: "text", text: launchPrompt(input.body, input.launchTells, input.schemaJson) }],
+        prompt: [{ type: "text", text: launchPrompt(input.launchTells, input.schemaJson) }],
       })
       .then(
         (response) => finish(promptResult(response, narration.answer)),

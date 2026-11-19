@@ -128,6 +128,7 @@ async function turnFixture(context: TestContext, prefix: string): Promise<TurnFi
   const world = await World.at(root);
   const born = await bornDirectAkuma({ root, akumaName: "claude", draw: "f8930001", createdAt: AT });
   const body = await born.leash.recordBody(born.paths, { leashTakenAt: AT });
+  await recordTell(born.paths, { kind: "tell", id: "opening", body: "wait on a permission", recordedAt: AT });
   return {
     paths: born.paths,
     world,
@@ -144,8 +145,7 @@ function driveInput(fixture: TurnFixture, adapter: ProviderAdapter, supervisor: 
     soul: fixture.soul,
     adapter,
     bodySequence: fixture.bodySequence,
-    body: "wait on a permission",
-    launchTells: [],
+    launchTells: fixture.snapshot.pending,
     supervisor,
     world: fixture.world,
     turnStarted: { emit: async () => undefined },
@@ -289,7 +289,7 @@ test("provider events are serialized in order and the answer waits for physical 
     assert.deepEqual(await settlement, {
       kind: "answered",
       answer: "done",
-      turnSequence: 1,
+      turnSequence: 2,
       session: { sessionId: "last-session" },
     });
     assert.deepEqual((await readHeart(fixture.paths)).latestSession?.coordinate, { sessionId: "last-session" });
@@ -315,7 +315,7 @@ test("provider completion failure preserves its diagnostic and retires the stall
   try {
     await armedWait(pull);
     completion.reject(new Error("provider completion failed"));
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic: "provider completion failed", turnSequence: 1 });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic: "provider completion failed", turnSequence: 2 });
     assert.equal(provider.aborts(), 1);
     assert.equal(pull.registrations, 1);
   } finally {
@@ -348,7 +348,7 @@ test("control during retirement does not erase an already observed provider fail
     await waitForCondition("BodySupervisor to observe the stop", () => supervisor.signal.aborted);
     assert.equal(settled, false, "abort acknowledgement is not closure proof");
     closure.resolve();
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 1 });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 2 });
   } finally {
     closure.resolve();
     supervisor.cancel("control");
@@ -378,7 +378,7 @@ test("a failed Heart read fails the stalled Turn and retires its provider", asyn
     await waitForCondition("the failed observation to retire the provider", () => provider.aborts() === 1, {
       budgetMs: 5_000,
     });
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 1 });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 2 });
     assert.equal(supervisor.signal.aborted, false);
     assert.equal(pull.registrations, 1);
     assert.throws(() => supervisor.current(), { message: diagnostic });

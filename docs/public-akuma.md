@@ -105,8 +105,8 @@ need no adapter projection or execution capability to inspect that evidence;
 an arbitrary foreign error property does not establish confirmed admission.
 
 Ordinary spawn confirms clean birth and, when an instruction is supplied, exact
-first-Tell submission through the same Akuma owner as ordinary Tell. A prompt-free
-spawn invents no input or Turn. A child made durable before birth settlement fails
+first-Tell submission through the same Akuma owner as ordinary Tell, without a
+second birth-readiness judgment. A prompt-free spawn invents no input or Turn. A child made durable before birth settlement fails
 is retained as partial creation, not clean birth. Explicit SDK answer observation
 instead watches the first Tell's text answer without withdrawing its admission
 at the deadline. Akuma execution owns admission and submission; Library composes

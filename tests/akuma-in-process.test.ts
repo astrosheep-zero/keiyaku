@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { Akuma, AkumaHost, Akumas, Keis, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
 import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
-import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readTurn, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readTurn, readLatestTurnForBody, recordTell } from "../src/akuma/heart/index.js";
 import { launchInProcessBody } from "../src/akuma/in-process-body.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { KeiyakuError } from "../src/index.js";
@@ -408,7 +408,9 @@ test("owned in-process cancellation retires only its own prepared Body", async (
   const started = [deferred<void>(), deferred<void>()];
   const finished = [deferred<void>(), deferred<void>()];
   const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
-    const index = input.body === "first" ? 0 : 1;
+    const text = input.launchTells[0]?.text;
+    assert.ok(text === "first" || text === "second");
+    const index = text === "first" ? 0 : 1;
     const abort = async () => { finished[index]!.resolve(); };
     custody.own({ closed: finished[index]!.promise, abort, forceDispose: abort });
     return {
@@ -420,7 +422,7 @@ test("owned in-process cancellation retires only its own prepared Body", async (
           await finished[index]!.promise;
         },
       },
-      completion: finished[index]!.promise.then(() => ({ kind: "answered" as const, answer: input.body })),
+      completion: finished[index]!.promise.then(() => ({ kind: "answered" as const, answer: text })),
     };
   }));
   const launches: LiveBodyLaunch[] = [];
@@ -430,21 +432,24 @@ test("owned in-process cancellation retires only its own prepared Body", async (
       async () => ({ world }),
       adapter,
     );
-  for (const [index, child] of [first, second].entries())
-    launches.push(
-      await spawn({
-        paths: child.paths,
-        seed: {
-          id: child.id,
-          akumaName: "worker",
-          cwd: world,
-          origin: { kind: "direct" },
-          provider: { name: "pi", kind: "pi" },
-          options: {},
-        },
-        initialBody: index === 0 ? "first" : "second",
-      }),
-    );
+  for (const [index, child] of [first, second].entries()) {
+    const born = await spawn({
+      paths: child.paths,
+      seed: {
+        id: child.id,
+        akumaName: "worker",
+        cwd: world,
+        origin: { kind: "direct" },
+        provider: { name: "pi", kind: "pi" },
+        options: {},
+      },
+    });
+    await born.completed;
+    assert.equal((await readHeart(child.paths)).latestBody?.end, "exited");
+    const body = index === 0 ? "first" : "second";
+    assert.equal((await recordTell(child.paths, { kind: "tell", id: body, body, recordedAt: new Date().toISOString() })).kind, "recorded");
+    launches.push(await spawn({ paths: child.paths }));
+  }
   try {
     await Promise.all(started.map((item) => item.promise));
     await launches[0]!.cancel(true);

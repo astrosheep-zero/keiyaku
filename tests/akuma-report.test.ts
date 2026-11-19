@@ -18,8 +18,7 @@ import { parseArgv } from "../src/cli/parse.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { Settings } from "../src/settings.js";
 import { World } from "../src/world.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
-import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, driveWithTell, noBodyLaunch } from "./support/akuma-fixtures.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
@@ -67,7 +66,7 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
       completion: Promise.resolve({ kind: "answered" as const, answer: "final, not the report" }),
     };
   }));
-  await driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
+  await driveWithTell(claudeBodyLaunch(allocated, root), "work", adapter, {
     world,
   });
   const akuma = Akuma.select(world, allocated.id);

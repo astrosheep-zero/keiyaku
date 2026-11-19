@@ -4,7 +4,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { Akuma } from "../src/akuma/index.js";
 import { akumaStatusSchema } from "../src/akuma/akuma.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import { activitySlice, appendActivity, beginTurn } from "../src/akuma/heart/index.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
@@ -12,7 +11,7 @@ import { AgentEventChannel, AGENT_EVENT_QUEUE_LIMIT, decodeAgentEvent, encodeAge
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { currentWorkLines } from "../src/cli/render/akuma-activity.js";
 import { World } from "../src/world.js";
-import { allocatedHeart, bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { allocatedHeart, bornDirectAkuma, driveWithTell } from "./support/akuma-fixtures.js";
 import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory, waitForCondition } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -29,12 +28,11 @@ test("native permission waits reach public status, clear on reply, and end with 
   const allocated = await allocatedHeart(root, "opencode", "99840001");
   const native = opencodeFixture(t);
   const controller = new AbortController();
-  const body = driveAkumaBody({
+  const body = driveWithTell({
     paths: allocated.paths,
     seed: { id: allocated.id, akumaName: "opencode", provider: { name: "opencode", kind: "opencode-sdk" },
       options: {}, cwd: root, origin: { kind: "direct" } },
-    initialBody: "read outside the working directory",
-  }, createOpencodeProvider(undefined, native.open), { world, signal: controller.signal });
+  }, "read outside the working directory", createOpencodeProvider(undefined, native.open), { world, signal: controller.signal });
   const handle = Akuma.select(world, allocated.id);
   const path = "/outside/work/secret.txt";
   try {

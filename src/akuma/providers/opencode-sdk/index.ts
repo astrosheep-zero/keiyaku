@@ -309,7 +309,7 @@ async function openTurn(input: Input, runtime: NativeOpencodeRuntime, sessionID:
         if (turn.fail(error)) retireAdmitted();
       },
     );
-    await prompt(initial, launchPrompt(input.body, input.launchTells));
+    await prompt(initial, launchPrompt(input.launchTells));
     signal.throwIfAborted();
     runtime.sessionID = sessionID;
     admitted = true;

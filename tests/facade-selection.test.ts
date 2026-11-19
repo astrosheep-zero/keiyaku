@@ -20,7 +20,6 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import {
   activitySlice,
   appendActivity,
@@ -49,7 +48,7 @@ import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.j
 import { Debts, type DebtId } from "../src/debt/index.js";
 import { World } from "../src/world.js";
 import { observeAkumaRoster, readAkumaCompleteRoster } from "../src/akuma/akuma.js";
-import { allocatedHeart, bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { allocatedHeart, bornBody, bornDirectAkuma, driveWithTell } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
@@ -129,7 +128,7 @@ function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
 
 async function answered(root: string, akumaName: string, suffix: string) {
   const allocated = await allocatedHeart(root, akumaName, suffix);
-  await driveAkumaBody(
+  await driveWithTell(
     {
       paths: allocated.paths,
       seed: {
@@ -140,8 +139,8 @@ async function answered(root: string, akumaName: string, suffix: string) {
         origin: { kind: "direct" },
         cwd: root,
       },
-      initialBody: "work",
     },
+    "work",
     provider,
     { now: () => "2026-08-11T00:00:00.000Z" },
   );
@@ -993,19 +992,19 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
   const tiedSecond = await answered(root, "worker", "00000002");
   const reviewer = await answered(root, "reviewer", "00000001");
   await appendActivity(first.paths, {
-    turnSequence: 1,
+    turnSequence: 2,
     event: { type: "unknown", kind: "fixture" },
     at: "2026-08-11T00:00:01.000Z",
   });
   for (const source of [tiedFirst, tiedSecond]) {
     await appendActivity(source.paths, {
-      turnSequence: 1,
+      turnSequence: 2,
       event: { type: "unknown", kind: "fixture" },
       at: "2026-08-11T00:00:02.000Z",
     });
   }
   await appendActivity(reviewer.paths, {
-    turnSequence: 1,
+    turnSequence: 2,
     event: { type: "unknown", kind: "fixture" },
     at: "2026-08-11T00:00:03.000Z",
   });
@@ -1069,7 +1068,7 @@ test("recent Akuma page keeps complete membership without timestamp pruning", as
       Array.from({ length: 3 }, async (_, index) => {
         const source = await answered(root, "worker", `a00000${index.toString(16).padStart(2, "0")}`);
         await appendActivity(source.paths, {
-          turnSequence: 1,
+          turnSequence: 2,
           event: { type: "unknown", kind: "fixture" },
           at: `2099-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
         });

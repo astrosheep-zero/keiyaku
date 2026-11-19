@@ -287,7 +287,7 @@ class PaseoDrive {
     // Native steer may still replace work if a human wins the check/send race.
     input.signal.throwIfAborted();
     if (this.turn.outcome.terminal) await completion;
-    const prompt = launchPrompt(input.body, input.launchTells, input.schemaJson);
+    const prompt = launchPrompt(input.launchTells, input.schemaJson);
     await setup(input.signal, () => {
       this.submitted = true;
       return this.client.sendMessage(agent.id, prompt, { messageId: this.turn.messageId, activeTurnBehavior: "steer" });

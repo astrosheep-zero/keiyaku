@@ -295,7 +295,7 @@ async function driveClaude(
   let submission = 0;
   const evidence: ClaudeQueryEvidence = { stderr: "", nativeResult: false };
   const turn = providerTurn(events, input.end);
-  const launch = input.push(claudeUserMessage(launchPrompt(drive.body, drive.launchTells)));
+  const launch = input.push(claudeUserMessage(launchPrompt(drive.launchTells)));
   void launch.catch(() => undefined);
   let query: Query;
   try {

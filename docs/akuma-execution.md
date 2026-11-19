@@ -17,9 +17,11 @@ cancellation cannot publish an ordinarily settled put-down. A Body uses the
 persisted Soul and latest valid session recipe; Heart loss makes it
 retire only provider custody it directly owns and exit.
 
-An input may carry its submitting initiator for outcome addressing. A Turn
-freezes that identity from its opening call or, without a call, its first
-launch Tell. Later coalesced inputs and live steering do not replace the Turn's
+Birth establishes Soul without supplying provider input. A Body starts a new
+Turn only from eligible admitted Tells and binds those Tells before provider
+submission. Without eligible input it settles idle without starting a provider.
+A Turn freezes its first Tell's submitting initiator for outcome addressing.
+Later coalesced inputs and live steering do not replace the Turn's
 single owner. A Turn's audience includes that opening identity and the
 initiators of every Tell bound to it, without duplicates. Live steering and
 launch routing decide how input enters the Turn, never who hears its outcome.
@@ -149,8 +151,6 @@ Schema remains a Tell input property and does not invent another recovery
 authority. A schema Tell is answered by a Turn dedicated to that Tell; ordinary
 input waits outside that Turn. Drain groups ordinary Tells only until the next
 schema Tell.
-A body-less publication composed before a schema Tell exits cleanly before that
-Tell is admitted; it never makes the Tell contend with its own birth Body.
 
 Interrupt atomically admits the Tell with a request for the current Body to
 yield. The predecessor never receives the protected input, and normal session

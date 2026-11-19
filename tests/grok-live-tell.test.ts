@@ -160,8 +160,7 @@ function grokProvider(controlled: NativeGrokProcess): ProviderAdapter {
 
 function freshInput(): DriveInput & { session: { kind: "fresh" } } {
   return {
-    body: "native grok work",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "native grok work" }],
     cwd: "/tmp",
     options: {},
     signal: new AbortController().signal,

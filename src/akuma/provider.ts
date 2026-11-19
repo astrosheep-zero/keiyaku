@@ -388,10 +388,10 @@ export function tellRegistry<Key>(fenceOf: (id: string) => string = (id) => id):
   };
 }
 
-/** The one launch text: the body, every launch tell, then any schema, blank-line separated. */
+/** Launch Tell text followed by any schema, blank-line separated. */
 const JSON_SCHEMA_PROMPT = "Respond with JSON matching this JSON Schema and no other text:";
-export function launchPrompt(body: string, tells: readonly Readonly<{ text: string }>[], schema?: string): string {
-  const parts = [body, ...tells.map((tell) => tell.text)];
+export function launchPrompt(tells: readonly Readonly<{ text: string }>[], schema?: string): string {
+  const parts = tells.map((tell) => tell.text);
   if (schema !== undefined) parts.push(JSON_SCHEMA_PROMPT, schema);
   return parts.filter((part) => part.length > 0).join("\n\n");
 }
@@ -546,7 +546,6 @@ export function createProviderAttempt<Result>(
 }
 
 export type DriveInput = Readonly<{
-  body: string;
   launchTells: readonly Readonly<{ id: string; text: string }>[];
   cwd: string;
   options: ProviderOptions;

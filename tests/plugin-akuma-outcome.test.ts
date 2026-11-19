@@ -10,11 +10,11 @@ import { Akuma, Akumas, KeiyakuError, World, type WorldRoot } from "../src/index
 import type { FailureProjection } from "../src/library/outcome.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
 import { readAkumaWork } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
-import { bornBody } from "./support/akuma-fixtures.js";
+import { bornBody, driveWithTell } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, restoreEnvironmentValues, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -125,8 +125,9 @@ test(
     const runtime = { now: () => AT };
     const opening = harnessOwner({ channel: "pi", session: "opening" });
     const steering = harnessOwner({ channel: "codex", session: "steering" });
-    const body = driveAkumaBody(
-      { paths: source.allocated.paths, initialBody: "work", initiator: opening },
+    const body = driveWithTell(
+      { paths: source.allocated.paths },
+      { body: "work", initiator: opening },
       adapter,
       runtime,
     );
@@ -163,7 +164,7 @@ test(
         plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
       }),
     );
-    await driveAkumaBody({ paths: empty.allocated.paths, initialBody: "no tells" }, answering("second"), runtime);
+    await driveWithTell({ paths: empty.allocated.paths }, "no attributed input", answering("second"), runtime);
     const canceled = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-canceled-ids-"), "0b500021");
     mkdirSync(join(canceled.world, "plugins"), { recursive: true });
     writeFileSync(
@@ -179,8 +180,9 @@ test(
     const canceledStarted = deferred<void>();
     const bound = deferred<void>();
     const closed = deferred<void>();
-    const canceledBody = driveAkumaBody(
-      { paths: canceled.allocated.paths, initialBody: "cancel me", initiator: opening },
+    const canceledBody = driveWithTell(
+      { paths: canceled.allocated.paths },
+      { body: "cancel me", initiator: opening },
       fixtureAdapter(input => createProviderAttempt(input.signal, async (custody) => {
         const abort = async () => { closed.resolve(); };
         custody.own({ closed: closed.promise, abort, forceDispose: abort });
@@ -557,11 +559,9 @@ test("CLI native Owners survive coalesced Tell admission into direct Body ledger
   }
   target.holder.release();
   await driveAkumaBody(
-    { paths: target.allocated.paths, initiator: "unrelated-launch-owner" },
+    { paths: target.allocated.paths },
     answering("coalesced result"),
-    {
-      now: () => AT,
-    },
+    { now: () => AT },
   );
   for (const owner of [observed.owner, observed.other]) {
     const cards = await observed.cards(owner);
@@ -756,8 +756,9 @@ test("the isolated user home reaches an executed Body as user-scope plugin setti
     }),
   );
   try {
-    await driveAkumaBody(
-      { paths: target.allocated.paths, initialBody: "user scope" },
+    await driveWithTell(
+      { paths: target.allocated.paths },
+      "user scope",
       answering("from the user home"),
       { now: () => AT },
     );

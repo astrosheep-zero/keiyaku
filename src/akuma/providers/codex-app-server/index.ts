@@ -163,7 +163,7 @@ async function admitTurn(
       input: [
         {
           type: "text",
-          text: launchPrompt(input.body, input.launchTells),
+          text: launchPrompt(input.launchTells),
         },
       ],
       ...(input.options.model === undefined ? {} : { model: input.options.model }),

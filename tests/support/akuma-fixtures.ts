@@ -1,12 +1,15 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { BodyLaunch, BodyLauncher } from "../../src/akuma/body-launch.js";
+import type { driveAkumaBody } from "../../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   initializeHeart,
   finishBodyIfIdle,
+  readHeart,
   recordTell as heartRecordTell,
   type Soul,
   type TimelineFact,
@@ -179,12 +182,36 @@ export function seedLegacySchema(path: string, table: "akuma_schema" | "leash_sc
   }
 }
 
-/** A fresh launch object per call; no shared Heart, adapter, options, or lifecycle. */
+/** Run real prompt-free birth when needed, admit the fixture Tell, then drive its ordinary wake. */
+export async function driveWithTell(
+  launch: BodyLaunch,
+  tell: string | Readonly<{ id?: string; body: string; initiator?: string }>,
+  adapter: Parameters<typeof driveAkumaBody>[1],
+  runtime: Parameters<typeof driveAkumaBody>[2] = {},
+): ReturnType<typeof driveAkumaBody> {
+  const { driveAkumaBody: driveBody } = await import("../../src/akuma/body.js");
+  const { seed, birthSession: _session, birthInitiator: _initiator, ...wake } = launch;
+  if (seed !== undefined) {
+    await driveBody(launch, adapter, runtime);
+    if ((await readHeart(launch.paths)).latestBody?.end !== "exited") {
+      throw new Error("fixture birth did not settle cleanly");
+    }
+  }
+  const input = typeof tell === "string" ? { body: tell } : tell;
+  const admitted = await recordTell(launch.paths, {
+    ...input,
+    id: input.id ?? randomUUID(),
+    recordedAt: runtime.now?.() ?? new Date().toISOString(),
+  });
+  if (admitted.kind !== "recorded") throw new Error("fixture Tell was not admitted");
+  return await driveBody(wake, adapter, runtime);
+}
+
+/** A fresh birth launch with no provider input. */
 export function claudeBodyLaunch(
   allocated: AllocatedAkuma,
   cwd: string,
-  initialBody: string,
-  extra: Omit<BodyLaunch, "paths" | "seed" | "initialBody"> = {},
+  extra: Omit<BodyLaunch, "paths" | "seed"> = {},
   seed: Partial<Pick<NonNullable<BodyLaunch["seed"]>,
     "description" | "options" | "bare" | "caller"
   >> = {},
@@ -200,7 +227,6 @@ export function claudeBodyLaunch(
       cwd,
       ...seed,
     },
-    initialBody,
     ...extra,
   };
 }

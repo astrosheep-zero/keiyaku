@@ -1,3 +1,4 @@
+import { driveWithTell } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -13,7 +14,6 @@ import {
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { moveAlias, readAliases, tryAcquireAliasCustody } from "../src/alias/index.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId, type AllocatedAkuma } from "../src/akuma/identity.js";
 import { readRetentionCandidate, retireInactiveAkuma } from "../src/akuma/retention.js";
@@ -53,7 +53,7 @@ function ageAkuma(allocated: AllocatedAkuma, at: string): void {
 async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<AllocatedAkuma> {
   const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
-  await driveAkumaBody(
+  await driveWithTell(
     {
       paths: allocated.paths,
       seed: {
@@ -64,8 +64,8 @@ async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<All
         origin: { kind: "direct" },
         cwd: world,
       },
-      initialBody: "old work",
     },
+    "old work",
     answering("done"),
     { now: () => at },
   );

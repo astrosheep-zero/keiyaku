@@ -1,3 +1,4 @@
+import { driveWithTell } from "./support/akuma-fixtures.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -7,7 +8,6 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { nuke, World, type NukeResult } from "../src/index.js";
 import { worldRootSchema } from "../src/world.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
@@ -127,12 +127,11 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
       origin: { kind: "direct" },
       cwd: world,
     },
-    initialBody: "keep working",
   };
-  const body = driveAkumaBody(launch, provider, { now: () => "2026-08-19T00:00:00.000Z" });
+  const body = driveWithTell(launch, "keep working", provider, { now: () => "2026-08-19T00:00:00.000Z" });
   await waitForCondition(
-    "the first Body recorded in Heart",
-    async () => (await readHeart(allocated.paths)).latestBody !== null,
+    "the wake Body recorded in Heart",
+    async () => (await readHeart(allocated.paths)).latestBody?.sequence === 2,
     { terminalState: settlementProbe(body, () => "the driving Body pump settled without a recorded Body") },
   );
   return { allocated, body };

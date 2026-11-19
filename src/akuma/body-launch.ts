@@ -19,10 +19,7 @@ export const bodyLaunchSchema = z
     paths: akumaPathsSchema,
     seed: launchSeedSchema.optional(),
     birthSession: sessionAdmissionSchema.optional(),
-    initialBody: z.string().optional(),
-    initiator: z.string().optional(),
     birthInitiator: z.string().optional(),
-    initialSchemaJson: z.string().optional(),
     refuseIfHeld: z.boolean().optional(),
     completion: z.object({ contractId: z.string().optional() }).strict().optional(),
   })

@@ -35,7 +35,7 @@ async function __keiyakuAwaitBarrier(barrier, releaseName, announce, ownerSignal
 
 async function __keiyakuAwaitEmptyPublicationBarrier(launch, signal) {
   const barrier = process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER;
-  if (launch.seed === undefined || launch.initialBody !== undefined) return;
+  if (launch.seed === undefined) return;
   await __keiyakuAwaitBarrier(barrier, "release", () => {
     const ready = __keiyakuBarrierJoin(barrier, "ready");
     __keiyakuBarrierWrite(ready + ".tmp", JSON.stringify({ id: launch.seed.id, pid: process.pid }) + "\\n");

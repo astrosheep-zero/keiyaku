@@ -3,13 +3,12 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
 import test from "node:test";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { readHeart } from "../src/akuma/heart/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { NativeOpencodeRuntime, type RuntimeOpener } from "../src/akuma/providers/opencode-sdk/session.js";
-import { allocatedHeart, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
+import { allocatedHeart, driveWithTell, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import {
   failDispatcherRetirement,
   json,
@@ -197,9 +196,8 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
           origin: { kind: "direct" },
           cwd: root,
         },
-        initialBody: "work",
       };
-      const body = driveAkumaBody(launch, createOpencodeProvider(undefined, native.open), {
+      const body = driveWithTell(launch, "work", createOpencodeProvider(undefined, native.open), {
         now: () => "2026-08-08T00:00:00.000Z",
       });
       try {

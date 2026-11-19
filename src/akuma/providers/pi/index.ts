@@ -293,7 +293,7 @@ async function drivePi(
   prompting = Promise.resolve().then(async () => {
     if (signal.aborted || turn.terminal) return;
     try {
-      await native.prompt(launchPrompt(input.body, input.launchTells, input.schemaJson));
+      await native.prompt(launchPrompt(input.launchTells, input.schemaJson));
       if (turn.terminal) return;
       if (aborting) return finish(aborted);
       if (terminalFailure !== null) return finish({ kind: "failed", diagnostic: terminalFailure });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
 import { join } from "node:path";
-import { allocatedHeart, claudeBodyLaunch } from "./akuma-fixtures.js";
+import { allocatedHeart, claudeBodyLaunch, driveWithTell } from "./akuma-fixtures.js";
 import { deferred, expectBodySettles, waitForCondition } from "./process.js";
 import { readHeart, readLatestTurnForBody } from "../../src/akuma/heart/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../../src/akuma/provider.js";
@@ -21,7 +21,7 @@ if (mode === "gates") {
     mkdirSync(barrier);
     process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER = barrier;
     const allocated = await allocatedHeart(root, "claude", cancel ? "c3000002" : "c3000001");
-    const { initialBody: _, ...launch } = claudeBodyLaunch(allocated, root, "unused");
+    const launch = claudeBodyLaunch(allocated, root);
     const controller = new AbortController();
     const body = driveAkumaBody(
       launch,
@@ -82,7 +82,7 @@ if (mode === "gates") {
       });
     },
   };
-  const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
+  const body = driveWithTell(claudeBodyLaunch(allocated, root), "work", adapter, {
     signal: controller.signal,
   });
   await started.promise;

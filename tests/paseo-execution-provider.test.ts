@@ -26,7 +26,7 @@ import { deferred, settlementProbe, temporaryDirectory, expectBodySettles, waitF
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { World } from "../src/world.js";
-import { allocatedHeart } from "./support/akuma-fixtures.js";
+import { allocatedHeart, recordTell } from "./support/akuma-fixtures.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -243,8 +243,7 @@ class NativeFixture implements NativeClient {
 
 function drive(signal = new AbortController().signal): DriveInput {
   return {
-    body: "debt",
-    launchTells: [{ id: "tell", text: "launch input" }],
+    launchTells: [{ id: "opening", text: "debt" }, { id: "tell", text: "launch input" }],
     cwd: "/tmp/paseo-work",
     options: {},
     signal,
@@ -1010,7 +1009,7 @@ test(
     const wake = { spawn: async () => owned(startBody({ paths: allocated.paths, refuseIfHeld: true })) };
     const owner = new AkumaOwner(allocated.id, root);
     try {
-      const firstBody = startBody({
+      await expectBodySettles(startBody({
         paths: allocated.paths,
         seed: {
           id: allocated.id,
@@ -1020,8 +1019,12 @@ test(
           cwd: root,
           origin: { kind: "direct" },
         },
-        initialBody: "first native turn",
-      });
+      }), "prompt-free Paseo birth did not complete");
+      assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+      assert.equal((await recordTell(allocated.paths, {
+        id: "first", body: "first native turn", recordedAt: new Date().toISOString(),
+      })).kind, "recorded");
+      const firstBody = startBody({ paths: allocated.paths });
       const first = await launched[0]!.promise;
       const retained = first.createInput!.env!;
       assert.equal(retained.KEIYAKU_ACTOR_ID, allocated.id);
@@ -1032,7 +1035,7 @@ test(
       assistant(first, "first answer");
       complete(first);
       await expectBodySettles(firstBody, "first Paseo Body did not complete");
-      assert.equal((await readLatestTurnForBody(allocated.paths, 1))?.end?.outcome.kind, "answered");
+      assert.equal((await readLatestTurnForBody(allocated.paths, 2))?.end?.outcome.kind, "answered");
       assert.equal(first.calls.includes("cancel"), false);
       assert.equal(first.closed, true);
 

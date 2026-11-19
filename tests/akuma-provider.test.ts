@@ -59,10 +59,11 @@ const DRIVE_DEFAULTS = {
 
 /** Fresh carrier objects; non-default recipe and admission inputs remain at each call site. */
 function freshInput(
-  body: string,
-  extra: Partial<Omit<DriveInput, "session">> = {},
+  text: string | readonly string[],
+  extra: Partial<Omit<DriveInput, "launchTells">> = {},
 ): DriveInput & { session: { kind: "fresh" } } {
-  return { ...DRIVE_DEFAULTS, body, launchTells: [], cwd: "/tmp", options: {}, ...extra, session: { kind: "fresh" } };
+  const launchTells = (typeof text === "string" ? [text] : text).map((text, index) => ({ id: `launch-${index}`, text }));
+  return { ...DRIVE_DEFAULTS, launchTells, cwd: "/tmp", options: {}, ...extra, session: { kind: "fresh" } };
 }
 
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
@@ -1086,8 +1087,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   const provider = createAcpProvider(fake.execution);
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
-    freshInput("build", {
-      launchTells: [{ id: "tell-1", text: "then test" }],
+    freshInput(["build", "then test"], {
       cwd: root,
       options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
     }),
@@ -1147,8 +1147,7 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
   assert.equal(provider.fork, undefined);
   const drive = await provider.resume!({
     ...DRIVE_DEFAULTS,
-    body: "continue",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "continue" }],
     cwd: root,
     options: {},
     session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
@@ -1171,8 +1170,7 @@ test("ACP composes the admitted schema into fresh and resumed Turn prompts", asy
     const attempt = resume
       ? provider.resume!({
           ...DRIVE_DEFAULTS,
-          body: "continue",
-          launchTells: [],
+          launchTells: [{ id: "launch", text: "continue" }],
           cwd: root,
           options: {},
           schemaJson,
@@ -1216,8 +1214,7 @@ test("ACP applies model then effort session selectors before prompting on fresh 
     const attempt = resume
       ? provider.resume!({
           ...DRIVE_DEFAULTS,
-          body: "continue",
-          launchTells: [],
+          launchTells: [{ id: "launch", text: "continue" }],
           cwd: root,
           options: { model: "k28", effort: "low" },
           session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
@@ -1944,7 +1941,7 @@ test("OpenCode v2 adapter admits and completes from native execution evidence", 
   const provider = createOpencodeProvider(undefined, native.open);
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
-    freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }] }),
+    freshInput(["build", "also check"]),
   ).result;
   assert.equal(drive.admission.fence, native.prompts[0]!.body.id);
   assert.equal(native.prompts[0]!.body.text, "build\n\nalso check");
@@ -2083,8 +2080,7 @@ test("OpenCode v2 refuses a Pi coordinate before loading its native runtime", as
     attemptResult(
       provider.resume!({
         ...DRIVE_DEFAULTS,
-        body: "continue",
-        launchTells: [],
+        launchTells: [{ id: "launch", text: "continue" }],
         cwd: "/tmp",
         options: {},
         session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
@@ -2195,8 +2191,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const attempt = provider.start(
-    freshInput("work", {
-      launchTells: [{ id: "tell-1", text: "also" }],
+    freshInput(["work", "also"], {
       cwd: tmpdir(),
       execution: { akumaId: "aku/pi/1234abcd", world: "/work" },
     }),
@@ -2321,7 +2316,7 @@ test("Pi binds host extensions once before the first prompt on fresh and resumed
       events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }],
     });
     const provider = createPiProvider(undefined, async () => fake.sdk);
-    const input = freshInput("work", { launchTells: [{ id: "tell-1", text: "also check" }], cwd: tmpdir() });
+    const input = freshInput(["work", "also check"], { cwd: tmpdir() });
     const attempt = resumed
       ? provider.resume!({
           ...input,
@@ -2811,8 +2806,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const drive = await provider.resume!({
     ...DRIVE_DEFAULTS,
-    body: "continue",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "continue" }],
     cwd: "/work",
     options: {},
     session: { kind: "resume", coordinate: { sessionFile: "/sessions/source.jsonl" } },
@@ -2830,8 +2824,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
     attemptResult(
       provider.resume!({
         ...DRIVE_DEFAULTS,
-        body: "bad",
-        launchTells: [],
+        launchTells: [{ id: "launch", text: "bad" }],
         cwd: "/work",
         options: {},
         session: { kind: "resume", coordinate: { sessionId: "wrong" } },
@@ -3544,8 +3537,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
 
   const drive = await provider.start({
     ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "build" }],
     cwd: root,
     options,
     runtimeInstructions: "<keiyaku>current</keiyaku>",
@@ -3710,8 +3702,7 @@ test("native adapters report only the runtime model their own payloads name", { 
     executable: fake.executable,
   }).start({
     ...DRIVE_DEFAULTS,
-    body: "build",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "build" }],
     cwd: root,
     options: {},
     session: { kind: "fresh" },

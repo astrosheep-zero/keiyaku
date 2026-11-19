@@ -144,8 +144,7 @@ test("Pi native extensions finish session start and discover resources before fr
       },
     }));
     const input = {
-      body: "work",
-      launchTells: [{ id: "tell-1", text: "also check" }],
+      launchTells: [{ id: "launch", text: "work" }, { id: "tell-1", text: "also check" }],
       cwd: root,
       options: {},
       execution: { world: actor.world, akumaId: actor.akuId },
@@ -256,8 +255,7 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
       },
     }));
     const attempt = provider.start({
-      body: "work",
-      launchTells: [],
+      launchTells: [{ id: "launch", text: "work" }],
       cwd: root,
       options: {},
       signal: controller.signal,
@@ -318,8 +316,7 @@ test("Pi closure reports extension shutdown failure but still disposes native st
     },
   }));
   const attempt = provider.start({
-    body: "work",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "work" }],
     cwd: root,
     options: {},
     signal: new AbortController().signal,
@@ -341,8 +338,7 @@ test("Pi reports extension load failures to stderr and Akuma activity", async (t
   const stderr = t.mock.method(console, "error", () => {});
   const provider = createPiProvider(undefined, async () => nativeSdk);
   const attempt = provider.start({
-    body: "work",
-    launchTells: [],
+    launchTells: [{ id: "launch", text: "work" }],
     cwd: root,
     options: {},
     signal: new AbortController().signal,

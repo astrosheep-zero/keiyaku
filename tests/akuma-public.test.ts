@@ -9,6 +9,7 @@ import {
   bornBody,
   bornLineageAkuma,
   claudeBodyLaunch,
+  driveWithTell,
   seedLegacySchema,
   turnEndFact,
 } from "./support/akuma-fixtures.js";
@@ -523,7 +524,7 @@ test("turn owner folds a rejected completion while the event stream remains open
   try {
     const world = await World.at(root);
     const allocated = await allocatedHeart(world, "claude", "deadbeef");
-    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
+    driving = driveWithTell(claudeBodyLaunch(allocated, world), "work", rejecting, {
       now: () => "2026-08-24T00:00:00.000Z",
     });
     void driving.catch(() => undefined);
@@ -544,12 +545,13 @@ test("turn owner folds a rejected completion while the event stream remains open
 async function answeredSource(root: string, suffix: string, bare?: boolean) {
   const world = await World.at(root);
   const allocated = await allocatedHeart(world, "claude", suffix);
-  await driveAkumaBody(
-    claudeBodyLaunch(allocated, world, "work", {}, {
+  await driveWithTell(
+    claudeBodyLaunch(allocated, world, {}, {
       description: "Fork source",
       ...(bare === undefined ? {} : { bare }),
       options: { model: "fixture-model" },
     }),
+    "work",
     provider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -1047,7 +1049,7 @@ test("wait timeout returns compact running evidence and its exact retained outco
     assert.equal(expected.life, "running");
     assert.deepEqual(await handle.wait({ timeoutMs: 0 }), {
       kind: "observed", id: source.id, life: "running", lastActivityAt: expected.lastActivityAt,
-      outcome: { kind: "answered", historyId: "turn/1", answer: "public answer" },
+      outcome: { kind: "answered", historyId: "turn/2", answer: "public answer" },
     });
   } finally {
     leash.release();
@@ -1074,22 +1076,23 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       })),
     };
   }));
-  await driveAkumaBody(
-    claudeBodyLaunch(allocated, root, "work", {}, {
+  await driveWithTell(
+    claudeBodyLaunch(allocated, root, {}, {
       description: "No fork point",
       options: { model: "fixture-model" },
     }),
+    "work",
     noPointProvider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
-  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork", historyId: "turn/1" });
+  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork", historyId: "turn/2" });
   assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
     kind: "answered",
     answer: "complete without fork",
   });
-  const exact = await handle.history({ id: "turn/1" });
+  const exact = await handle.history({ id: "turn/2" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
   assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history" });
 });
@@ -1128,7 +1131,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     };
     const receipt = await Akumas.of(world).fork({
       akuma: source.id,
-      at: "turn/1",
+      at: "turn/2",
       caller,
       initiator: "Invoker",
       bare: true,
@@ -1139,7 +1142,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal((await readHeart(child)).soul?.bare, true);
     assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
     const status = await new AkumaOwner(receipt.childAkumaId, world).status();
-    assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
+    assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/2" }, caller });
     await waitForCondition(
       `the exact fork child ${receipt.childAkumaId} akuma.born line in ${output}`,
       () => readFileSync(output, "utf8")
@@ -1167,7 +1170,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
       initiator: "Invoker",
     });
     const bareSource = await answeredSource(root, "f0a10004", true);
-    const inherited = await Akumas.of(world).fork({ akuma: bareSource.id, at: "turn/1", bare: false });
+    const inherited = await Akumas.of(world).fork({ akuma: bareSource.id, at: "turn/2", bare: false });
     assert.equal(inherited.kind, "forked");
     if (inherited.kind === "forked") {
       assert.equal(
@@ -1186,14 +1189,14 @@ test("SDK fork records its invoking caller independently of source lineage and e
     };
     const second = await akumasWithLauncher(world, spawn).fork({
       akuma: source.id,
-      at: "turn/1",
+      at: "turn/2",
       caller,
     });
     await Promise.all(bodies);
     assert.equal(second.kind, "forked");
     assert.equal(launches.length, 1);
     assert.equal(launches[0]?.birthSession?.coordinate.sessionId, "native-fork");
-    assert.deepEqual(launches[0]?.seed?.origin, { kind: "fork", parent: source.id, at: "turn/1" });
+    assert.deepEqual(launches[0]?.seed?.origin, { kind: "fork", parent: source.id, at: "turn/2" });
     assert.equal((await readHeart(launches[0]!.paths)).latestBody?.end, "exited");
   } finally {
     mutable.fork = original;
@@ -1221,7 +1224,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
       });
     assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "unknown-history" });
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(await handle.fork({ at: "turn/1" }, spawnAkumaBody), {
+    assert.deepEqual(await handle.fork({ at: "turn/2" }, spawnAkumaBody), {
       kind: "fork-failed",
       diagnostic: "native refused",
     });
@@ -1233,7 +1236,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         writeFileSync(runRoot, "blocked");
         return { session: { sessionId: "orphan-upstream-session" } };
       });
-    const partial = await handle.fork({ at: "turn/1" }, spawnAkumaBody);
+    const partial = await handle.fork({ at: "turn/2" }, spawnAkumaBody);
     assert.equal(partial.kind, "provider-forked-local-birth-failed");
     if (partial.kind === "provider-forked-local-birth-failed") {
       assert.deepEqual(partial.session, { kind: "session", sessionId: "orphan-upstream-session" });
@@ -1277,10 +1280,10 @@ test("public Akuma handles separate compact list rows from full status and wait"
   await assert.rejects(world.list({ akumaName: "not/a-name" }), /Akuma name/);
   await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
-  const launch = claudeBodyLaunch(allocated, root, "work", {}, {
+  const launch = claudeBodyLaunch(allocated, root, {}, {
     description: "Fixture akuma",
   });
-  await driveAkumaBody(launch, provider, { now: () => "2026-08-08T00:00:00.000Z" });
+  await driveWithTell(launch, "work", provider, { now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
   assert.equal((await world.list()).rows, undefined, "asleep instances leave the default active catalogue");
@@ -1302,19 +1305,19 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal("pending" in status, false);
   assert.equal(status.work.kind, "idle");
   assert.equal(status.work.outcome?.verdict, "answered");
-  assert.equal(status.work.turn?.sequence, 1);
+  assert.equal(status.work.turn?.sequence, 2);
   assert.equal("history" in status, false);
   assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
     kind: "answered",
     answer: "public answer",
   });
-  const exact = await handle.history({ id: "turn/1" });
+  const exact = await handle.history({ id: "turn/2" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
   assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer" });
   assert.ok((status.recent?.length ?? 0) <= 3);
   const waited = await handle.wait();
   assert.equal(waited.life, "asleep");
-  assert.deepEqual(waited.outcome, { kind: "answered", historyId: "turn/1", answer: "public answer" });
+  assert.deepEqual(waited.outcome, { kind: "answered", historyId: "turn/2", answer: "public answer" });
   assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await handle.status()).life, "asleep");
   const finalStatus = await handle.status();
@@ -1463,10 +1466,9 @@ test("birth records the frozen caller edge only in Soul", async (context) => {
   const world = Akumas.of(await World.at(root));
   const caller = { kind: "external", integration: "test", id: "birth" } as const;
   const allocated = await allocatedHeart(root, "claude", "ca110010");
-  await driveAkumaBody(
-    claudeBodyLaunch(allocated, root, "work", {}, {
-      caller,
-    }),
+  await driveWithTell(
+    claudeBodyLaunch(allocated, root, {}, { caller }),
+    "work",
     provider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -1825,8 +1827,9 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   const seat = join(root, "seat");
   mkdirSync(seat);
   const allocated = await allocatedHeart(root, "claude", "1d1e0001");
-  await driveAkumaBody(
-    claudeBodyLaunch(allocated, seat, "first"),
+  await driveWithTell(
+    claudeBodyLaunch(allocated, seat),
+    "first",
     provider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -2218,8 +2221,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
       completion,
     };
   }));
-  const launch = claudeBodyLaunch(allocated, root, "keep working");
-  const body = driveAkumaBody(launch, running, { now: () => "2026-08-08T00:00:00.000Z" });
+  const body = driveWithTell(claudeBodyLaunch(allocated, root), "keep working", running, { now: () => "2026-08-08T00:00:00.000Z" });
   await started;
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));

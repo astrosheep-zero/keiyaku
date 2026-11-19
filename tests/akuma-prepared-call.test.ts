@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fixtureLauncher } from "./support/akuma-tell.js";
+import { prepareAkumaCall, publishAkumaCall } from "../src/akuma/akuma-call.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunchEnd, BodyLauncher, ChildBodyLaunch, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
@@ -499,36 +501,44 @@ test("the exact admitted initial Tell is preserved and a missing admission never
   assert.match(String(missing.failure), /was not born for its initial Tell/u);
 });
 
-test("a failed initial Tell wake keeps the born child and the native failure", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-wake-"));
-  const failure = new Error("tell wake failed");
-  const prepared = await prepareCall({
-    akumaName: "worker",
-    cwd: root,
-    initialTell: { tellId: "2f1c4b6a-0000-4000-8000-000000000002", body: "begin" },
-    world: root,
-    recipe: rawRecipe(),
-    spawn: async (launch) => await birth(launch),
-    admitInitialTell: async (input) => ({
-      kind: "admitted",
-      tell: {
-        kind: "tell",
-        sequence: 1,
-        id: input.initialTell.tellId,
-        body: "",
-        recordedAt: AT,
-        state: "pending",
-        deliveries: [],
-      },
-      wake: Promise.reject(failure),
-    }),
-  });
-  const result = await publishPreparedCall(prepared);
-  assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
-  assert.equal(result.failure, failure);
-  assert.equal(result.failureStage, "wake");
-  assert.equal(result.tell?.admission.tellId, prepared.input.initialTell?.tellId);
-  assert.equal(result.tell?.row.sequence, 1);
+test("a failed or canceled first wake retains the real initial Tell and born child", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-prepared-wake-"));
+  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  const settings = await Settings.load({ cwd: world, home: join(world, "empty-home") });
+  for (const canceled of [false, true]) {
+    const controller = new AbortController();
+    const failure = new Error(canceled ? "cancel after admission" : "tell wake failed");
+    const initialTell = { tellId: "stable-opening", body: "begin", initiator: "Submitter" };
+    const bodies: Promise<unknown>[] = [];
+    const prepared = await prepareAkumaCall(world, { settings }, {
+      akumaName: "worker", cwd: world, initialTell, signal: controller.signal,
+    }, {}, async (launch) => {
+      if (launch.seed !== undefined) {
+        return await fixtureLauncher(bodies, new Map([[launch.paths.directory, {
+          adapter: answering("unused"), now: AT,
+        }]]))(launch);
+      }
+      if (canceled) controller.abort(failure);
+      throw failure;
+    });
+    const result = await publishAkumaCall(prepared);
+    await Promise.all(bodies);
+    const paths = pathsForAkumaId(world, result.id);
+    assert.equal((await readSoul(paths))?.id, result.id);
+    assert.equal(result.tell?.admission.tellId, initialTell.tellId);
+    const tell = await readTell(paths, initialTell.tellId);
+    assert.equal(tell?.body, initialTell.body);
+    assert.equal(tell?.initiator, initialTell.initiator);
+    assert.equal(tell?.state, "pending");
+    if (canceled) {
+      assert.equal(result.failure, failure);
+      assert.equal(result.failureStage, "wake");
+      assert.deepEqual(result.tell?.wake, { kind: "pending" });
+    } else {
+      assert.deepEqual(result.tell?.wake, { kind: "failed", diagnostic: failure.message });
+    }
+  }
 });
 
 for (const corruptInitialization of [false, true]) {

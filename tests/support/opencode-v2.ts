@@ -242,8 +242,7 @@ export function opencodeFixture(context: TestContext) {
     },
     disconnect: () => feed?.end(),
     input: {
-      body: "launch",
-      launchTells: [],
+      launchTells: [{ id: "launch", text: "launch" }],
       cwd: "/tmp",
       options: {},
       signal: new AbortController().signal,
