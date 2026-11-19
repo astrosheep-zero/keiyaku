@@ -1,5 +1,5 @@
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
-import { fixtureAdapter } from "./support/akuma-tell.js";
+import { answering, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import { waitForCondition } from "./support/process.js";
@@ -35,6 +35,7 @@ import {
   activitySlice,
   appendActivity,
   beginTurn,
+  bindTellsToTurn,
   breakBody,
   endTurn,
   finishBodyIfIdle,
@@ -42,12 +43,15 @@ import {
   probeLeash,
   readHeart,
   readSoul,
+  readTell,
+  readTurn,
+  readTurnParticipants,
   recordTell,
   recordTellDeliveries,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
+import { createProviderAttempt, type DriveInput, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Settings } from "../src/settings.js";
 import { AkumaNameError, Akumas, KeiyakuError } from "../src/index.js";
@@ -1711,6 +1715,67 @@ test("a member reclaimed between Soul and lifecycle reads is omitted with uncert
     assert.equal(listed.more, true, "the vanished member leaves the observed extent uncertain");
   } finally {
     DatabaseSync.prototype.prepare = prepare;
+  }
+});
+
+test("ordinary Tell wakes a successor for a barrier-free untidy Akuma", async (context) => {
+  const world = await World.at(temporaryDirectory(context, "keiyaku-akuma-tell-untidy-"));
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
+  const at = "2026-08-10T00:00:00.000Z";
+  const { allocated: { id, paths }, holder, body } = await bornBody(world, "1d1e0013", at);
+  const retained = { id: "bound-before-loss", text: "continue the original work" };
+  const initiator = "original-tell-owner";
+  let oldTurn;
+  try {
+    oldTurn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    await recordTell(paths, { kind: "tell", id: retained.id, body: retained.text, initiator, recordedAt: at });
+    await bindTellsToTurn(paths, { turnSequence: oldTurn.sequence, tellIds: [retained.id], boundAt: at });
+  } finally {
+    holder.release();
+  }
+  const pending = await readTell(paths, retained.id);
+  assert.ok(pending);
+  assert.equal(pending.state, "pending");
+  assert.deepEqual(pending.binding, { turnSequence: oldTurn.sequence, boundAt: at });
+  assert.deepEqual(pending.deliveries, []);
+
+  const submissions: DriveInput["launchTells"][] = [];
+  const bodies: Promise<unknown>[] = [];
+  const provider = answering("successor answer");
+  const adapter = fixtureAdapter((input) => {
+    submissions.push(input.launchTells);
+    return provider.start(input);
+  });
+  const successorAt = "2026-08-10T00:00:01.000Z";
+  const spawn = fixtureLauncher(bodies, new Map([[paths.directory, { adapter, now: successorAt }]]));
+  const api = akumasWithLauncher(world, spawn);
+  const text = "also take this next instruction";
+  try {
+    assert.equal((await api.status({ akuma: id })).life, "untidy");
+    const receipt = await api.tell({ akuma: id, body: text });
+    assert.equal(receipt.action?.kind, "started", JSON.stringify(receipt));
+    await Promise.all(bodies);
+    const { latestBody: successor, latestKill } = await readHeart(paths);
+    assert.ok(successor && successor.sequence > body.sequence);
+    const fresh = await readTell(paths, receipt.tellId);
+    assert.ok(fresh?.binding);
+    const { turnSequence } = fresh.binding;
+    assert.equal((await readTurn(paths, turnSequence))?.bodySequence, successor.sequence);
+    assert.deepEqual(receipt.action, { kind: "started", historyId: `turn/${turnSequence}` });
+    const delivery = { turnSequence, route: "launch", deliveredAt: successorAt };
+    assert.deepEqual(fresh.deliveries, [delivery]);
+    assert.deepEqual(submissions, [[retained, { id: receipt.tellId, text }]]);
+    assert.deepEqual(await readTell(paths, retained.id), {
+      ...pending,
+      state: "told",
+      binding: { turnSequence, boundAt: successorAt },
+      deliveries: [delivery],
+    });
+    assert.deepEqual(await readTurn(paths, oldTurn.sequence), oldTurn);
+    assert.deepEqual(await readTurnParticipants(paths, oldTurn.sequence), [initiator]);
+    assert.equal(latestKill, null);
+  } finally {
+    await settleFixtureBodies(bodies);
   }
 });
 

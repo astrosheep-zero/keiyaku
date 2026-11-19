@@ -604,7 +604,7 @@ async function launchForTell(
 function wakeFromFreeSeat(current: TellActionEvidence, followedBody: number | undefined): TellWake | null {
   if (current.kind !== "pending") return evidencedTellWake(current);
   const { body, control } = current;
-  if (body !== null && body.end === undefined)
+  if (body !== null && body.end === undefined && (control !== null || body.sequence === followedBody))
     return {
       kind: "confirmation-stopped",
       reason: "untidy",
