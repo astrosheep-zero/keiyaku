@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { documentKey, documentSegmentKey, entryUlid, gate, requirementId } from "../core/facts/types.js";
+import {
+  documentKey,
+  documentSegmentKey,
+  entryUlid,
+  gate,
+  requirementId,
+  type ChangeId,
+  type DeliverData,
+} from "../core/facts/types.js";
 import { parseDependencyKeySet } from "../core/subject.js";
 import { changeIdSchema, contractHeadSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 
@@ -25,6 +33,25 @@ export const deliverDataSchema = z
     policy: z.strictObject({ requireBranchesToBeUpToDate: z.boolean() }).readonly(),
   })
   .readonly();
+export const deliveryIdentitySchema = z
+  .strictObject({
+    candidate: snapshotIdSchema,
+    integration: snapshotIdSchema,
+    contentId: changeIdSchema,
+    admission: z.literal("reused").exactOptional(),
+    previousContentId: changeIdSchema.exactOptional(),
+  })
+  .readonly();
+export type DeliveryIdentity = z.output<typeof deliveryIdentitySchema>;
+export function compactDelivery(delivery: DeliverData, reused = false, previousContentId?: ChangeId): DeliveryIdentity {
+  return {
+    candidate: delivery.tenderSnapshot,
+    integration: delivery.integration.snapshot,
+    contentId: delivery.integration.changeId,
+    ...(reused ? { admission: "reused" } : {}),
+    ...(previousContentId === undefined ? {} : { previousContentId }),
+  };
+}
 export const verdictSchema = z.enum(["satisfied", "unsatisfied"]);
 export const candidateContentChangeSchema = z
   .strictObject({

@@ -224,20 +224,19 @@ test("public refusal and retry are compact operation stops", () => {
   }
 });
 
-test("the local failure projector never decodes partial owner evidence or masks its original cause", () => {
+test("repeated failure projection preserves confirmed recovery evidence and the original cause", () => {
   const progress = new InvocationAccumulator();
   const native = new TypeError("later programming failure");
-  // Owner conclusions can be genuinely incomplete; strict wire decoding is not a local failure gate.
-  const scope = {};
-  progress.recordDeliveryPreview(id, { scope });
-  const first = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: native });
+  const snapshot = snapshotId("ref-free-recovery");
+  progress.recordPhysical(id, { effects: [{ kind: "recovery-snapshot", snapshot }], lag: [] });
+  const first = project("abandon", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
   assert.ok(first.error instanceof KeiyakuError);
   assert.equal(first.error.cause, native);
   assert.equal(first.error.category, "internal");
   assert.equal(first.error.message, native.message);
   progress.recordStop({ kind: "execution-stopped", contractId: id, reason: "failed", diagnostic: "later read failed" });
-  const final = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
+  const final = project("abandon", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
   assert.ok(final.error instanceof KeiyakuError);
   assert.equal(final.error.cause, first.error);
@@ -252,6 +251,6 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.notEqual(final.error, first.error);
   assert.notEqual(first.error.outcome, final.error.outcome);
   assert.equal(first.error.outcome.issues, undefined);
-  assert.deepEqual(first.error.outcome.preview, { scope });
-  assert.deepEqual(final.error.outcome.preview, { scope });
+  assert.deepEqual(first.error.outcome.effects, [{ kind: "recovery-snapshot", snapshot }]);
+  assert.deepEqual(final.error.outcome.effects, first.error.outcome.effects);
 });

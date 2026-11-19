@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, readlinkSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
-import { Keis, Keiyaku, KeiyakuError, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
+import { Keis, Keiyaku, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { waitForFixtureFile } from "./support/process.js";
@@ -346,7 +346,7 @@ test("preview reports integration conflicts without materializing a merge or cha
   assert.deepEqual(await bound.kei.history(), history);
 });
 
-test("cancelling invocation dry-run preserves native abort and partial preview instead of accepting target.failed", async () => {
+test("cancelling invocation dry-run preserves native abort rather than returning an unfinished preview", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
@@ -371,21 +371,17 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
     const pending = facet.deliver({ contract: bound.contractId, dryRun: true }, { signal: controller.signal });
     // Attach the rejection consumer before waiting on the in-flight process barrier.
     const rejection = assert.rejects(pending, (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.category, "aborted");
-      assert.equal(error.cause, reason);
-      assert.ok(error.outcome?.kind === "contract");
-      assert.ok(error.outcome.preview?.kind === "ready");
-      assert.ok(error.outcome.preview.candidate);
-      assert.equal(error.outcome.preview.target, undefined, "interrupted target observation is not a failed answer");
-      assert.equal(error.outcome.admitted, undefined);
-      assert.ok((error.outcome.issues ?? []).every((effect) => effect.kind === "diagnostic" && effect.severity === "optional"),
-        "only native decode-channel retirement diagnostics may accompany cancellation");
-      const json = JSON.parse(JSON.stringify(projectFailure(error)));
-      assert.equal(json.category, "aborted");
-      assert.equal(json.causeClass, "Error");
-      assert.equal(json.causeDiagnostic, reason.message);
-      assert.deepEqual(json.outcome, error.outcome);
+      assert.equal(error, reason, "a cancelled observation with no confirmed effects retains the original reason");
+      assert.equal(projectFailure(error).outcome, undefined);
+      const text = renderVerb(
+        "deliver",
+        { contract: bound.contractId, dryRun: true },
+        { kind: "threw", error },
+        { columns: 120, color: false },
+      );
+      assert.match(text, /deliver --dry-run.*failed/u);
+      assert.match(text, /stop preview in target probe/u);
+      assert.doesNotMatch(text, /^  (candidate|integration result|content identity|scope|diff|target)\b/mu);
       return true;
     });
     try {

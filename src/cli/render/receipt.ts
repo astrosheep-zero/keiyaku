@@ -178,7 +178,8 @@ export function effectLines(effect: Effect): string[] {
 
 export function admissionLines(admission: NonNullable<PartialContract["admitted"]>[number]): string[] {
   const lines: string[] = [];
-  fact(lines, "admitted", admission.kind);
+  if (admission.kind === "deliver" && admission.admission === "reused") fact(lines, "admission", "reused");
+  else fact(lines, "admitted", admission.kind);
   fact(lines, "contract", admission.contractId);
   if ("candidate" in admission) fact(lines, "candidate", admission.candidate);
   if ("integration" in admission) fact(lines, "integration result", admission.integration);

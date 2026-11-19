@@ -52,7 +52,7 @@ type ContinuationInput = Readonly<{
   channel: GitDecodeChannel;
   primary: ContractId;
   placed: Placed;
-  progress: ProtocolProgress & { recordContinuation(contractId: ContractId, report: ContinuationReport): void };
+  progress: ProtocolProgress;
   signal?: AbortSignal;
 }>;
 
@@ -87,18 +87,10 @@ async function attemptDependent(input: ContinuationInput, id: ContractId, predec
 }
 
 /** One bounded invocation-local walk. Discovery is scheduling input, never placement authority. */
-export async function continueDeliveredDependents(input: ContinuationInput): Promise<void> {
+export async function continueDeliveredDependents(input: ContinuationInput): Promise<ContinuationReport> {
   const { primary } = input;
   const claimed: ContractId[] = [];
   const stopped: NonNullable<ContinuationReport["stopped"]>[number][] = [];
-  const report = (): ContinuationReport => ({
-    ...(claimed.length === 0 ? {} : { claimed: [...claimed] }),
-    ...(stopped.length === 0 ? {} : { stopped: [...stopped] }),
-  });
-  const retain = (): void => input.progress.recordContinuation(primary, report());
-  // The primary candidate's own conclusions are retained by completion before this walk discovers
-  // anything; every sibling attempt is retained here before the next one is awaited.
-  retain();
   try {
     input.signal?.throwIfAborted();
     const world = await withGitReadObservation(input.scope, input.channel, observeActiveContractWorld);
@@ -127,13 +119,17 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
           newlyClaimed.add(id);
           queue.push({ contractId: id, target: placement.integration });
         } else {
+          input.progress.recordCandidate(id, placement);
           stopped.push({ contractId: id, stop: placement });
         }
-        retain();
       }
     }
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;
     input.progress.recordStop({ contractId: primary, ...executionIssue(error, input.signal) });
   }
+  return {
+    ...(claimed.length === 0 ? {} : { claimed }),
+    ...(stopped.length === 0 ? {} : { stopped }),
+  };
 }

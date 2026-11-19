@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { VERIFIED } from "../verification/declaration.js";
-import { snapshotIdSchema, changeIdSchema } from "../git/identity.js";
+import { snapshotIdSchema } from "../git/identity.js";
+import { compactDelivery, type DeliveryIdentity } from "./result-leaves.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
   materializeIntegrationSnapshot,
@@ -64,30 +65,6 @@ import type {
   MutationOperationInput,
 } from "./operations.js";
 import { timestamp } from "./operations.js";
-
-export const deliveryIdentitySchema = z
-  .strictObject({
-    candidate: snapshotIdSchema,
-    integration: snapshotIdSchema,
-    contentId: changeIdSchema,
-    admission: z.literal("reused").exactOptional(),
-    previousContentId: changeIdSchema.exactOptional(),
-  })
-  .readonly();
-export type DeliveryIdentity = z.output<typeof deliveryIdentitySchema>;
-export function compactDelivery(
-  delivery: DeliverData,
-  leading?: DeliverLeading,
-  previousContentId?: ChangeId,
-): DeliveryIdentity {
-  return {
-    candidate: delivery.tenderSnapshot,
-    integration: delivery.integration.snapshot,
-    contentId: delivery.integration.changeId,
-    ...(leading?.kind === "already-admitted" ? { admission: "reused" as const } : {}),
-    ...(previousContentId === undefined ? {} : { previousContentId }),
-  };
-}
 
 /** Known prospective and delivered integrations, newest first, without giving Git producer vocabulary. */
 export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
@@ -527,14 +504,13 @@ function currentCandidateDeliveryDecision(
   if (state === null || assembled.derivation === undefined || assembled.reuse !== true) return undefined;
   const record = contractJournal(observation.journals, input.contractId);
   const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
-  if (delivery === undefined) throw new Error("current delivery is missing its journal fact");
-  input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
+  if (delivery?.kind !== "deliver") throw new Error("current delivery is missing its journal fact");
+  input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries }, delivery);
   const leading: DeliverLeading = { kind: "already-admitted", fact: delivery.entry };
   const value = compactDelivery(
     { ...state.delivery!.data, integration: state.currentIntegration ?? state.delivery!.data.integration },
-    leading,
+    true,
   );
-  input.progress?.recordDelivery(input.contractId, value);
   return { kind: "accepted", facts: [], state, journal: record.entries, value: { ...value, leading } };
 }
 
@@ -593,10 +569,9 @@ async function decideAndAdmitDelivery(
   const leading: DeliverLeading = { kind: "admitted-now", fact: deliverFact.entry };
   const value = compactDelivery(
     preparation.data,
-    leading,
+    false,
     previousContentId === preparation.data.integration.changeId ? undefined : previousContentId,
   );
-  input.progress?.recordDelivery(input.contractId, value);
   return { ...admission, value: { ...value, leading } };
 }
 

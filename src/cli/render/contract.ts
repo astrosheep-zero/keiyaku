@@ -24,7 +24,7 @@ export type ContractResultName = "bind" | "amend" | "arc" | "abandon" | "deliver
 type Answer = VerbOutput<ContractResultName>;
 type PartialContract = Extract<PartialOutcomeEnvelope, { kind: "contract" }>;
 type PreparedPreview = Extract<VerbOutput<"deliver">, { kind: "ready" }>;
-type ContractEvidence = Answer | PartialContract | NonNullable<PartialContract["preview"]>;
+type ContractEvidence = Answer | PartialContract;
 
 function previewTargetLines(target: PreparedPreview["target"]): string[] {
   if (target === undefined) return [];
@@ -237,8 +237,6 @@ function contractLines(
     ...diffLines(value),
     ...stopEvidenceLines(value),
   ];
-  if ("preview" in value && value.preview !== undefined)
-    lines.push(...contractLines(value.preview, "deliver", { ...input, dryRun: true }, context));
   if ("issues" in value) lines.push(...issueLines(value.issues));
   if ("recoverySnapshots" in value) lines.push(...recoveryLines(value.recoverySnapshots));
   return [...lines, ...contractRecoveryLines(value, operation, input, context)];

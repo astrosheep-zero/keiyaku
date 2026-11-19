@@ -135,10 +135,12 @@ command grammar.
 
 A normal refusal or retry is returned only before the leading act has confirmed
 an effect. Later stops remain on the accepted answer or thrown exception.
-An exceptional receipt retains the native category and cause together with the
-known admitted work, resource creation, movement, and issues at its actual
-failure point. Its category retains an existing owner's judgment, and diagnostics
-retain the underlying native cause through any evidence wrappers. Adapter
+An exceptional receipt retains the native category and cause together with
+confirmed admissions, consequential movement, resource effects and issues, and
+Verification evidence already produced. It does not reconstruct an unfinished
+normal answer or preserve incomplete descriptive observations. Its category
+retains the existing owner's judgment, and diagnostics retain the underlying
+native cause through any evidence wrappers. Adapter
 classification consumes these judgments without introducing another severity
 authority. Ephemeral recovery snapshots survive accepted cleanup because a
 later read cannot recover their unpinned identities.
@@ -231,14 +233,13 @@ refusal; after acceptance it can appear as retained checkout lag. Disjoint
 local dirt alone is not checkout lag.
 
 Preview never executes declarations or hooks, admits facts, places, reconciles,
-settles, or continues dependents. A failed finite Git read preserves any preview
-already confirmed through the invocation's existing exceptional evidence.
-Standing evidence is judged independently for
-every prospective requirement by generic currentness. Requested diff and scope,
-including a genuinely empty diff, are presentation data rather than journal,
-gate, or cache authority. Real delivery observes afresh. Cancellation retains
-its native exceptional category and partial observations instead of becoming a
-successful observation of target failure.
+settles, or continues dependents. A failed or cancelled finite Git read keeps its
+native failure meaning. The exceptional receipt does not reconstruct a partial
+preview, and an interrupted target read does not become a target failure.
+Standing evidence is judged independently for every prospective requirement by
+generic currentness.
+Requested diff and scope, including a genuinely empty diff, are presentation
+data rather than journal, gate, or cache authority. Real delivery observes afresh.
 
 Board and workspace reads are owned by [public-api.md](public-api.md), reset
 semantics by [world.md](world.md), and reconciliation by
@@ -268,10 +269,14 @@ while draining accompanies the original operation failure. A consumer exception
 retains its exact identity when there is no independent failure to attach.
 Newer candidate conclusions cannot overwrite an earlier resource problem. A failure during
 retirement keeps every previously confirmed admission and effect, including when
-an earlier exceptional receipt was already attached to the native cause. Merging
-evidence creates a fresh error with immutable receipt properties and preserves
-the prior error and its complete cause chain. Independent invocations sharing a
-frozen reason retain independent receipts without changing that reason.
+an earlier exceptional receipt was already attached to the native cause. That
+boundary combines confirmed evidence rather than replaying normal answers.
+It creates a fresh error with immutable receipt properties and preserves the
+prior error and its complete cause chain. A conflicting admission claim is
+reported as native corruption. The corruption receipt retains the prior
+confirmed admission and independent new evidence without repeating the
+conflicting claim. Independent invocations sharing a frozen reason retain
+independent receipts without changing that reason.
 
 Ephemeral progress is separate from the final answer. It may expose confirmed
 admission before trailing work settles, but observer failure, gaps, or absence

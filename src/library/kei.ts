@@ -18,7 +18,6 @@ import {
   type RepositoryScope,
   withScopeAbortSignal,
   type DocumentDerivation,
-  type IntentOutcome,
 } from "../protocol/operations.js";
 import {
   errorCategory,
@@ -28,7 +27,6 @@ import {
   project,
   type ContractVerb,
   type InvocationFailure,
-  type ContractConclusion,
 } from "./outcome.js";
 import {
   callerContractId,
@@ -79,7 +77,8 @@ import {
   type VerifyInput,
 } from "./contract-types.js";
 import { selectHistoryPage, type HistoryCursor } from "../history.js";
-import { compactDelivery, admitDeliveryOperation, type DeliverLeading } from "../protocol/deliver.js";
+import { admitDeliveryOperation, type DeliverLeading } from "../protocol/deliver.js";
+import { compactDelivery } from "../protocol/result-leaves.js";
 import { type Delivery } from "./delivery.js";
 import {
   validateContractWaitHandle,
@@ -91,15 +90,13 @@ import { targetName } from "../core/facts/types.js";
 import { prepareAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
-import { type WorktreeHooks } from "../git/hooks.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
 import { previewDeliveryOperation } from "../protocol/delivery-preview.js";
 import { completeCandidate } from "../protocol/completion.js";
 import { type ExecutionObserver } from "../protocol/execution-observation.js";
-import { type AcceptedProtocolStep } from "../protocol/outcome.js";
-import { executionStop, isOperationalStop, type ContractCheckpoint } from "../protocol/progress.js";
+import type { ContractCheckpoint } from "../protocol/progress.js";
 import { admitReviewOperation } from "../protocol/review.js";
 import { verifyOperation } from "../protocol/verify.js";
 import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
@@ -109,7 +106,6 @@ import { reconcileAffectedContracts } from "./reconcile.js";
 import { observeChangedRegion } from "./region.js";
 import { compactReason, compactRetry } from "../protocol/result-reasons.js";
 
-type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
 /** An amendment's library conclusion: admitted terms, or the fact that no change was requested. */
 type AmendConclusion = AmendOutcome | Readonly<{ kind: "unchanged"; contractId: ContractId }>;
 
@@ -276,25 +272,15 @@ export class Kei {
       };
       const sections =
         changedSections === undefined || changedSections.size === 0 ? {} : { changedSections: [...changedSections] };
-      accumulator.extendConclusions(this.id, { ...sections, ...changes });
+      retainAdmission(accumulator, this.id, admission);
       const region = await observeChangedRegion(
         scope,
         this.id,
         changedSections,
         decodeContractDocument(admission.value.terms.document.bytes).region,
       );
-      const value = await this.conclude(accumulator, {
-        scope,
-        channel,
-        leading: admission,
-        hooks,
-        value: (): AmendValue => ({
-          ...sections,
-          ...changes,
-          ...region,
-        }),
-      });
-      return { kind: "accepted", contractId: this.id, ...value };
+      await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
+      return { kind: "accepted", contractId: this.id, ...sections, ...changes, ...region };
     });
     return concluded.kind === "unchanged" ? { kind: "accepted", contractId: this.id } : concluded;
   }
@@ -307,58 +293,46 @@ export class Kei {
     return await this.local(
       "deliver",
       async (accumulator, localChannel, scope): Promise<DeliverOutcome> => {
-        try {
-          values.signal?.throwIfAborted();
-          const outcome = await admitDeliveryOperation({
-            scope,
-            channel: localChannel,
+        scope.signal?.throwIfAborted();
+        const outcome = await admitDeliveryOperation({
+          scope,
+          channel: localChannel,
+          contractId: this.id,
+          progress: accumulator,
+          ...(scope.signal === undefined ? {} : { signal: scope.signal }),
+          ...(values.message === undefined ? {} : { message: values.message }),
+          includeDirty: values.includeDirty,
+          materializeConflict: values.materializeConflict,
+          overwrite: values.overwrite,
+          requireBranchesToBeUpToDate,
+          deriveDocument: derivedDocument,
+        });
+        if (outcome.kind === "integration-conflict-materialized")
+          return {
+            kind: "handoff",
             contractId: this.id,
-            progress: accumulator,
-            ...(values.signal === undefined ? {} : { signal: values.signal }),
-            ...(values.message === undefined ? {} : { message: values.message }),
-            includeDirty: values.includeDirty,
-            materializeConflict: values.materializeConflict,
-            overwrite: values.overwrite,
-            requireBranchesToBeUpToDate,
-            deriveDocument: derivedDocument,
-          });
-          if (outcome.kind === "integration-conflict-materialized")
-            return {
-              kind: "handoff",
-              contractId: this.id,
-              worktreePath: outcome.workspace.path,
-              targetHead: outcome.targetHead,
-              conflictPaths: outcome.conflictPaths,
-              handoffBase: outcome.handoffBase,
-            };
-          if (outcome.kind === "refused")
-            return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
-          if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
-          requireMatchingDeliveryLeading(outcome.value.leading, accumulator, this.id);
-          await advanceAndContinue(accumulator, scope, localChannel, this.id, outcome, values.signal);
-        } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, values.signal);
-        }
+            worktreePath: outcome.workspace.path,
+            targetHead: outcome.targetHead,
+            conflictPaths: outcome.conflictPaths,
+            handoffBase: outcome.handoffBase,
+          };
+        if (outcome.kind === "refused")
+          return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
+        if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
+        const { leading, ...value } = outcome.value;
+        requireMatchingDeliveryLeading(leading, accumulator, this.id);
+        const { integration, tail } = await advanceAndContinue(accumulator, scope, localChannel, outcome);
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        const { placement, ...value } = accumulator.conclusions(this.id) ?? {};
-        const { candidate, integration, contentId } = value;
-        if (candidate === undefined || integration === undefined || contentId === undefined)
-          throw new Error("confirmed delivery requires its own receipt");
+        const { placement, ...continuation } = tail;
+        const delivered =
+          placement.kind === "placed" ? (({ integration: _integration, ...rest }) => rest)(placement) : placement;
         return {
           kind: "accepted",
           contractId: this.id,
           ...value,
-          candidate,
-          integration,
-          contentId,
-          ...(placement === undefined
-            ? {}
-            : {
-                placement:
-                  placement.kind === "placed"
-                    ? (({ integration: _integration, ...rest }) => rest)(placement)
-                    : placement,
-              }),
+          integration: integration ?? value.integration,
+          placement: delivered,
+          ...continuation,
         };
       },
       values.signal,
@@ -394,39 +368,17 @@ export class Kei {
           requireBranchesToBeUpToDate,
           verificationMode,
           ...(index === undefined ? {} : { index }),
-          ...(signal === undefined ? {} : { signal }),
+          ...(scope.signal === undefined ? {} : { signal: scope.signal }),
         });
         if (outcome.kind === "refused")
           return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
-        accumulator.extendConclusions(this.id, outcome.value);
-        try {
-          if (!signal?.aborted && outcome.checkpoint !== undefined)
-            await advanceAndContinue(
-              accumulator,
-              scope,
-              localChannel,
-              this.id,
-              {
-                kind: "accepted",
-                facts: [],
-                state: outcome.checkpoint.state,
-                journal: outcome.checkpoint.journal,
-              },
-              signal,
-            );
-        } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, signal);
-        }
+        const trailing =
+          scope.signal?.aborted || outcome.checkpoint === undefined
+            ? undefined
+            : await advanceAndContinue(accumulator, scope, localChannel, outcome.checkpoint);
         if (outcome.checkpoint !== undefined)
           await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        const { continuation, ...value } = accumulator.conclusions(this.id) ?? {};
-        return {
-          kind: "accepted",
-          contractId: this.id,
-          ...outcome.value,
-          ...value,
-          ...(continuation === undefined || Object.keys(continuation).length === 0 ? {} : { continuation }),
-        };
+        return { kind: "accepted", contractId: this.id, ...outcome.value, ...trailing?.tail };
       },
       signal,
       observer,
@@ -451,32 +403,22 @@ export class Kei {
     return await this.local(
       "review",
       async (accumulator, localChannel, scope): Promise<ReviewOutcome> => {
-        try {
-          signal?.throwIfAborted();
-          const outcome = await admitReviewOperation({
-            scope,
-            channel: localChannel,
-            contractId: this.id,
-            progress: accumulator,
-            ...(signal === undefined ? {} : { signal }),
-            verdict,
-            summary,
-          });
-          if (outcome.kind === "refused")
-            return {
-              kind: "refused",
-              contractId: this.id,
-              reason: outcome.refusal,
-            };
-          if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
-          accumulator.extendConclusions(this.id, outcome.value);
-          if (verdict === "satisfied")
-            await advanceAndContinue(accumulator, scope, localChannel, this.id, outcome, signal);
-        } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, signal);
-        }
+        scope.signal?.throwIfAborted();
+        const outcome = await admitReviewOperation({
+          scope,
+          channel: localChannel,
+          contractId: this.id,
+          progress: accumulator,
+          ...(scope.signal === undefined ? {} : { signal: scope.signal }),
+          verdict,
+          summary,
+        });
+        if (outcome.kind === "refused") return { kind: "refused", contractId: this.id, reason: outcome.refusal };
+        if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
+        const trailing =
+          verdict === "satisfied" ? await advanceAndContinue(accumulator, scope, localChannel, outcome) : undefined;
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        return { kind: "accepted", contractId: this.id, ...accumulator.conclusions(this.id) };
+        return { kind: "accepted", contractId: this.id, ...outcome.value, ...trailing?.tail };
       },
       signal,
       observer,
@@ -510,13 +452,8 @@ export class Kei {
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
           : { contractId: this.id, ...compactRetry(admission.reason) };
-      await this.conclude(accumulator, {
-        scope,
-        channel,
-        leading: admission,
-        hooks,
-        value: () => ({}),
-      });
+      retainAdmission(accumulator, this.id, admission);
+      await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
       return { kind: "accepted", contractId: this.id };
     });
   }
@@ -539,14 +476,9 @@ export class Kei {
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
           : { contractId: this.id, ...compactRetry(admission.reason) };
-      const value = await this.conclude(accumulator, {
-        scope,
-        channel,
-        leading: admission,
-        hooks,
-        value: () => ({ chapter: admission.value.chapter }),
-      });
-      return { kind: "accepted", contractId: this.id, ...value };
+      retainAdmission(accumulator, this.id, admission);
+      await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
+      return { kind: "accepted", contractId: this.id, chapter: admission.value.chapter };
     });
   }
 
@@ -573,59 +505,55 @@ export class Kei {
           includeDirty,
           showDiff,
           requireBranchesToBeUpToDate,
-          ...(signal === undefined ? {} : { signal }),
+          ...(scope.signal === undefined ? {} : { signal: scope.signal }),
         });
-        if (admission.kind === "refused")
-          return { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) };
-        accumulator.recordDeliveryPreview(this.id, admission.value);
-        return admission.value;
+        return admission.kind === "refused"
+          ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
+          : admission.value;
       },
       signal,
       observer,
     );
   }
 
-  /** One accumulator before the first admission-capable await, one projector after teardown. */
   private async local<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
     operation: ContractVerb,
     run: (accumulator: InvocationAccumulator, channel: GitDecodeChannel, scope: RepositoryScope) => Promise<Answer>,
     signal?: AbortSignal,
     observer?: ExecutionObserver,
   ): Promise<Answer> {
-    const accumulator = new InvocationAccumulator(observer, operation);
+    const accumulator = new InvocationAccumulator(observer);
     const scope = withScopeAbortSignal(this.scope, signal);
-    let projection: Answer | InvocationFailure;
-    try {
-      projection = await withGitDecodeChannel(scope, async (channel) => {
-        const completed = await run(accumulator, channel, scope);
-        if (completed.kind === "accepted" && accumulator.head(this.id) === undefined)
-          throw new Error("missing leading admission receipt");
-        return completed;
-      });
-    } catch (error) {
-      projection = { kind: "failed", contract: this.id, error };
-    }
-    const projected = project<Answer>(operation, accumulator.snapshot(), projection, scope.signal);
-    if (projected.kind === "failed") throw projected.error;
-    return projected.outcome;
+    return await invokeContract(operation, scope, accumulator, (channel) => run(accumulator, channel, scope), this.id);
   }
+}
 
-  private async conclude<Value, Public extends ContractConclusion>(
-    accumulator: InvocationAccumulator,
-    input: Readonly<{
-      scope: RepositoryScope;
-      channel: GitDecodeChannel;
-      leading: AcceptedIntent<Value>;
-      hooks: WorktreeHooks;
-      value: (value: Value) => Public;
-    }>,
-  ): Promise<Public> {
-    retainAdmission(accumulator, this.id, input.leading);
-    const value = input.value(input.leading.value);
-    accumulator.extendConclusions(this.id, value);
-    await reconcileAffectedContracts(accumulator, this.id, input.scope, input.channel, input.hooks);
-    return value;
+/** Finish the owned observation before returning the direct answer or attaching confirmed evidence. */
+export async function invokeContract<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
+  operation: ContractVerb,
+  scope: RepositoryScope,
+  accumulator: InvocationAccumulator,
+  run: (channel: GitDecodeChannel) => Promise<Answer>,
+  id?: ContractId,
+): Promise<Answer> {
+  let answer: Answer | InvocationFailure;
+  try {
+    answer = await withGitDecodeChannel(scope, async (channel) => {
+      const result = await run(channel);
+      if (
+        result.kind === "accepted" &&
+        (result.contractId === undefined || accumulator.head(result.contractId) === undefined)
+      )
+        throw new Error("missing leading admission receipt");
+      return result;
+    });
+  } catch (error) {
+    const contract = id ?? accumulator.firstFact("bind")?.contract;
+    answer = { kind: "failed", ...(contract === undefined ? {} : { contract }), error };
   }
+  const result = project(operation, accumulator.snapshot(), answer, scope.signal);
+  if (result.kind === "failed") throw result.error;
+  return result.outcome;
 }
 
 function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }>) {
@@ -908,46 +836,40 @@ function normalizeDeliverInput(input: DeliverInput | undefined): DeliverValues {
   };
 }
 
-/** A trailing operational failure after a confirmed admission is a typed stop, never a lost receipt. */
-function retainTrailingFailure(
-  accumulator: InvocationAccumulator,
-  contractId: ContractId,
-  error: unknown,
-  signal: AbortSignal | undefined,
-): void {
-  if (accumulator.head(contractId) === undefined) throw error;
-  if (!isOperationalStop(error, signal)) throw error;
-  accumulator.recordStop(executionStop(contractId, error, signal));
-}
-
-// eslint-disable-next-line max-params -- Keep this local operation's custody, admission, and policy witnesses explicit.
 async function advanceAndContinue(
   accumulator: InvocationAccumulator,
   scope: RepositoryScope,
   channel: GitDecodeChannel,
-  contractId: ContractId,
-  outcome: AcceptedProtocolStep,
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  const checkpoint: ContractCheckpoint = { state: outcome.state, journal: outcome.journal };
-  const result = await completeCandidate({
+  checkpoint: ContractCheckpoint,
+) {
+  const { signal } = scope;
+  const contractId = checkpoint.state.id;
+  const { checkpoint: completed, placement } = await completeCandidate({
     repository: scope,
     channel,
     checkpoint,
     progress: accumulator,
     ...(signal === undefined ? {} : { signal }),
   });
-  if (result.placement.kind !== "placed") return;
+  const integration = completed.state.currentIntegration?.snapshot;
+  if (placement.kind !== "placed") return { integration, tail: { placement } };
   accumulator.observe({ kind: "stage", contractId, stage: "continuation", state: "started" });
-  await continueDeliveredDependents({
+  const continuation = await continueDeliveredDependents({
     scope,
     channel,
     progress: accumulator,
-    primary: result.checkpoint.state.id,
-    placed: result.placement,
+    primary: contractId,
+    placed: placement,
     ...(signal === undefined ? {} : { signal }),
   });
   accumulator.observe({ kind: "stage", contractId, stage: "continuation", state: "finished" });
+  return {
+    integration,
+    tail: {
+      placement,
+      ...(continuation.claimed === undefined && continuation.stopped === undefined ? {} : { continuation }),
+    },
+  };
 }
 
 /** An accepted delivery's leading act must be the fact this invocation admitted. */
@@ -956,7 +878,7 @@ function requireMatchingDeliveryLeading(
   accumulator: InvocationAccumulator,
   contractId: ContractId,
 ): void {
-  const fact = accumulator.snapshot().facts.find((entry) => entry.contract === contractId && entry.kind === "deliver");
+  const fact = accumulator.firstFact("deliver");
   const witnessed = fact === undefined ? accumulator.checkpoint(contractId)?.state.delivery?.entry : fact.entry;
   if (witnessed === undefined) throw new Error("confirmed delivery requires its own receipt");
   if (leading.fact !== witnessed || leading.kind !== (fact === undefined ? "already-admitted" : "admitted-now"))

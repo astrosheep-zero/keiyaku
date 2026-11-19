@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { placedSchema, placementStopSchema } from "../protocol/completion.js";
-import { deliveryIdentitySchema } from "../protocol/deliver.js";
+import { deliveryIdentitySchema } from "../protocol/result-leaves.js";
 import { continuationReportSchema } from "./continuation.js";
 
 export const deliverPlacementSchema = z.union([

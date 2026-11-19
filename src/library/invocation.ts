@@ -1,48 +1,41 @@
 /** @architectureCompositionRoot */
-import { encodeEntry } from "../core/facts/codec.js";
+import { decodeJournal, encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
+import type { ContractHead, ContractId, ContractState, JournalEntry } from "../core/facts/types.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { ReconcileResult } from "../git/reconcile.js";
-import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import type { Placed, Placement } from "../protocol/completion.js";
-import { compactDelivery, type DeliveryIdentity } from "../protocol/deliver.js";
+import type { VerifyValue } from "../protocol/verify.js";
 import {
   observeExecution,
   type ExecutionObservation,
   type ExecutionObserver,
 } from "../protocol/execution-observation.js";
 import type { AcceptedProtocolStep } from "../protocol/outcome.js";
-import type {
-  ContractCheckpoint,
-  ExecutionStop,
-  ProgressResidue,
-  ProtocolProgress,
-  VerificationResidue,
+import {
+  publicationKey,
+  type ContractCheckpoint,
+  type ExecutionStop,
+  type ProgressResidue,
+  type ProtocolProgress,
+  type VerificationResidue,
 } from "../protocol/progress.js";
 import type { SettlementReport } from "../settlement/settle.js";
-import type { ContinuationReport } from "./continuation.js";
-import type {
-  ContractConclusion,
-  ContractVerb,
-  InvocationEffect,
-  InvocationIssue,
-  ReconciliationLag,
-  admittedEvidenceSchema,
-} from "./outcome.js";
-import type { z } from "zod";
+import type { InvocationEffect, InvocationIssue, ReconciliationLag } from "./outcome.js";
 import { compactEffect, reconcileLagScope, reconcileLagIsFailure } from "./outcome.js";
 
 type RecordedVerificationCheck = Parameters<ProtocolProgress["recordVerificationCheck"]>[2];
 
+type AdmissionWitness = Readonly<{ bytes: string; reused: boolean }>;
 export type InvocationSnapshot = Readonly<{
   facts: readonly JournalEntry[];
-  admitted: readonly z.output<typeof admittedEvidenceSchema>[];
+  reused?: string;
   checkpoints: ReadonlyMap<ContractId, ContractCheckpoint>;
   heads: ReadonlyMap<ContractId, ContractHead>;
   affected: readonly ContractId[];
   effects: readonly InvocationEffect[];
-  conclusions: ReadonlyMap<ContractId, ContractConclusion>;
+  placements: ReadonlyMap<ContractId, Placement>;
+  verification: ReadonlyMap<ContractId, Pick<VerifyValue, "snapshot" | "checks">>;
 }>;
 
 type ReconciliationRecord = Readonly<{
@@ -51,56 +44,31 @@ type ReconciliationRecord = Readonly<{
   settlement?: SettlementReport;
 }>;
 
-function admissionEvidence(fact: JournalEntry): z.output<typeof admittedEvidenceSchema> {
-  const base = { contractId: fact.contract };
-  switch (fact.kind) {
-    case "deliver":
-      return {
-        ...base,
-        kind: fact.kind,
-        candidate: fact.data.tenderSnapshot,
-        integration: fact.data.integration.snapshot,
-        contentId: fact.data.integration.changeId,
-      };
-    case "reintegrated":
-      return { ...base, kind: fact.kind, integration: fact.data.snapshot, predecessor: fact.data.predecessor };
-    case "attestation":
-      return {
-        ...base,
-        kind: fact.kind,
-        ...(fact.data.gate === "verified" ? { requirement: fact.data.requirement, verdict: fact.data.verdict } : {}),
-      };
-    case "arc":
-      return { ...base, kind: fact.kind, chapter: fact.data.seq };
-    default:
-      return { ...base, kind: fact.kind };
-  }
-}
-
-function entryKey(fact: JournalEntry): string {
-  return `${fact.contract}\u0000${fact.entry}`;
-}
-
 /**
  * The one invocation accumulator. It exists before any admission-capable await, satisfies the lower
- * Protocol progress sink, and holds every confirmed publication, candidate conclusion and physical
- * observation until the single final projection.
+ * Protocol progress sink, and holds confirmed publication, placement and physical observations.
  */
 export class InvocationAccumulator implements ProtocolProgress {
-  private readonly entries = new Map<string, string>();
-  private readonly admittedFacts: JournalEntry[] = [];
+  // Canonical witness bytes are custody; observers receive detached, newly admitted facts.
+  private readonly entries = new Map<string, AdmissionWitness>();
   private readonly admittedHeads = new Map<ContractId, ContractHead>();
   private readonly admittedCheckpoints = new Map<ContractId, ContractCheckpoint>();
   private readonly affectedContracts = new Set<ContractId>();
   private readonly records: InvocationEffect[] = [];
-  private readonly admitted: z.output<typeof admittedEvidenceSchema>[] = [];
-  private readonly candidateConclusions = new Map<ContractId, ContractConclusion>();
+  private readonly placements = new Map<ContractId, Placement>();
+  private readonly verification = new Map<ContractId, Pick<VerifyValue, "snapshot" | "checks">>();
   private readonly reportedResidue = new WeakSet<object>();
 
-  constructor(
-    private readonly observer?: ExecutionObserver,
-    private readonly operation?: ContractVerb,
-  ) {}
+  constructor(private readonly observer?: ExecutionObserver) {}
+
+  firstFact<Kind extends JournalEntry["kind"]>(kind: Kind) {
+    for (const { bytes, reused } of this.entries.values()) {
+      if (reused) continue;
+      const fact = decodeJournal(bytes)[0]!;
+      if (fact.kind === kind) return fact as Extract<JournalEntry, { kind: Kind }>;
+    }
+    return undefined;
+  }
 
   observe(event: ExecutionObservation): void {
     observeExecution(this.observer, event);
@@ -108,34 +76,38 @@ export class InvocationAccumulator implements ProtocolProgress {
 
   /** A confirmed publication is retained even if folding or later physical work throws. */
   recordPublication(contract: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void {
-    const incoming = new Map<string, Readonly<{ fact: JournalEntry; bytes: string }>>();
-    for (const fact of facts) {
-      const key = entryKey(fact);
-      const bytes = encodeEntry(fact);
-      const previous = incoming.get(key)?.bytes ?? this.entries.get(key);
-      if (previous !== undefined && previous !== bytes)
-        throw new AuthorityCorruptionError("conflicting invocation receipt");
-      incoming.set(key, { fact, bytes });
-    }
-    let fresh = false;
-    for (const [key, { fact, bytes }] of incoming) {
-      if (this.entries.has(key)) continue;
-      this.entries.set(key, bytes);
-      this.admittedFacts.push(fact);
-      this.admitted.push(admissionEvidence(fact));
-      if (fact.kind === "deliver") this.recordDelivery(fact.contract, compactDelivery(fact.data));
-      if (fact.kind === "reintegrated" && this.conclusions(fact.contract)?.candidate !== undefined)
-        this.extendConclusions(fact.contract, { integration: fact.data.snapshot });
-      this.observe({ kind: "admitted", contractId: contract, fact });
-      this.affectedContracts.add(fact.contract);
-      fresh = true;
-    }
+    const fresh = this.recordWitnesses(contract, facts, false);
     if (fresh || !this.admittedHeads.has(contract)) this.admittedHeads.set(contract, head);
   }
 
-  recordAdmission(step: AcceptedProtocolStep): void {
+  private recordWitnesses(contract: ContractId, facts: readonly JournalEntry[], reused: boolean): boolean {
+    const incoming = new Map<string, Readonly<{ owner: ContractId; bytes: string }>>();
+    for (const fact of facts) {
+      const key = publicationKey(fact);
+      const bytes = encodeEntry(fact);
+      const previous = incoming.get(key)?.bytes ?? this.entries.get(key)?.bytes;
+      if (previous !== undefined && previous !== bytes)
+        throw new AuthorityCorruptionError("conflicting invocation receipt");
+      incoming.set(key, { owner: fact.contract, bytes });
+    }
+    let fresh = false;
+    for (const [key, { owner, bytes }] of incoming) {
+      const known = this.entries.get(key);
+      if (known !== undefined && (!known.reused || reused)) continue;
+      this.entries.set(key, Object.freeze({ bytes, reused }));
+      if (reused) continue;
+      this.affectedContracts.add(owner);
+      if (this.observer !== undefined)
+        this.observe({ kind: "admitted", contractId: contract, fact: decodeJournal(bytes)[0]! });
+      fresh = true;
+    }
+    return fresh;
+  }
+
+  recordAdmission(step: AcceptedProtocolStep, reused?: NonNullable<ContractState["delivery"]>): void {
     if (step.state.head === null) throw new Error("admission requires a journal head");
     this.recordPublication(step.state.id, step.state.head, step.facts);
+    if (reused !== undefined) this.recordWitnesses(step.state.id, [reused], true);
     if (this.admittedHeads.get(step.state.id) === step.state.head) {
       this.admittedCheckpoints.set(step.state.id, { state: step.state, journal: step.journal });
     }
@@ -143,7 +115,8 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   hasFact(fact: JournalEntry): boolean {
-    return this.entries.get(entryKey(fact)) === encodeEntry(fact);
+    const known = this.entries.get(publicationKey(fact));
+    return known?.reused !== true && known?.bytes === encodeEntry(fact);
   }
 
   head(contract: ContractId): ContractHead | undefined {
@@ -177,26 +150,21 @@ export class InvocationAccumulator implements ProtocolProgress {
     snapshot: Parameters<ProtocolProgress["recordVerificationCheck"]>[1],
     check: RecordedVerificationCheck,
   ): void {
-    const checks = this.candidateConclusions.get(contract)?.checks ?? [];
-    this.extendConclusions(contract, { snapshot, checks: [...checks, check] });
+    const checks = this.verification.get(contract)?.checks ?? [];
+    this.verification.set(contract, { snapshot, checks: [...checks, check] });
   }
 
-  /** Replace the current candidate's conclusions; accumulated resources are never erased. */
   recordCandidate(contract: ContractId, placement: Placement | undefined): void {
-    const { placement: _placement, ...current } = this.candidateConclusions.get(contract) ?? {};
-    this.candidateConclusions.set(contract, { ...current, ...(placement === undefined ? {} : { placement }) });
+    if (placement === undefined) this.placements.delete(contract);
+    else this.placements.set(contract, placement);
   }
 
   recordCompletion(contract: ContractId, movement: Omit<Placed, "kind">): Placed {
-    const retained = this.conclusions(contract)?.placement;
+    const retained = this.placements.get(contract);
     if (retained?.kind === "placed") return retained;
     const placement: Placed = { kind: "placed", ...movement };
     this.recordCandidate(contract, placement);
     return placement;
-  }
-
-  recordDeliveryPreview(contract: ContractId, report: Partial<DeliveryPreviewReport>): void {
-    this.extendConclusions(contract, { preview: { ...this.conclusions(contract)?.preview, ...report } });
   }
 
   /** Physical residue a continuation's dependent reconciliation observed. */
@@ -208,24 +176,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.recordReconciliation(contract, physical);
   }
 
-  /** Incremental continuation progress; verify also retains its known-empty partial observation. */
-  recordContinuation(contract: ContractId, report: ContinuationReport): void {
-    if (this.operation === "verify" || report.claimed !== undefined || report.stopped !== undefined)
-      this.extendConclusions(contract, { continuation: report });
-  }
-
   recordStop(stop: ExecutionStop): void {
-    if (
-      this.records.some(
-        (record) =>
-          record.kind === "issue" &&
-          record.issue.kind === "execution-stopped" &&
-          record.contract === stop.contractId &&
-          record.issue.reason === stop.reason &&
-          record.issue.diagnostic === stop.diagnostic,
-      )
-    )
-      return;
     this.records.push({
       kind: "issue",
       contract: stop.contractId,
@@ -268,27 +219,22 @@ export class InvocationAccumulator implements ProtocolProgress {
     for (const failure of report.seatClose ?? []) this.recordSeatClose(contract, failure);
   }
 
-  recordDelivery(contract: ContractId, value: DeliveryIdentity): void {
-    this.extendConclusions(contract, value);
-  }
-
-  extendConclusions(contract: ContractId, patch: ContractConclusion): void {
-    this.candidateConclusions.set(contract, { ...(this.candidateConclusions.get(contract) ?? {}), ...patch });
-  }
-
-  conclusions(contract: ContractId): ContractConclusion | undefined {
-    return this.candidateConclusions.get(contract);
-  }
-
   snapshot(): InvocationSnapshot {
+    const admissions = [...this.entries.values()];
+    const reused = admissions.find((entry) => entry.reused)?.bytes;
     return {
-      facts: Object.freeze([...this.admittedFacts]),
-      admitted: Object.freeze([...this.admitted]),
+      get facts() {
+        return Object.freeze(
+          decodeJournal(admissions.flatMap((entry) => (entry.reused ? [] : [entry.bytes])).join("")),
+        );
+      },
+      ...(reused === undefined ? {} : { reused }),
       checkpoints: new Map(this.admittedCheckpoints),
       heads: new Map(this.admittedHeads),
       affected: Object.freeze([...this.affectedContracts]),
       effects: Object.freeze([...this.records]),
-      conclusions: new Map(this.candidateConclusions),
+      placements: new Map(this.placements),
+      verification: new Map(this.verification),
     };
   }
 

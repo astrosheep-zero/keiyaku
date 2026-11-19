@@ -302,13 +302,12 @@ is owned by [lifecycle.md](lifecycle.md).
 
 ## Cancellation And Confirmed Effects
 
-Review, delivery, verify, and delivery preview carry caller cancellation through
-execution. A signal is a request to stop further work, not proof
-that publication did not occur. Once a leading act has been accepted, cancellation
-preserves its receipt and identifies the unfinished stage. An unknown Git
-publication is still adjudicated under independent, bounded read custody before
-reporting the known outcome. Resource retirement is not skipped merely because
-the execution signal has already been cancelled. Attaching confirmed effects
-creates a fresh KeiyakuError with immutable, directly readable evidence and the
-previous failure as its standard cause. Frozen or shared causes remain intact;
-cancellation before admission retains the caller's original reason.
+Review, delivery, verify, and preview carry caller cancellation through
+execution. A stop request does not prove that publication did not occur.
+Cancellation preserves confirmed admissions, movement and recovery evidence,
+not an unfinished normal answer. Unknown Git publication is adjudicated under
+independent, bounded read custody. Cancellation never skips resource retirement.
+Attaching evidence creates a fresh KeiyakuError with immutable, directly readable
+evidence and the previous failure as its standard cause. Frozen or shared
+causes remain intact; without confirmed evidence to attach, pre-admission
+cancellation retains the caller's original reason.

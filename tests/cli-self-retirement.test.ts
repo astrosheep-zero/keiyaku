@@ -201,12 +201,7 @@ let admitted;
 const delivered = await Keis.of(await Repo.at({ path: world }))
   .kei({ id: contract })
   .deliver(undefined, { observe(event) {
-    if (event.kind === "admitted" && event.fact.kind === "deliver") admitted = {
-      kind: "deliver", entry: event.fact.entry,
-      candidate: event.fact.data.tenderSnapshot,
-      integration: event.fact.data.integration.snapshot,
-      contentId: event.fact.data.integration.changeId,
-    };
+    if (event.kind === "admitted" && event.fact.kind === "deliver") admitted = event.fact;
   } });
 if (delivered.kind !== "accepted" || admitted === undefined) throw new Error("deliver did not admit: " + delivered.kind);
 
@@ -216,8 +211,7 @@ process.stdout.write = (chunk, ...rest) => {
   if (armed) {
     armed = false;
     throw withOutcomeReceipt(new TypeError("representative failure after known admission"), {
-      kind: "contract", contractId: delivered.contractId, admitted: [admitted],
-      candidate: delivered.candidate, integration: delivered.integration, contentId: delivered.contentId,
+      kind: "contract", contractId: delivered.contractId, facts: [admitted],
     });
   }
   return nativeWrite(chunk, ...rest);
@@ -264,8 +258,7 @@ test("a known-admission failure after retirement keeps its receipt and classific
     outcome: {
       kind: string;
       contractId: string;
-      admitted: readonly { kind: string; candidate: string }[];
-      candidate: string;
+      admitted: readonly { kind: string; candidate: string; integration: string; contentId: string }[];
     };
   };
   assert.equal(body.kind, "failed");
@@ -278,7 +271,9 @@ test("a known-admission failure after retirement keeps its receipt and classific
     body.outcome.admitted.map((item) => item.kind),
     ["deliver"],
   );
-  assert.equal(body.outcome.admitted[0]!.candidate, body.outcome.candidate);
+  assert.match(body.outcome.admitted[0]!.candidate, /^[0-9a-f]{40}$/u);
+  assert.match(body.outcome.admitted[0]!.integration, /^[0-9a-f]{40}$/u);
+  assert.ok(body.outcome.admitted[0]!.contentId);
   assert.equal(existsSync(fixture.worktree), false);
 });
 

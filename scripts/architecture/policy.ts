@@ -155,7 +155,7 @@ const outcomeOwner = {
     any("git/reconcile.ts"),
     runtime("git/scratch.ts", ["worktreeLeakSchema"]),
     runtime("git/identity.ts", ["contractHeadSchema", "contractIdSchema", "snapshotIdSchema"]),
-    runtime("protocol/result-leaves.ts", ["journalEntrySchema"]),
+    runtime("protocol/result-leaves.ts", ["journalEntrySchema", "compactDelivery", "deliveryIdentitySchema"]),
     types("git/private-state-seat.ts"),
     any("world.ts", ["WorldRoot", "worldRootSchema"]),
     any("library/continuation.ts"),
@@ -471,7 +471,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ...outcomeOwner.allow,
         types("library/outcome.ts"),
         runtime("library/outcome.ts", ["compactEffect", "reconcileLagScope", "reconcileLagIsFailure"]),
-        any("protocol/deliver.ts", ["compactDelivery", "DeliveryIdentity"]),
         types("protocol/completion.ts", ["Placement", "Placed"]),
       ],
     },
@@ -497,6 +496,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/kei.ts",
       allow: [
         ...contractOwner.allow,
+        runtime("protocol/result-leaves.ts", ["compactDelivery"]),
         runtime("core/subject.ts", ["dependencyKeys"]),
         runtime("markdown/parse.ts", ["parseToAST"]),
         runtime("markdown/query.ts", ["normalizeTitle", "indexDocument", "indexedHeadings", "sectionContent"]),
@@ -552,7 +552,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/delivery.ts",
-      allow: [...libraryOwner.allow, runtime("protocol/completion.ts", ["placedSchema", "placementStopSchema"])],
+      allow: [
+        ...libraryOwner.allow,
+        runtime("protocol/completion.ts", ["placedSchema", "placementStopSchema"]),
+        runtime("protocol/result-leaves.ts", ["deliveryIdentitySchema"]),
+      ],
       deny: libraryOwner.deny,
     },
     {

@@ -19,6 +19,10 @@ export function contractCheckpoint(input: ContractCheckpoint): ContractCheckpoin
   return { state: input.state, journal: input.journal };
 }
 
+export function publicationKey(fact: JournalEntry): string {
+  return `${fact.contract}\u0000${fact.entry}`;
+}
+
 export const verificationCleanupFailureSchema = z
   .object({
     name: z.string().refine((value) => value.trim() !== ""),
@@ -87,7 +91,7 @@ export type VerificationResidue = Readonly<{ cleanup?: VerificationCleanupFailur
 export interface ProtocolProgress {
   observe(event: ExecutionObservation): void;
   recordPublication(contractId: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void;
-  recordAdmission(step: AcceptedProtocolStep): void;
+  recordAdmission(step: AcceptedProtocolStep, reused?: NonNullable<ContractState["delivery"]>): void;
   recordResidue(contractId: ContractId, residue: ProgressResidue): void;
   recordPhysical(contractId: ContractId, report: ReconcileResult): void;
   /** Physical follow owned by this invocation's target movement, distinct from retained topology. */
@@ -100,12 +104,7 @@ export interface ProtocolProgress {
   ): void;
   recordVerificationCheck(contractId: ContractId, snapshot: SnapshotId, check: VerificationCheck): void;
   recordStop(stop: ExecutionStop): void;
-  recordDeliveryPreview(
-    contractId: ContractId,
-    report: Partial<import("./delivery-preview.js").DeliveryPreviewReport>,
-  ): void;
-  recordDelivery(contractId: ContractId, value: import("./deliver.js").DeliveryIdentity): void;
-  /** Current candidate conclusions, retained before the next await can fail. */
+  /** The existing placement producer owns its conclusion. */
   recordCandidate(contractId: ContractId, placement: Placement | undefined): void;
   /** Retain and return the admitted movement, including before a target checkout follows. */
   recordCompletion(contractId: ContractId, movement: Omit<Placed, "kind">): Placed;

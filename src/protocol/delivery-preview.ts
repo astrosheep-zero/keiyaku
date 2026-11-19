@@ -160,7 +160,6 @@ async function observeReadyPreview(
     integration: candidate.integration.snapshot,
     contentId: candidate.integration.changeId,
   };
-  input.progress?.recordDeliveryPreview(state.id, identity);
   const prospective = { ...state, currentIntegration: candidate.integration };
   const unmetGates = unmetGateProblems(gateReports(prospective).reports);
   const prerequisites = unmetPrerequisites(state.terms.after, decision);
@@ -170,7 +169,6 @@ async function observeReadyPreview(
     ...(prerequisites.length === 0 ? {} : { unmetPrerequisites: prerequisites }),
     ...(previousContentId === undefined ? {} : { previousContentId }),
   };
-  input.progress?.recordDeliveryPreview(state.id, requirements);
   const scope = compactScope(
     await readDeliveryScope(
       input.scope,
@@ -179,7 +177,6 @@ async function observeReadyPreview(
       input.showDiff === true,
     ),
   );
-  input.progress?.recordDeliveryPreview(state.id, { scope });
   const diff =
     input.showDiff === true
       ? await readDeliveryDiff(input.scope, candidate.integration.predecessor, candidate.integration.snapshot)
@@ -188,9 +185,7 @@ async function observeReadyPreview(
     diff === undefined
       ? {}
       : { diff: diff === null ? { kind: "unavailable" as const } : { kind: "present" as const, text: diff } };
-  input.progress?.recordDeliveryPreview(state.id, detail);
   const target = await targetAnswer(input.scope, state, candidate);
-  if (target !== undefined) input.progress?.recordDeliveryPreview(state.id, { target });
   const lag =
     target?.kind === "placeable" ? await observeTargetLag(input.scope, workspacePath, target.head) : undefined;
   const targetLag = compactTargetLag(lag);
