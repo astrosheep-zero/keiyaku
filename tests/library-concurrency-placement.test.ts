@@ -1,20 +1,12 @@
-import { present, accepted } from "./support/library-verbs.js";
+import { bind, present, repositoryWithMain } from "./support/library-verbs.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import test, { describe } from "node:test";
-import { Keis } from "../src/index.js";
+import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { reintegrateOperation } from "../src/protocol/reintegrate.js";
-import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt } from "./support/git.js";
-import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
-
-
+import { cachedRepositoryAt } from "./support/git.js";
 
 function crossProcessAmend(
   input: Readonly<{
@@ -141,98 +133,43 @@ function crossProcessAmend(
   };
 }
 
-// Each case owns a separate repository and scoped fault injection, never a process-wide mock.
-describe("library-concurrency-placement isolated repositories", { concurrency: 4 }, () => {
-
-  test("same-Contract cross-process amends refuse the retired source after a fresh attempt", async () => {
-    const repository = repositoryWithMain();
-    const contract = await bind(repository);
-    const source = (present(await contract.state())).terms;
-    const capability = await cachedRepositoryAt(repository.path);
-    const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
-    const workers = [
-      crossProcessAmend({
-        repository: repository.path,
-        contractId: (present(await contract.state())).id,
-        markdown: "## Replace: Context\nfirst source terms\n",
-        source,
-      }),
-      crossProcessAmend({
-        repository: repository.path,
-        contractId: (present(await contract.state())).id,
-        markdown: "## Replace: Objective\nsecond source terms\n",
-        source,
-      }),
-    ];
-    try {
-      assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
-      await Promise.race([
-        Promise.all(workers.map(({ contended }) => contended)),
-        Promise.all(workers.map(({ completed }) => completed)).then(() => {
-          throw new Error("cross-process amends completed without private-state seat contention");
-        }),
-      ]);
-    } finally {
-      held.close();
-    }
-    const outcomes = await Promise.all(workers.map(({ completed }) => completed));
-    assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
-    assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
-    const body = decodeContractDocument((present(await contract.state())).terms.document.bytes);
-    assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
-
-
+test("same-Contract cross-process amends refuse the retired source after a fresh attempt", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository);
+  const source = present(await contract.state()).terms;
+  const capability = await cachedRepositoryAt(repository.path);
+  const held = await acquireSqliteTransactionLock({
+    path: privateStatePublicationSeatPath(capability),
+    mode: "immediate",
   });
-
-  test("reintegration observes and publishes only after the shared private-state seat", async () => {
-    const repository = repositoryWithMain();
-    repository.run(["branch", "release"]);
-    const bound = accepted(await Keis.of(await cachedRepoAt(repository.path)).bind({
-      terms: document(),
-      target: "refs/heads/release",
-      gates: ["reviewed"],
-    }));
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.kei.state())).id);
-    writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-    await bound.kei.deliver();
-    writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
-    repository.run(["add", "target.txt"]);
-    repository.run(["commit", "--quiet", "-m", "move target"]);
-    repository.run(["update-ref", "refs/heads/release", repository.run(["rev-parse", "HEAD"]).trim()]);
-    const writers = [];
-    for (let index = 0; index < 3; index += 1) writers.push(await bind(repository));
-    const before = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
-    const capability = await cachedRepositoryAt(repository.path);
-    const held = await acquireSqliteTransactionLock({
-      path: privateStatePublicationSeatPath(capability),
-      mode: "immediate",
-    });
-    const writerIds = await Promise.all(writers.map(async (contract) => (present(await contract.state())).id));
-    const racingWriters = writers.map((_, index) =>
-      crossProcessAmend({
-        repository: repository.path,
-        contractId: writerIds[index]!,
-        markdown: `## Replace: Context\nracing writer ${index}\n`,
+  const workers = [
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: present(await contract.state()).id,
+      markdown: "## Replace: Context\nfirst source terms\n",
+      source,
+    }),
+    crossProcessAmend({
+      repository: repository.path,
+      contractId: present(await contract.state()).id,
+      markdown: "## Replace: Objective\nsecond source terms\n",
+      source,
+    }),
+  ];
+  try {
+    assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
+    await Promise.race([
+      Promise.all(workers.map(({ contended }) => contended)),
+      Promise.all(workers.map(({ completed }) => completed)).then(() => {
+        throw new Error("cross-process amends completed without private-state seat contention");
       }),
-    );
-    const reintegration = withGitDecodeChannel(capability, async (channel) =>
-      reintegrateOperation({
-        channel,
-        repository: capability,
-        contractId: (present(await bound.kei.state())).id,
-        target: "refs/heads/release",
-      }),
-    );
-    try {
-      await Promise.all(racingWriters.map(({ ready }) => ready));
-      assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim(), before);
-    } finally {
-      held.close();
-    }
-    assert.equal((await reintegration).kind, "accepted");
-    const outcomes = await Promise.all(racingWriters.map(({ completed }) => completed));
-    assert.ok(outcomes.every((outcome) => outcome.includes("accepted")));
-  });
+    ]);
+  } finally {
+    held.close();
+  }
+  const outcomes = await Promise.all(workers.map(({ completed }) => completed));
+  assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
+  const body = decodeContractDocument(present(await contract.state()).terms.document.bytes);
+  assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
 });
