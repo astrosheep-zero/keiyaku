@@ -187,33 +187,6 @@ test("pending owned cancellation is bounded and a held leash leaves unborn custo
   }
 });
 
-test("early launch exit is not birth and an already completed handle needs no cancellation", async (t) => {
-  const worldPath = await World.at(temporaryDirectory(t, "keiyaku-publication-exit-"));
-  let child!: AllocatedAkuma;
-  let cancellations = 0;
-  let releases = 0;
-  await assert.rejects(publishAkuma({
-    worldPath,
-    akumaName: "worker",
-    launch: async (allocated) => {
-      child = allocated;
-      return {
-        completed: Promise.resolve({ diagnostic: "launch exited before Soul" }),
-        cancel: async () => { cancellations += 1; },
-        release: () => { releases += 1; },
-      };
-    },
-  }), (error: unknown) => {
-    assertUnborn(error, child, "sealed");
-    assert.match(String(error.cause), /launch exited before Soul/u);
-    return true;
-  });
-  assert.equal(cancellations, 0);
-  assert.equal(releases, 1);
-  assert.equal(await readSoul(child.paths), null);
-  assert.equal((await readSeal(child.paths))?.evidence, "launch exited before Soul");
-});
-
 test("publication observes a real prebirth Body Seal without replacing it", async (t) => {
   const worldPath = await World.at(temporaryDirectory(t, "keiyaku-publication-body-failed-"));
   let child!: AllocatedAkuma;

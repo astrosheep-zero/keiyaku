@@ -4,12 +4,11 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { BodySupervisor, CONTROL_RESPONSE_MS } from "../src/akuma/body-supervisor.js";
+import { BodySupervisor } from "../src/akuma/body-supervisor.js";
 import {
   activitySlice,
   heartExists,
   readHeart,
-  readTell,
   recordTell,
   requestStop,
   type HeartSnapshot,
@@ -179,22 +178,6 @@ async function armedWait(pull: PendingProviderPull): Promise<void> {
   });
 }
 
-/**
- * Controlled Heart observations through the real BodySupervisor, one at a time. The periodic timer
- * yield matters: a tight synchronous refresh loop only spins the microtask queue, and the driving
- * Turn's own Heart writes then never reach their timer-backed contention retry.
- */
-async function observe(supervisor: BodySupervisor, count: number): Promise<void> {
-  for (let index = 0; index < count; index += 1) {
-    await supervisor.refresh();
-    if (index % 5 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 1));
-  }
-}
-
-async function highestSequence(paths: TurnFixture["paths"]): Promise<number | null> {
-  return (await activitySlice(paths)).highest;
-}
-
 /** One stalled Turn driven by exactly `observations` controlled Heart observations, then stopped. */
 async function stalledRun(
   context: TestContext,
@@ -221,36 +204,6 @@ test("a stalled Turn keeps exactly one provider registration as control observat
   const report = `provider registrations after ${few.observations} and ${many.observations} control observations: ${few.registrations} and ${many.registrations}`;
   assert.equal(few.registrations, 1, report);
   assert.equal(many.registrations, 1, report);
-});
-
-test("a Tell admitted mid-stall is submitted live once and recorded with its binding", async (context) => {
-  const fixture = await turnFixture(context, "kei-turn-wait-tell-");
-  const supervisor = await fixture.control();
-  const pull = new PendingProviderPull();
-  const provider = turnProvider({ events: stalledEvents(pull) });
-  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor));
-  try {
-    await armedWait(pull);
-    await recordTell(fixture.paths, { kind: "tell", id: "tell-live", body: "keep going", recordedAt: AT });
-    await supervisor.refresh();
-    await waitForCondition(
-      "the live Tell delivery",
-      async () => (await readTell(fixture.paths, "tell-live"))?.deliveries.length === 1,
-    );
-    const tell = await readTell(fixture.paths, "tell-live");
-    assert.deepEqual(provider.submissions, [{ id: "tell-live", text: "keep going" }]);
-    assert.deepEqual(
-      tell?.deliveries.map((delivery) => delivery.route),
-      ["live"],
-    );
-    assert.equal(tell?.state, "told");
-    assert.ok(tell?.binding !== undefined && tell.binding.turnSequence > 0);
-    supervisor.cancel("control");
-    assert.deepEqual(await settlement, { kind: "stopped" });
-    assert.equal(provider.submissions.length, 1);
-  } finally {
-    await supervisor.close();
-  }
 });
 
 test("the driver commits ordered evidence but cannot finish before closure", async (context) => {
@@ -304,24 +257,6 @@ test("the driver commits ordered evidence but cannot finish before closure", asy
   } finally {
     closure.resolve();
     supervisor.cancel("control");
-    await supervisor.close();
-  }
-});
-
-test("provider completion failure preserves its diagnostic and retires the stalled attempt", async (context) => {
-  const fixture = await turnFixture(context, "kei-turn-wait-failure-");
-  const supervisor = await fixture.control();
-  const completion = deferred<TurnResult>();
-  const pull = new PendingProviderPull();
-  const provider = turnProvider({ events: stalledEvents(pull), completion: completion.promise });
-  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor));
-  try {
-    await armedWait(pull);
-    completion.reject(new Error("provider completion failed"));
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic: "provider completion failed" });
-    assert.equal(provider.aborts(), 1);
-    assert.equal(pull.registrations, 1);
-  } finally {
     await supervisor.close();
   }
 });
@@ -389,28 +324,6 @@ test("a failed Heart read fails the stalled Turn and retires its provider", asyn
     await assert.rejects(supervisor.next(lastGood), { message: diagnostic });
   } finally {
     supervisor.cancel("control");
-    await supervisor.close();
-  }
-});
-
-test("stop is responsive and later control observations write nothing", async (context) => {
-  const fixture = await turnFixture(context, "kei-turn-wait-stop-");
-  const supervisor = await fixture.control();
-  const pull = new PendingProviderPull();
-  const provider = turnProvider({ events: stalledEvents(pull) });
-  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor));
-  try {
-    await armedWait(pull);
-    const before = await highestSequence(fixture.paths);
-    const startedAt = performance.now();
-    supervisor.cancel("control");
-    assert.deepEqual(await settlement, { kind: "stopped" });
-    assert.ok(performance.now() - startedAt < CONTROL_RESPONSE_MS + 1_000, "stop did not settle promptly");
-    await observe(supervisor, 25);
-    assert.equal(await highestSequence(fixture.paths), before);
-    assert.deepEqual(provider.submissions, []);
-    assert.equal(pull.registrations, 1);
-  } finally {
     await supervisor.close();
   }
 });

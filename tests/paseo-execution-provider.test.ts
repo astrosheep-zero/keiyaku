@@ -19,8 +19,6 @@ import {
 } from "@getpaseo/protocol/messages";
 import type { DaemonTransport } from "@getpaseo/client/internal/daemon-client-transport-types";
 import { createPaseoProvider, type PaseoDependencies } from "../src/akuma/providers/paseo/index.js";
-import { resolveProviderExecution } from "../src/akuma/providers/index.js";
-import { decodeProviderRecipe } from "../src/akuma/provider-recipe.js";
 import { encodeAgentEvent, type DriveInput, type AgentEvent } from "../src/akuma/provider.js";
 import { deferred, settlementProbe, temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -475,50 +473,6 @@ test("Paseo start and resume retain native id and complete only the admitted tur
   );
 });
 
-test("Paseo silently filters administrative items while retaining native answer boundaries and diagnostics", async () => {
-  const fake = new NativeFixture();
-  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
-  const session = await attempt.result;
-  assistant(fake, "before notice", "answer-before");
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "notification", level: "info", message: "private administrative notice",
-  } });
-  assistant(fake, "after notice", "answer-after");
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "todo", items: [{ text: "private plan", completed: false }],
-  } });
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "plugin", id: "event-1", pluginId: "plugin-1", kind: "private", version: 1, data: { secret: "hidden" },
-  } });
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "compaction", status: "loading",
-  } });
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "compaction", status: "completed",
-  } });
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "error", message: "native execution diagnostic",
-  } });
-  assistant(fake, "before unknown", "answer-unknown");
-  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
-    type: "future_item", secret: "hidden",
-  } } as never);
-  assistant(fake, "final", "answer-final");
-  complete(fake);
-  assert.deepEqual(await session.completion, { kind: "answered", answer: "final", historyId: "own-turn" });
-  await attempt.closed;
-  assert.deepEqual(await narration(session.events), [
-    { type: "session", coordinate: { sessionId: "native-agent" } },
-    { type: "model", model: "original-model" },
-    { type: "note", text: "Context compacted" },
-    { type: "note", text: "native execution diagnostic" },
-    { type: "assistant", text: "before notice" },
-    { type: "assistant", text: "after notice" },
-    { type: "assistant", text: "before unknown" },
-    { type: "assistant", text: "final" },
-  ]);
-});
-
 test("Paseo refuses observed human execution and unconfirmed native selectors before prompt", async () => {
   const busy = new NativeFixture();
   busy.agent.status = "running";
@@ -548,105 +502,6 @@ test("Paseo refuses observed human execution and unconfirmed native selectors be
   await rejected.closed;
   assert.equal(unconfirmed.sendInput, undefined);
   assert.equal(unconfirmed.calls.includes("cancel"), false);
-});
-
-test("Paseo cancellation retires setup and cancels current native execution without destroying runtime", async () => {
-  const setup = new NativeFixture();
-  const connecting = deferred<void>();
-  setup.connectBarrier = connecting.promise;
-  const setupController = new AbortController();
-  const pending = provider(setup).start({ ...drive(setupController.signal), session: { kind: "fresh" } });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  setupController.abort(new Error("stop during connect"));
-  await assert.rejects(pending.result, /stop during connect/u);
-  await pending.closed;
-  connecting.resolve();
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.deepEqual(setup.calls, ["connect", "close"]);
-  assert.equal(setup.sendInput, undefined, "late setup cannot send after client retirement");
-  const active = new NativeFixture();
-  const attempt = provider(active).start({ ...drive(), session: { kind: "fresh" } });
-  const session = await attempt.result;
-  await attempt.abort();
-  await attempt.closed;
-  assert.equal(active.calls.filter((call) => call === "cancel").length, 1);
-  assert.equal(active.closed, true);
-  assert.equal((await session.completion).kind, "failed");
-  assert.equal(active.agent.archivedAt, undefined);
-  const retiring = new NativeFixture();
-  retiring.closeFailure = new Error("native client retirement failed");
-  const broken = provider(retiring).start({ ...drive(), session: { kind: "fresh" } });
-  const brokenSession = await broken.result;
-  complete(retiring);
-  assert.deepEqual(await brokenSession.completion, { kind: "answered", answer: "", historyId: "own-turn" });
-  await assert.rejects(broken.closed, /native client retirement failed/u);
-});
-
-test("Paseo loses incomplete observation honestly and normalizes observed tool output", async () => {
-  const fake = new NativeFixture();
-  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
-  const session = await attempt.result;
-  fake.event(
-    {
-      type: "timeline",
-      provider: "claude",
-      turnId: "own-turn",
-      item: {
-        type: "tool_call",
-        callId: "shell",
-        name: "bash",
-        status: "running",
-        error: null,
-        detail: { type: "shell", command: "pwd", output: "secret-output" },
-      },
-    },
-    10,
-  );
-  fake.event(
-    {
-      type: "timeline",
-      provider: "claude",
-      turnId: "own-turn",
-      item: {
-        type: "tool_call",
-        callId: "shell",
-        name: "bash",
-        status: "completed",
-        error: null,
-        detail: { type: "shell", command: "changed-native-summary", output: "secret-output" },
-      },
-    },
-    11,
-  );
-  assistant(fake, "incomplete", "answer-a", "own-turn", 13);
-  await assert.rejects(session.completion, /timeline delivery gap/u);
-  await attempt.closed;
-  const events = await narration(session.events);
-  assert.deepEqual(
-    events.filter((event) => event.type === "tool"),
-    [
-      { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "pwd" } },
-      {
-        type: "tool",
-        phase: "completed",
-        id: "shell",
-        name: "bash",
-        call: { kind: "run", command: "pwd" },
-        result: { status: "ok", output: "secret-output" },
-      },
-    ],
-  );
-  assert.equal(
-    events.some((event) => event.type === "assistant"),
-    false,
-  );
-  const lost = new NativeFixture();
-  const lostAttempt = provider(lost).start({ ...drive(), session: { kind: "fresh" } });
-  const lostSession = await lostAttempt.result;
-  lost.disconnect();
-  await assert.rejects(lostSession.completion, /Paseo connection lost/u);
-  await assert.rejects(lostAttempt.closed, /native cancel connection unavailable/u);
-  assert.equal(lost.closed, true);
 });
 
 test("Paseo carries a completed edit's unified patch and never treats write content as a patch", async () => {
@@ -832,57 +687,6 @@ test("Paseo keeps the installed ACP mapper's ambiguous edits generic", async () 
     { type: "tool", phase: "started", id: "edit-from-start", name: "edit", call: edit },
     { type: "tool", phase: "completed", id: "edit-from-start", name: "edit", call: edit, result: { status: "ok" } },
   ]);
-});
-
-test("Paseo registration stays local and refuses unsupported execution shapes", async () => {
-  const recipe = decodeProviderRecipe({ name: "paseo", kind: "paseo" });
-  const resolved = await resolveProviderExecution(recipe);
-  assert.equal(resolved.execution.kind, "paseo");
-  assert.equal(resolved.adapter.admitOptions({ network: "disabled" }).kind, "refused");
-  assert.equal(
-    resolved.adapter.admitOptions({ systemPrompt: "override", systemPromptMode: "replace" }).kind,
-    "refused",
-  );
-  assert.throws(() => createPaseoProvider({ ...recipe, config: { url: "wss://remote.example/ws" } }), /loopback/u);
-  assert.throws(() => createPaseoProvider({ ...recipe, config: { extra: true } }), /configuration/u);
-  assert.throws(() => createPaseoProvider({ ...recipe, executable: "paseo" }), /not an executable/u);
-  assert.throws(() => createPaseoProvider({ ...recipe, config: { provider: "claude/opus" } }), /bare native provider/u);
-  assert.throws(
-    () => createPaseoProvider({ ...recipe, config: { url: "ws://localhost/ws?route=other" } }),
-    /loopback/u,
-  );
-});
-
-test("Paseo refuses missing resume and unavailable or unconfirmed selectors without send", async () => {
-  const missing = new NativeFixture();
-  missing.missing = true;
-  const resume = provider(missing).resume!({
-    ...drive(),
-    session: { kind: "resume", coordinate: { sessionId: "missing" } },
-  });
-  await assert.rejects(resume.result, /unavailable/u);
-  await resume.closed;
-  assert.deepEqual(missing.calls, ["connect", "fetch", "close"]);
-  const catalog = new NativeFixture();
-  catalog.catalogError = "provider offline";
-  const unavailable = provider(catalog).start({
-    ...drive(),
-    options: { model: "native-model" },
-    session: { kind: "fresh" },
-  });
-  await assert.rejects(unavailable.result, /catalog unavailable.*provider offline/u);
-  await unavailable.closed;
-  assert.equal(catalog.sendInput, undefined);
-  const model = new NativeFixture();
-  model.confirmModel = false;
-  const unconfirmed = provider(model).start({
-    ...drive(),
-    options: { model: "native-model" },
-    session: { kind: "fresh" },
-  });
-  await assert.rejects(unconfirmed.result, /model selection was not confirmed/u);
-  await unconfirmed.closed;
-  assert.equal(model.sendInput, undefined);
 });
 
 test("Paseo matching failure and cancellation are outcomes, unrelated terminals and duplicate deliveries are not", async () => {

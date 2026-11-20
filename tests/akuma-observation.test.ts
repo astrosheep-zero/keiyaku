@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
-import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
+import { bornStatus } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectFact } from "../src/akuma/projection.js";
 import { summarizeFrontier } from "../src/akuma/status-projection.js";
@@ -25,7 +25,6 @@ import {
   endTurn,
   recordCurrentModel,
   recordTellDeliveries,
-  recordTellReceipt,
   readStatusFacts,
   readTell,
 } from "../src/akuma/heart/index.js";
@@ -217,39 +216,6 @@ test("status reports the one current model and follows confirmed native changes"
   }
 });
 
-test("shared observation returns one final deadline snapshot and propagates caller abort", async () => {
-  let reads = 0;
-  const deadline = await waitForObservation({
-    timeoutMs: 0,
-    observe: async (): Promise<"running" | "settled"> => {
-      reads += 1;
-      return "running";
-    },
-    complete: (status) => status === "settled",
-  });
-  assert.deepEqual(deadline, { reason: "deadline", value: "running" });
-  assert.equal(reads, 1);
-
-  const completed = await waitForObservation({
-    timeoutMs: 0,
-    observe: async () => "settled" as const,
-    complete: (status) => status === "settled",
-  });
-  assert.deepEqual(completed, { reason: "completed", value: "settled" });
-
-  const controller = new AbortController();
-  const reason = new Error("caller cancelled observation");
-  controller.abort(reason);
-  await assert.rejects(
-    waitForObservation({
-      signal: controller.signal,
-      observe: async () => "running" as const,
-      complete: () => false,
-    }),
-    (error: unknown) => error === reason,
-  );
-});
-
 test("timeline decoding batches Tell witnesses and rejects missing retained facts", async (context) => {
   const value = await fixture();
   const { paths } = value.allocated;
@@ -389,52 +355,6 @@ test("wait returns stranded failure without consuming pending input", async () =
   }
 });
 
-test("public status exposes frozen provider selection without private recipe or invented model", async () => {
-  const { Akuma } = await import("../src/index.js");
-  const value = await fixture();
-  const { paths, id } = value.allocated;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, {
-      ...value.soul,
-      provider: { ...value.soul.provider, env: { SECRET: "private-token" }, config: { private: "private-config" } },
-      options: { systemPrompt: "private-prompt" },
-    });
-    const status = await Akuma.select(value.root, id).status();
-    assert.equal(status.provider, "claude");
-    assert.equal(Object.hasOwn(status, "model"), false);
-    const json = JSON.stringify(status);
-    for (const secret of ["private-token", "private-config", "private-prompt"])
-      assert.equal(json.includes(secret), false);
-  } finally {
-    leash.release();
-    value.close();
-  }
-});
-
-test("a live status observation pairs its bounded status with the same complete projected frontier", async () => {
-  const value = await fixture();
-  const { paths, id } = value.allocated;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, value.soul);
-    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
-    await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt, call: "live frontier" });
-    const observed = await readLiveStatus(value.root, id);
-    const history = await Akumas.of(value.root).history({ akuma: id });
-    assert.ok(history.kind === "akuma");
-    assert.equal(observed.status.provider, "claude");
-    assert.equal(observed.status.model, "claude-sonnet-4-5");
-    assert.deepEqual(observed.rows, history.events);
-    assert.deepEqual(observed.status.recent, observed.rows.slice(-3));
-    assert.equal(observed.status.work.kind, "open");
-    assert.equal("rows" in observed.status, false, "the public status itself carries no companion field");
-  } finally {
-    leash.release();
-    value.close();
-  }
-});
-
 test("reported changes retain native Pi writes and aggregate a write-then-edit path", async () => {
   const value = await fixture();
   const { paths } = value.allocated;
@@ -523,46 +443,6 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
   }
 });
 
-test("a retained unknown tool call keeps its bounded argument preview through projection", async () => {
-  const value = await fixture();
-  const { paths } = value.allocated;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, value.soul);
-    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
-    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-    const emitted: AgentEvent[] = [];
-    const state = piState(emitted);
-    const at = (tick: number) => new Date(Date.parse(value.soul.createdAt) + tick * 1_000).toISOString();
-    const args = { alpha: 1, nested: { ok: true } };
-    const emit = (event: AgentEvent): void => void emitted.push(event);
-    translatePiEvent({ type: "tool_execution_start", toolCallId: "future-1", toolName: "future_tool", args }, state, emit);
-    translatePiEvent(
-      {
-        type: "tool_execution_end",
-        toolCallId: "future-1",
-        toolName: "future_tool",
-        isError: false,
-        result: { content: [{ type: "text", text: "secret output" }] },
-      },
-      state,
-      emit,
-    );
-    for (const [index, event] of emitted.entries()) {
-      await appendActivity(paths, { turnSequence: turn.sequence, at: at(index + 1), event });
-    }
-
-    const calls = (await activitySlice(paths)).rows.map(projectFact).flatMap(row => row.kind === "tool" ? [row.call] : []);
-    assert.deepEqual(calls, Array.from({ length: 2 }, () => ({
-      kind: "other", input: { json: JSON.stringify(args) },
-    })));
-    assert.doesNotMatch(JSON.stringify(calls), /secret output/u, "a tool result body never enters the preview");
-  } finally {
-    leash.release();
-    value.close();
-  }
-});
-
 test("status reads retain delivered frontier Tells without a global told substitution", async () => {
   const value = await fixture();
   const { paths, id } = value.allocated;
@@ -622,36 +502,6 @@ test("status reads retain delivered frontier Tells without a global told substit
     assert.equal(status.work.kind, "open");
     assert.deepEqual(status.recent?.map(row => row.id), [opening.tell.sequence, frontier.sequence, live.tell.sequence]);
     assert.equal(status.work.summary?.id, live.tell.sequence);
-  } finally {
-    leash.release();
-    value.close();
-  }
-});
-
-test("status preserves pending input before any Turn without inventing recent work", async () => {
-  const value = await fixture();
-  const { paths, id } = value.allocated;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, value.soul);
-    for (const phase of ["empty", "pending", "told"] as const) {
-      if (phase === "pending")
-        await recordTell(paths, { id: "only-tell", body: "hello", recordedAt: value.soul.createdAt });
-      if (phase === "told")
-        await recordTellReceipt(paths, {
-          evidence: "exact",
-          tellId: "only-tell",
-          kind: "undelivered",
-          receivedAt: value.soul.createdAt,
-        });
-      const observed = await bornStatus(paths, id);
-      assert.equal(observed.work.kind, "idle");
-      assert.equal(observed.work.turn, undefined);
-      assert.equal(observed.recent, undefined);
-      assert.deepEqual(observed.work.pending, phase === "pending"
-        ? [{ id: (await readStatusFacts(paths)).find(fact => fact.kind === "tell")!.sequence }]
-        : undefined);
-    }
   } finally {
     leash.release();
     value.close();

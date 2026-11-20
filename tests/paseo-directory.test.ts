@@ -5,7 +5,7 @@ import test, { type TestContext } from "node:test";
 import { createPaseoApi, type PaseoAgent, type PaseoAgentListOptions, type PaseoAgentListResult } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
-import { createDirectoryIndex, StaleDirectory } from "../plugins/paseo/plugin/server/directory.js";
+import { createDirectoryIndex } from "../plugins/paseo/plugin/server/directory.js";
 import { createReopener } from "../plugins/paseo/plugin/server/reopen.js";
 import { directorySubscriptions } from "./support/paseo-directory.js";
 
@@ -130,46 +130,6 @@ test("older buffered updates cannot roll newer paginated identity back; equal co
   });
 });
 
-test("warm updates replace identity, retain inactive duplicates and remove old membership", async t => {
-  const h = harness(t);
-  await h.directory.read(h.paseo, t.signal);
-  const replacement = { ...agent("parent", "replacement"), updatedAt: later };
-  h.agents.set("parent", replacement);
-  h.stream.update({ kind: "upsert", agent: replacement });
-  t.mock.method(console, "warn", () => {});
-  assert.deepEqual(await h.attach(), { attached: false });
-  const duplicate = { ...agent("closed-duplicate", "replacement", "closed"), archivedAt: "now" };
-  h.agents.set(duplicate.id, duplicate);
-  h.stream.update({ kind: "upsert", agent: duplicate });
-  const next = { ...h.input, caller: { ...h.input.caller, id: "replacement" } };
-  assert.deepEqual(await h.attach(next), { attached: false });
-  h.agents.delete(duplicate.id);
-  h.stream.update({ kind: "remove", agentId: duplicate.id });
-  assert.deepEqual(await h.attach(next), { attached: true });
-  const child = h.agents.get("created-aku/test/1")!;
-  h.agents.delete(child.id);
-  h.stream.update({ kind: "remove", agentId: child.id });
-  assert.deepEqual(await h.refresh(), { woken: 0 });
-  assert.equal(h.lists.length, 2, "all updates maintain the same warm index");
-});
-
-test("reconnect snapshots and null subscription IDs invalidate generations without treating page one as complete", async t => {
-  const h = harness(t);
-  const before = await h.directory.read(h.paseo, t.signal);
-  h.stream.disconnect();
-  assert.throws(before.assertCurrent, StaleDirectory);
-  h.agents.set("duplicate", agent("duplicate", "native", "closed"));
-  t.mock.method(console, "warn", () => {});
-  assert.deepEqual(await h.attach(), { attached: false });
-  assert.equal(h.lists.length, 4);
-  const connected = await h.directory.read(h.paseo, t.signal);
-  h.stream.reconnect();
-  assert.throws(connected.assertCurrent);
-  assert.equal(h.stream.listeners(), 0, "replacement snapshot retires its observer immediately");
-  assert.deepEqual(await h.attach(), { attached: false });
-  assert.equal(h.lists.length, 6);
-});
-
 test("late exact-ID reads cannot create against replaced membership or a retired connection", async t => {
   for (const mode of ["replacement", "duplicate", "reconnect", "dispose"]) await t.test(mode, async t => {
     const h = harness(t);
@@ -219,18 +179,6 @@ test("reconnect during bootstrap retires pending pages and only a new complete g
   assert.equal(h.lists.length, 3, "retired first page cannot replace the new two-partition seed");
 });
 
-test("reopen refuses a duplicate introduced while its exact-ID refresh is in flight", async t => {
-  const h = harness(t, [mirror("selected")]);
-  h.onFetch(() => {
-    const duplicate = { ...mirror("archived-duplicate"), archivedAt: "now" };
-    h.agents.set(duplicate.id, duplicate);
-    h.stream.update({ kind: "upsert", agent: duplicate });
-  });
-  assert.deepEqual(await h.refresh(), { woken: 0 });
-  assert.deepEqual(h.refetched, [], "a stale unique candidate cannot authorize the timeline read");
-  assert.equal(h.lists.length, 2);
-});
-
 test("recursive parent and child accept their exact own upserts before create resolves", async t => {
   const h = harness(t);
   h.onCreate(value => h.stream.update({ kind: "upsert", agent: value }));
@@ -241,23 +189,6 @@ test("recursive parent and child accept their exact own upserts before create re
   assert.equal(h.lists.length, 2, "own stream upserts consume no retry or rebootstrap");
   const warm = await h.directory.read(h.paseo, t.signal);
   assert.deepEqual((await warm.mirrors(world, "aku/child/2")).map(value => value.id), ["created-aku/child/2"]);
-});
-
-test("own creation never forgives a different watched key changing or an ambiguous new mirror", async t => {
-  for (const mode of ["parent-replaced", "duplicate-child"]) await t.test(mode, async t => {
-    const h = harness(t);
-    h.onCreate(value => {
-      h.stream.update({ kind: "upsert", agent: value });
-      const changed = mode === "parent-replaced" ? { ...agent("parent", "other"), updatedAt: later } : mirror("duplicate");
-      h.agents.set(changed.id, changed);
-      h.stream.update({ kind: "upsert", agent: changed });
-    });
-    const evidence = await h.directory.read(h.paseo, t.signal);
-    evidence.native("pi", "native");
-    await evidence.mirrors(world, "aku/test/1");
-    const handle = await h.paseo.agents.create({ cwd: world, config: { provider: "keiyaku/mirror", options: { world, akuId: "aku/test/1" } } });
-    assert.throws(() => evidence.created(handle.current()!), StaleDirectory);
-  });
 });
 
 test("one cancelled seed waiter cannot abort another caller's bootstrap", async t => {

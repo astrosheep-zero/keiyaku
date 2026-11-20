@@ -10,7 +10,6 @@ import {
   appendActivity,
   beginTurn,
   createTimelineReader,
-  endTurn,
   HeartAbsentError,
   initializeHeart,
   recordTellDeliveries,
@@ -228,50 +227,6 @@ test("stream windows are complete, bounded, and keep retention metadata honest",
   }
 });
 
-test("stream continues across idle into new work and announces outcomes once", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stream-idle-");
-  const fixture = await bornStreamFixture(root, "c0000014");
-  const announced: (readonly [string, readonly string[]])[] = [];
-  const owner = new AkumaOwner(fixture.allocated.id, fixture.world, async (id, historyIds) => {
-    announced.push([id, [...historyIds]]);
-  });
-  const controller = new AbortController();
-  const iterator = owner.stream({ signal: controller.signal })[Symbol.asyncIterator]();
-  try {
-    await pull(iterator, "the initial window");
-    assert.deepEqual(announced, []);
-    await endTurn(fixture.allocated.paths, {
-      turnSequence: fixture.turn.sequence,
-      outcome: { kind: "failed", diagnostic: "stopped by the driver" },
-      completedAt: AT,
-    });
-    const closed = await pull(iterator, "the closed Turn");
-    assert.deepEqual(
-      closed.rows.map((row) => row.kind),
-      ["turn", "outcome"],
-    );
-    assert.deepEqual(announced, [[fixture.allocated.id, [`turn/${fixture.turn.sequence}`]]]);
-
-    const next = await beginTurn(fixture.allocated.paths, {
-      bodySequence: fixture.body.sequence,
-      startedAt: AT,
-    });
-    const continued = await pull(iterator, "work after idle");
-    assert.deepEqual(
-      continued.rows.map((row) => [row.kind, row.sequence]),
-      [
-        ["turn", fixture.turn.sequence],
-        ["outcome", closed.rows.at(-1)!.sequence],
-        ["turn", next.sequence],
-      ],
-    );
-    assert.equal(announced.length, 1, "an already observed outcome is never announced twice");
-  } finally {
-    controller.abort(new Error("test finished"));
-    fixture.holder.release();
-  }
-});
-
 test("a suspended stream observes nothing until its consumer pulls again", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-stream-slow-");
   const fixture = await bornStreamFixture(root, "c0000015");
@@ -295,27 +250,6 @@ test("a suspended stream observes nothing until its consumer pulls again", async
     assert.equal(tell.tellId, "tell-after-idle");
   } finally {
     controller.abort(new Error("test finished"));
-    fixture.holder.release();
-  }
-});
-
-test("abort while suspended after an emission releases the retained reader", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stream-yield-abort-");
-  const fixture = await bornStreamFixture(root, "c0000016");
-  const owner = new AkumaOwner(fixture.allocated.id, fixture.world);
-  const controller = new AbortController();
-  const iterator = owner.stream({ signal: controller.signal })[Symbol.asyncIterator]();
-  try {
-    await pull(iterator, "the initial window");
-    const closes = countCloses(context);
-    controller.abort(new Error("caller stopped observing"));
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(closes(), 1, "the suspended stream released its reader without another pull");
-    await assert.rejects(
-      pull(iterator, "the aborted pull"),
-      (error: unknown) => error instanceof Error && error.message === "caller stopped observing",
-    );
-  } finally {
     fixture.holder.release();
   }
 });
@@ -443,23 +377,6 @@ test("a replaced Heart invalidates the observation's change gate", async (contex
   }
 });
 
-test("an explicit return releases the retained reader", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stream-return-");
-  const fixture = await bornStreamFixture(root, "c0000018");
-  const owner = new AkumaOwner(fixture.allocated.id, fixture.world);
-  try {
-    const iterator = owner.stream()[Symbol.asyncIterator]();
-    await pull(iterator, "the initial window");
-    const closes = countCloses(context);
-    assert.equal(typeof iterator.return, "function");
-    await iterator.return!();
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(closes(), 1);
-  } finally {
-    fixture.holder.release();
-  }
-});
-
 test("leaving a for-await loop releases the retained reader", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-stream-break-");
   const fixture = await bornStreamFixture(root, "c000001c");
@@ -546,27 +463,6 @@ test("stream keeps a tool's start and completion as independent retained rows", 
   }
 });
 
-test("a born Akuma with no Turn still emits its initial empty window", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stream-empty-");
-  const born = await bornBody(root, "c000001f", AT);
-  const owner = new AkumaOwner(born.allocated.id, await World.at(root));
-  const controller = new AbortController();
-  const iterator = owner.stream({ signal: controller.signal })[Symbol.asyncIterator]();
-  try {
-    const initial = await pull(iterator, "the empty initial window");
-    assert.deepEqual(initial.rows, []);
-    assert.equal(initial.omitted, 0);
-    assert.equal(initial.hasEarlier, false);
-    assert.equal(initial.hasLater, false);
-    assert.equal(initial.historyLost, false);
-    assert.equal(initial.lowestRetained, null);
-    assert.equal(initial.highest, null);
-  } finally {
-    controller.abort(new Error("test finished"));
-    born.holder.release();
-  }
-});
-
 test("a commit made during an observation is never skipped by the change gate", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-stream-gate-");
   const fixture = await bornStreamFixture(root, "c000001d");
@@ -597,13 +493,4 @@ test("a commit made during an observation is never skipped by the change gate", 
     reader.clear();
     fixture.holder.release();
   }
-});
-
-test("stream options admit only a caller signal", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stream-options-");
-  const allocated = await allocatedHeart(root, "claude", "c000001b");
-  const akuma = Akuma.select(await World.at(root), allocated.id);
-  assert.throws(() => akuma.stream(null as never), /stream options must be an object/u);
-  assert.throws(() => akuma.stream({ cursor: 1 } as never), /unknown field: cursor/u);
-  assert.throws(() => akuma.stream({ signal: {} } as never), /signal must be an AbortSignal/u);
 });

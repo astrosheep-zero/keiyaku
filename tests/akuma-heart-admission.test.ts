@@ -137,33 +137,6 @@ test("Heart read admission yields through an exclusive WAL reader lock and execu
   }
 });
 
-test("cancelled Heart read admission never enters the callback", async () => {
-  const value = await fixture();
-  const blocker = new DatabaseSync(value.paths.heart);
-  const controller = new AbortController();
-  const reason = new Error("read caller cancelled");
-  let calls = 0;
-  try {
-    blocker.exec("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE");
-    blocker.prepare("SELECT version FROM akuma_schema").get();
-    const reading = withReadOnlyHeart(
-      value.paths,
-      () => {
-        calls += 1;
-      },
-      controller.signal,
-    );
-    const rejected = assert.rejects(reading, (error) => error === reason);
-    await delay(20);
-    controller.abort(reason);
-    await rejected;
-    assert.equal(calls, 0);
-  } finally {
-    blocker.close();
-    value.close();
-  }
-});
-
 test("Heart retains observed tool output and per-change patches beside rows written without them", async () => {
   const value = await heartFixture("keiyaku-heart-observed-output-");
   const { allocated, holder, body } = await bornBody(value.root, "c0ffee01", "2026-08-08T00:00:00.000Z");

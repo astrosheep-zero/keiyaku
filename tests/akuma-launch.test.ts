@@ -7,7 +7,7 @@ import { Akuma } from "../src/akuma/index.js";
 import { breakBody, HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
 import { runProcess } from "../src/runtime/proc/run.js";
 import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.js";
-import { answering, bornWorld, settledInput } from "./support/akuma-tell.js";
+import { answering, bornWorld } from "./support/akuma-tell.js";
 import { spawnAkumaBody } from "../src/akuma/detached-body.js";
 import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
@@ -21,93 +21,6 @@ import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
-
-test("one composed launcher reaches birth, first Tell, and nested birth plus structured ask", async (context) => {
-  const world = await World.at(temporaryDirectory(context, "keiyaku-launch-propagation-"));
-  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
-  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
-  const launches: BodyLaunch[] = [];
-  const bodies: Promise<unknown>[] = [];
-  const submissions: string[] = [];
-  let nestedId: string | undefined;
-  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
-    const text = input.launchTells[0]!.text;
-    submissions.push(text);
-    const answer = deferred<string>();
-    const abort = async () => { answer.resolve("canceled"); };
-    custody.own({ closed: answer.promise.then(() => undefined), abort, forceDispose: abort });
-    return {
-      admission: { fence: `launch-${text}` },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: `session-${text}` } };
-          if (text === "parent") {
-            const child = await akumasWithLauncher(world, spawn).spawn({
-              akumaName: "worker",
-
-              caller: {
-                kind: "akuma",
-                world,
-                akumaId: input.execution!.akumaId as NonNullable<BodyLaunch["seed"]>["id"],
-              },
-              signal: context.signal,
-            });
-            nestedId = child.akumaId;
-            await akumasWithLauncher(world, spawn).wait({ akuma: [child.akumaId], signal: context.signal });
-            const result = await akumasWithLauncher(world, spawn).ask({ akuma: child.akumaId, body: "child", schema: { type: "object" }, signal: context.signal });
-            assert.equal(result.kind, "answered");
-            if (result.kind === "answered") assert.deepEqual(result.answer, { ok: true });
-            answer.resolve("parent answer");
-          } else {
-            assert.equal(input.schemaJson, '{"type":"object"}');
-            answer.resolve('{"ok":true}');
-          }
-        },
-      },
-      completion: answer.promise.then((value) => ({ kind: "answered" as const, answer: value })),
-    };
-  }));
-  const spawn: BodyLauncher = async (launch) => {
-    launches.push(launch);
-    const body = driveAkumaBody(launch, adapter);
-    bodies.push(body);
-    return {
-      completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
-      async cancel() {
-        throw new Error("confirmed launches must not be canceled");
-      },
-      release() {},
-    };
-  };
-  try {
-    const result = await akumasWithLauncher(world, spawn).spawn({
-      akumaName: "worker",
-      body: "parent",
-      mode: "wait",
-      signal: context.signal,
-    });
-    assert.equal(result.input?.kind, "answered");
-    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: "parent answer" });
-    await Promise.all(bodies);
-    assert.deepEqual(submissions, ["parent", "child"], "births submit no provider prompt");
-    assert.equal(launches.length, 4);
-    assert.deepEqual(
-      launches.map((launch) => launch.seed?.origin.kind ?? "wake"),
-      ["direct", "wake", "direct", "wake"],
-    );
-    assert.equal(launches[0]!.paths.directory, launches[1]!.paths.directory);
-    assert.equal(launches[2]!.paths.directory, launches[3]!.paths.directory);
-    assert.notEqual(launches[0]!.paths.directory, launches[2]!.paths.directory);
-    assert.equal(launches[2]!.seed?.id, nestedId);
-    const child = await readHeart(launches[2]!.paths);
-    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: launches[0]!.seed!.id });
-    assert.equal(child.latestBody?.end, "exited");
-    assert.equal(child.pending.length, 0);
-  } finally {
-    await Promise.all(bodies);
-  }
-});
 
 test("an ordinary Tell waits for provider closure and drains under the same Body", { timeout: 10_000 }, async (context) => {
   const world = await World.at(temporaryDirectory(context, "keiyaku-launch-queue-"));

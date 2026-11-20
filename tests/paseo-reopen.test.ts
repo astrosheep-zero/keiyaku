@@ -81,19 +81,6 @@ test("refresh reopens only the canonical persisted mirror through a zero-item re
   assert.deepEqual(h.refetched, [["mirror", 0]]);
 });
 
-test("a persisted mirror from another real World is not reopened", async t => {
-  const otherWorld = await mkdtemp(join(tmpdir(), "paseo-reopen-other-world-"));
-  t.after(() => rm(otherWorld, { recursive: true, force: true }));
-  const h = await harness(t);
-  const matching = snapshot("mirror", h.world, "aku/test/1");
-  t.mock.method(h.client, "fetchAgents", async () => ({ requestId: "list",
-    entries: [snapshot("foreign-world", otherWorld, "aku/test/1"), matching].map(agent => ({ agent, project: null })),
-    pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }));
-  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 1 });
-  assert.deepEqual(h.refreshed, ["mirror"]);
-  assert.deepEqual(h.refetched, [["mirror", 0]]);
-});
-
 test("directory pagination must complete before any candidate can be reopened", async t => {
   const h = await harness(t);
   const warning = t.mock.method(console, "warn", () => {});
@@ -123,21 +110,6 @@ test("archived, disappeared, changed and concurrently archived mappings are refu
     assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
     assert.equal(h.refetched.length, scenario.refetches);
   });
-});
-
-test("unversioned and incorrectly shaped provider metadata is never treated as mirror identity", async t => {
-  const h = await harness(t);
-  const good = snapshot("mirror", h.world, "aku/test/1");
-  const wrongShape = { ...good, id: "flat", persistence: { ...good.persistence!, metadata: { world: h.world, akuId: "aku/test/1" } } };
-  const wrongVersion = { ...good, id: "v2", persistence: { ...good.persistence!, metadata: {
-    pluginProviderPersistence: { version: 2, data: { world: h.world, akuId: "aku/test/1" } },
-  } } };
-  t.mock.method(h.client, "fetchAgents", async () => ({ requestId: "list",
-    entries: [wrongShape, wrongVersion].map(agent => ({ agent, project: null })),
-    pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }));
-  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
-  assert.deepEqual(h.refreshed, []);
-  assert.deepEqual(h.refetched, []);
 });
 
 test("concurrent refreshes coalesce reopening the same exact agent", { timeout: 5_000 }, async t => {

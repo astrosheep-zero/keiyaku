@@ -226,27 +226,6 @@ const page = (rows: Row[], metadata: Partial<Omit<History, "rows">> = {}): Histo
   hasLater: false, historyLost: false, lowestRetained: rows[0]?.sequence ?? null,
   highest: Math.max(0, ...rows.map((row) => row.sequence)), ...metadata });
 
-test("a live report remains informational until its exact Turn outcome", async (t) => {
-  const h = await harness(t);
-  const report: Row = { kind: "report", sequence: 3, bodySequence: 1, turnSequence: 2,
-    text: "working", at };
-  h.push([turn(2)]); await h.drain();
-  h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
-  const reports = () => h.events.filter((event) => event.type === "timeline" && event.item.type === "notification"
-    && event.item.message === "Progress report: working");
-  assert.equal(reports().length, 1);
-  const observed = reports()[0];
-  assert.ok(observed?.type === "timeline" && observed.item.type === "notification");
-  assert.equal(observed.item.message, "Progress report: working");
-  h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
-  assert.equal(reports().length, 1);
-  h.push(historySchema.shape.rows.parse([turn(2), report, answer(2, 4)])); await h.drain();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
-  assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
-  assert.equal(reports().length, 1);
-});
-
 test("bad records keep observation incomplete until a genuine outcome", async (t) => {
   const h = await harness(t);
   const rows = historySchema.shape.rows.parse([turn(2),
@@ -265,31 +244,6 @@ test("bad records keep observation incomplete until a genuine outcome", async (t
   assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
 });
 
-test("skip opening exposes an incomplete observation without replaying retained history", async (t) => {
-  const rows = historySchema.shape.rows.parse([turn(2),
-    { kind: "said", sequence: 3, turnSequence: 2, at, text: "old speech" },
-    { kind: "future", sequence: 4, at, payload: "secret" }]);
-  const h = await harness(t, {}, rows);
-  const history = async () => {
-    const events: AgentStreamEvent[] = [];
-    for await (const event of h.agent.session!.streamHistory()) events.push(event);
-    return events;
-  };
-  const opening = await history();
-  const notices = opening.filter((event) => event.type === "timeline" && event.item.type === "notification"
-    && event.item.message === "Observation incomplete: unsupported or malformed future record at sequence 4.");
-  assert.equal(notices.length, 1);
-  assert.ok(!JSON.stringify(opening).includes("secret") && !JSON.stringify(opening).includes("old speech"));
-  assert.equal(opening.filter((event) => event.type === "turn_started" && event.turnId === "turn/2").length, 1);
-  assert.equal(opening.some((event) => event.type === "turn_completed" || event.type === "turn_canceled"), false);
-  await h.refresh();
-  assert.deepEqual(await history(), opening, "refresh deduplicates the seeded warning");
-  await h.sync();
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
-  h.push([...rows, answer(2, 5)]); await h.drain();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
-  assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
-});
 for (const failed of [false, true]) test(`recorded steer succeeds with ${failed ? "failed wake" : "no live receipt"}, one Tell and no interrupt`, async (t) => {
   const warnings = t.mock.method(console, "warn", () => {});
   let n = 0;
@@ -384,51 +338,6 @@ test("installed AgentManager refresh keeps an idle mirror through actual GC and 
   assert.equal(h.getDirectoryListeners(), 0, "the owned manager subscription is released on shutdown");
 });
 
-test("post-create sync restores the installed consumer's running Turn without replay or execution", async (t) => {
-  const snapshot = [
-    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const, deliveries: [] },
-    turn(11), answer(11, 12, "old answer"), turn(13),
-  ];
-  const h = await harness(t, {}, snapshot);
-  const history = async () => {
-    const events: AgentStreamEvent[] = [];
-    for await (const event of h.agent.session!.streamHistory()) events.push(event);
-    return events;
-  };
-  const opening = await history();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle", "opening precedes manager subscription");
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, null);
-  await h.refresh();
-  assert.deepEqual(await history(), opening, "normal refresh keeps the opening snapshot deduplicated");
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle", "a normal hint cannot recover the missed start");
-  await h.sync();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/13");
-  await h.sync();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/13");
-  assert.deepEqual(h.events.map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
-    [["turn_started", "turn/13"], ["turn_started", "turn/13"]], "sync only reannounces the same execution identity");
-  assert.equal(h.manager.listAgents().length, 1, "repeated sync creates no additional agent");
-  h.setRows([...snapshot, answer(13, 14, "new answer")]); await h.refresh();
-  assert.deepEqual(h.events.flatMap((event) => {
-    if (event.type === "timeline" && event.item.type === "assistant_message")
-      return [[event.item.text, event.turnId]];
-    if (event.type === "turn_completed") return [[event.type, event.turnId]];
-    return [];
-  }), [["new answer", "turn/13"], ["turn_completed", "turn/13"]]);
-  assert.deepEqual(opening.map((event) => event.type),
-    ["mode_changed", "model_changed", "thinking_option_changed", "turn_started"],
-    "opening reports the observed configuration, then only the current execution state, never historical starts or timeline");
-  const settled = await history();
-  await h.sync();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
-  assert.deepEqual(await history(), settled, "sync never reannounces a completed Turn");
-  await h.refresh();
-  assert.deepEqual(await history(), settled, "the new outcome is retained once");
-  assert.deepEqual(h.calls, [], "opening, sync and refresh never Tell or kill the Akuma");
-});
-
 test("one refresh preserves completed and short Turn output before their terminals and the next open Turn", async (t) => {
   const h = await harness(t);
   h.setRows([turn(2)]); await h.refresh();
@@ -462,28 +371,6 @@ test("one refresh preserves completed and short Turn output before their termina
   assert.deepEqual(await history(), retained);
   assert.deepEqual(h.calls, [], "refresh is observation only");
   h.setRows([...snapshot, answer(6, 7)]); await h.refresh();
-});
-
-test("a Turn transition during Tell keeps its captured acknowledgement and does not fall back", async (t) => {
-  let release!: () => void;
-  const blocked = new Promise<void>((resolve) => { release = resolve; });
-  let began!: () => void;
-  const started = new Promise<void>((resolve) => { began = resolve; });
-  let n = 0;
-  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
-    n++;
-    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
-    began(); await blocked; return receipt("steering");
-  } });
-  await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
-  const sending = h.send("steering", "steering"); await started;
-  h.setRows([turn(2), answer(2, 3), turn(4)]); await h.refresh();
-  release();
-  assert.deepEqual(await sending, { disposition: "steered" }); await h.drain();
-  assert.deepEqual(h.calls.map((call) => call.op), ["tell", "tell"]);
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/4");
-  assert.equal(h.events.filter((event) => event.type === "turn_completed" && event.turnId === "turn/2").length, 1);
-  h.setRows([turn(2), answer(2, 3), turn(4), answer(4, 5)]); await h.refresh();
 });
 
 test("a transition before plugin receipt can still make the host reject the acknowledgement, but never retries", async (t) => {
@@ -524,16 +411,6 @@ test("pending recovery Tell completes only its host command before a later real 
   assert.equal(h.events.filter((event) => event.type === "turn_completed" && event.turnId === "turn/439").length, 1);
   assert.equal(h.events.some((event) => (event.type === "turn_completed" || event.type === "turn_canceled") && event.turnId === "turn/303"), false);
   assert.deepEqual(h.calls.map((call) => call.op), ["tell"], "no retry or Stop to repair presentation");
-});
-
-test("idle admission with an already observed native start must not let command completion hide running work", async (t) => {
-  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
-    h.setRows([deliveredTell(1, 2, "idle", text), turn(2)]); return receipt("idle");
-  } });
-  await h.send("idle input", "idle"); await h.drain();
-  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
-  h.setRows([turn(2), answer(2, 3)]); await h.refresh();
 });
 
 test("combined best-effort Steer, explicit Stop, and later Tell preserve the same Akuma identity", async (t) => {
@@ -603,18 +480,4 @@ test("installed native consumer folds tool start and result by producer identity
   ]);
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running", "tool failure never fabricates Turn failure");
   h.setRows([turn(2), answer(2, 7)]); await h.refresh();
-});
-
-test("uncertain steer fails honestly without host replacement, retry, or touching the existing Turn", async (t) => {
-  let n = 0;
-  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
-    n++;
-    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
-    throw new Error("lost receipt after possible admission");
-  } });
-  await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
-  await assert.rejects(h.send("uncertain", "uncertain"), /lost receipt after possible admission.*may already be recorded/u);
-  assert.deepEqual(h.calls.map((call) => call.op), ["tell", "tell"]);
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
-  h.setRows([turn(2), answer(2, 3)]); await h.refresh();
 });

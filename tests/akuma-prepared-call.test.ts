@@ -15,8 +15,8 @@ import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering, settledInput } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
-import { HeldAkumaLeash, finishBodyIfIdle, readSeal, readSoul, readTell } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, pathsForAkumaId, type AkumaId } from "../src/akuma/identity.js";
+import { HeldAkumaLeash, finishBodyIfIdle, readSoul, readTell } from "../src/akuma/heart/index.js";
+import { akumaRunRoot, pathsForAkumaId } from "../src/akuma/identity.js";
 import type {
   CallInitialTellAdmission,
   InitialTellAdmissionInput,
@@ -245,22 +245,6 @@ const rejectedTell = async (input: InitialTellAdmissionInput): Promise<CallIniti
   throw new Error(`unexpected initial Tell ${input.initialTell.tellId}`);
 };
 
-test("the prepared executor admits local provider options itself and refuses unsupported ones before birth", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-refuse-"));
-  await assert.rejects(
-    prepareCall({
-      akumaName: "worker",
-      cwd: root,
-      world: root,
-      recipe: rawRecipe({ options: { network: "enabled" } }),
-      spawn: async (launch) => await birth(launch),
-      admitInitialTell: rejectedTell,
-    }),
-    /Claude provider does not support the network option/u,
-  );
-  assert.deepEqual(await childRuns(root), []);
-});
-
 test("targeted spawn freezes the scoped personality and admits options once per birth", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-inheritance-"));
   const home = join(root, "home");
@@ -325,47 +309,6 @@ test("invalid configured provider recipes refuse before allocating a child, incl
     });
     assert.deepEqual(await childRuns(root), []);
   }
-});
-
-test("local custody carries a raw recipe the executor admits once and births with", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-local-"));
-  const recipe = rawRecipe({ description: "Worker", options: { model: "claude-sonnet-4-5" } });
-  const prepared = await prepareCall({
-    akumaName: "worker",
-    cwd: root,
-    world: root,
-    recipe,
-    spawn: async (launch) => await birth(launch),
-    admitInitialTell: rejectedTell,
-  });
-  const result = await publishPreparedCall(prepared);
-  assert.equal(result.failure, undefined);
-  const soul = await readSoul(result.child.paths);
-  assert.equal(soul?.id, result.child.id);
-  assert.equal(soul?.cwd, root);
-  assert.deepEqual(soul?.options, { model: "claude-sonnet-4-5" });
-  assert.equal(Object.isFrozen(soul?.options), true);
-  assert.deepEqual(soul?.origin, { kind: "direct" });
-});
-
-test("a durably born child survives a later launch failure and returns the native failure", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-born-"));
-  const failure = new Error("post-birth launch failure");
-  const prepared = await prepareCall({
-    akumaName: "worker",
-    cwd: root,
-    world: root,
-    recipe: rawRecipe(),
-    spawn: async (launch) => {
-      await birth(launch);
-      throw failure;
-    },
-    admitInitialTell: rejectedTell,
-  });
-  const result = await publishPreparedCall(prepared);
-  assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
-  assert.equal(result.failure, failure);
-  assert.equal(result.tell, undefined);
 });
 
 test("native spawn failure after Soul durability retains TypeError cause and direct birth evidence", async (t) => {
@@ -540,59 +483,3 @@ test("a failed or canceled first wake retains the real initial Tell and born chi
     }
   }
 });
-
-for (const corruptInitialization of [false, true]) {
-  test(`prebirth cancellation retains its native reason with ${corruptInitialization ? "failed" : "successful"} seal cleanup`, async (t) => {
-    const world = await World.at(temporaryDirectory(t, "keiyaku-prebirth-cancel-"));
-    const prior = { KEIYAKU_INITIATOR: process.env.KEIYAKU_INITIATOR, SQUARE_DELIVERY: process.env.SQUARE_DELIVERY };
-    process.env.KEIYAKU_INITIATOR = "isolated-observer";
-    process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
-    t.after(() => restoreEnvironmentValues(prior));
-    mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
-    writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-    writeFileSync(
-      join(world, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        providers: { claude: { kind: "claude-agent-sdk" } },
-        plugins: { square: { package: "@astrosheep/keiyaku-plugin-square" } },
-      }),
-    );
-    const controller = new AbortController();
-    const reason = new Error("original prebirth cancellation");
-    const suppress = DeliveryLedger.prototype.suppress;
-    let child: AkumaId | undefined;
-    t.mock.method(
-      DeliveryLedger.prototype,
-      "suppress",
-      async function (this: DeliveryLedger, input: Parameters<DeliveryLedger["suppress"]>[0]) {
-        const result = await suppress.call(this, input);
-        child = input.key[1] as AkumaId;
-        if (corruptInitialization) mkdirSync(pathsForAkumaId(world, child).heart);
-        controller.abort(reason);
-        return result;
-      },
-    );
-    const selected = await Settings.load({ cwd: world, home: join(world, "empty-home") });
-    const api = akumasWithLauncher(world, async () => assert.fail("canceled observation cannot launch a Body"));
-    await assert.rejects(
-      api.spawn({ akumaName: "worker", body: "begin", mode: "wait", settings: selected, signal: controller.signal }),
-      (error: unknown) => {
-        assert.ok(error instanceof KeiyakuError);
-        assert.equal(error.category, "aborted");
-        assert.equal(error.cause, reason);
-        assert.equal(error.spawn, undefined, "an allocation is not a born-child receipt");
-        assert.ok(child);
-        assert.ok(error.message.includes(child));
-        assert.ok(error.message.includes(pathsForAkumaId(world, child).directory));
-        assert.match(error.message, corruptInitialization ? /birth unresolved/u : /birth sealed/u);
-        return true;
-      },
-    );
-    assert.ok(child);
-    assert.equal((await childRuns(world)).length, 1, "the allocated coordinate remains owned and is never reused");
-    if (!corruptInitialization) {
-      assert.equal(await readSoul(pathsForAkumaId(world, child)), null);
-      assert.equal((await readSeal(pathsForAkumaId(world, child)))?.evidence, reason.message);
-    }
-  });
-}

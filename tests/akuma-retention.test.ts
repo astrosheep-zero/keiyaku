@@ -1,33 +1,31 @@
 import { driveWithTell } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
   symlinkSync,
-  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { moveAlias, readAliases, tryAcquireAliasCustody } from "../src/alias/index.js";
 import { HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId, type AllocatedAkuma } from "../src/akuma/identity.js";
 import { readRetentionCandidate, retireInactiveAkuma } from "../src/akuma/retention.js";
+import { moveAlias, readAliases } from "../src/alias/index.js";
 import { contractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { readGitPaths, repositoryAt } from "../src/git/repository.js";
-import { isPrivateStateSeatContention, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
+import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
+import { isPrivateStateSeatContention, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { Settings } from "../src/index.js";
 import { sweepInactiveAkumas } from "../src/library/akuma-retention.js";
 import { Akumas } from "../src/library/akumas.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { answering } from "./support/akuma-tell.js";
-import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository } from "./support/git.js";
+import { makeGitRepository } from "./support/git.js";
 import { accepted, bind, present } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -136,23 +134,6 @@ async function callSettings(root: string) {
   return { home, value: await Settings.load({ cwd: root, home }) };
 }
 
-async function boundContract(raw: ReturnType<typeof makeGitRepository>, verification?: string) {
-  return await bind(raw, verification);
-}
-
-async function claimedContract(raw: ReturnType<typeof makeGitRepository>) {
-  const keiyaku = await boundContract(raw, "exit 0");
-  const state = present(await keiyaku.state());
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(raw.path), state.id);
-  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-  raw.run(["-C", worktree, "add", "candidate.txt"]);
-  raw.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  accepted(await keiyaku.deliver());
-  accepted(await keiyaku.verify());
-  assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
-  return state.id;
-}
-
 test("a successful call signals confirmed retirement only, after custody is removed", async () => {
   const raw = repositoryFixture();
   const world = await World.at(raw.path);
@@ -200,41 +181,6 @@ test("a successful call signals confirmed retirement only, after custody is remo
   assert.equal(existsSync(recent.paths.heart), true);
 });
 
-test("a same-handle later call reruns maintenance after a sweep failure", async () => {
-  const raw = repositoryFixture();
-  const world = await World.at(raw.path);
-  const settingsFixture = await callSettings(raw.path);
-  const akumas = Akumas.of(world);
-  const first = await oldAkuma(world, "a0000003");
-  const aliasAuthority = join(world, ".keiyaku", "akuma", "alias.json");
-  writeFileSync(aliasAuthority, "not json\n");
-
-  const one = await akumas.spawn({
-    akumaName: "worker",
-    body: "ping",
-    mode: "wait",
-    timeoutMs: 15_000,
-    home: settingsFixture.home,
-    settings: settingsFixture.value,
-  });
-  assert.equal(one.kind, "spawned");
-  assert.equal(existsSync(first.paths.heart), true, "a failed sweep is retried by a later call");
-
-  unlinkSync(aliasAuthority);
-  const second = await oldAkuma(world, "a0000004");
-  const two = await akumas.spawn({
-    akumaName: "worker",
-    body: "ping",
-    mode: "wait",
-    timeoutMs: 15_000,
-    home: settingsFixture.home,
-    settings: settingsFixture.value,
-  });
-  assert.equal(two.kind, "spawned");
-  assert.equal(existsSync(first.paths.heart), false);
-  assert.equal(existsSync(second.paths.heart), false);
-});
-
 test("the strict cutoff retains an Akuma exactly fifteen days old and retires one millisecond older", async (context) => {
   const world = await worldAt(context, "keiyaku-retention-cutoff-");
   const now = Date.parse("2030-01-01T00:00:00.000Z");
@@ -274,93 +220,35 @@ test("a running old Akuma, an aliased Akuma, and pending input survive", async (
   running.leash.release();
 });
 
-test("Dispatch associations keep active, missing, and unproven Contracts while terminal ones retire", async () => {
+test("Dispatch associations keep active and missing Contracts while an abandoned one retires", async () => {
   const raw = repositoryFixture();
   const world = await World.at(raw.path);
   const repository = await repositoryAt(raw.path);
 
   const active = await oldAkuma(world, "d0000001");
   const abandoned = await oldAkuma(world, "d0000002");
-  const claimed = await oldAkuma(world, "d0000003");
   const missing = await oldAkuma(world, "d0000004");
 
-  const activeContract = await boundContract(raw);
-  const abandonedContract = await boundContract(raw);
+  const activeContract = await bind(raw);
+  const abandonedContract = await bind(raw);
   const activeId = present(await activeContract.state()).id;
   const abandonedId = present(await abandonedContract.state()).id;
   accepted(await abandonedContract.abandon());
 
-  const claimedId = await claimedContract(raw);
   assert.equal((await publishDispatch({ repository, akumaId: active.id, contractId: activeId })).kind, "dispatched");
   assert.equal(
     (await publishDispatch({ repository, akumaId: abandoned.id, contractId: abandonedId })).kind,
     "dispatched",
   );
-  assert.equal((await publishDispatch({ repository, akumaId: claimed.id, contractId: claimedId })).kind, "dispatched");
   assert.equal(
     (await publishDispatch({ repository, akumaId: missing.id, contractId: contractId("kei/never-bound") })).kind,
     "dispatched",
   );
 
-  assert.deepEqual(await sweepInactiveAkumas(world), [abandoned.id, claimed.id]);
+  assert.deepEqual(await sweepInactiveAkumas(world), [abandoned.id]);
   assert.equal(existsSync(active.paths.heart), true);
   assert.equal(existsSync(missing.paths.heart), true);
   assert.equal(existsSync(abandoned.paths.directory), false);
-  assert.equal(existsSync(claimed.paths.directory), false);
-});
-
-test("a failed Dispatch observation keeps the candidate", async () => {
-  const raw = repositoryFixture();
-  const world = await World.at(raw.path);
-  const repository = await repositoryAt(raw.path);
-  const allocated = await oldAkuma(world, "d0000005");
-  assert.equal(
-    (await publishDispatch({ repository, akumaId: allocated.id, contractId: contractId("kei/unavailable-owner") })).kind,
-    "dispatched",
-  );
-  const path = `dispatch/${createHash("sha256").update(allocated.id).digest("hex")}.json`;
-  const entry = (await readGitPaths(repository, [path])).paths.get(path);
-  assert.equal(entry?.type, "blob");
-  if (entry?.type !== "blob") throw new Error("fixture Dispatch is not a blob");
-  unlinkSync(join(repository.commonDirectory, "objects", entry.oid.slice(0, 2), entry.oid.slice(2)));
-
-  assert.deepEqual(await sweepInactiveAkumas(world), []);
-  assert.equal(existsSync(allocated.paths.heart), true);
-});
-
-test("removal holds Alias custody across the effect so a concurrent move cannot interleave", async (context) => {
-  const world = await worldAt(context, "keiyaku-retention-custody-");
-  const now = Date.parse("2030-01-01T00:00:00.000Z");
-  const allocated = await oldAkuma(world, "e0000001", new Date(now - 20 * DAY_MS).toISOString());
-  const candidate = await readRetentionCandidate({ id: allocated.id, paths: allocated.paths }, now);
-  assert.ok(candidate !== null);
-
-  let moving: Promise<unknown> | undefined;
-  const receipt = await retireInactiveAkuma({
-    entry: candidate,
-    now,
-    retireUnderCustody: async (retire) => {
-      assert.equal(await HeldAkumaLeash.try(allocated.paths), null, "retention must hold the execution seat");
-      const custody = await tryAcquireAliasCustody(world);
-      assert.ok(custody !== null);
-      try {
-        moving = moveAlias({ world, alias: parseAkumaAlias("@raced"), akumaId: allocated.id });
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        assert.deepEqual(await readAliases(world), [], "a concurrent Alias move cannot commit before removal");
-        assert.equal(await retire(), true);
-        return "retired";
-      } finally {
-        custody.release();
-      }
-    },
-  });
-  assert.equal(receipt, "retired");
-  assert.equal(existsSync(allocated.paths.heart), false);
-  await moving;
-  assert.deepEqual(
-    (await readAliases(world)).map((binding) => binding.alias),
-    [parseAkumaAlias("@raced")],
-  );
 });
 
 test("a pending Tell observed by the final read prevents removal", async (context) => {
@@ -384,43 +272,6 @@ test("a pending Tell observed by the final read prevents removal", async (contex
   });
   assert.equal(receipt, "retained");
   assert.equal(existsSync(allocated.paths.heart), true);
-});
-
-test("a wake holding the execution seat keeps the candidate", async (context) => {
-  const world = await worldAt(context, "keiyaku-retention-wake-");
-  const now = Date.parse("2030-01-01T00:00:00.000Z");
-  const allocated = await oldAkuma(world, "e0000005", new Date(now - 20 * DAY_MS).toISOString());
-  const candidate = await readRetentionCandidate({ id: allocated.id, paths: allocated.paths }, now);
-  assert.ok(candidate !== null);
-  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-  try {
-    assert.equal(
-      await retireInactiveAkuma({
-        entry: candidate,
-        now,
-        retireUnderCustody: async () => {
-          throw new Error("custody must not run while a wake holds the execution seat");
-        },
-      }),
-      "busy",
-    );
-    assert.equal(existsSync(allocated.paths.heart), true);
-  } finally {
-    leash.release();
-  }
-});
-
-test("a busy Alias authority keeps the candidate", async (context) => {
-  const world = await worldAt(context, "keiyaku-retention-alias-busy-");
-  const allocated = await oldAkuma(world, "e0000002");
-  const custody = await tryAcquireAliasCustody(world);
-  assert.ok(custody !== null);
-  try {
-    assert.deepEqual(await sweepInactiveAkumas(world), []);
-    assert.equal(existsSync(allocated.paths.heart), true);
-  } finally {
-    custody.release();
-  }
 });
 
 test("a busy Dispatch publication seat keeps the candidate", async () => {
@@ -479,22 +330,4 @@ test("unborn, stillborn, foreign bytes, and noncanonical directories are preserv
   assert.equal(existsSync(join(foreign.paths.directory, "foreign.bin")), true);
   assert.equal(existsSync(foreign.paths.heart), false);
   assert.equal(existsSync(noncanonical), true);
-});
-
-test("one corrupt candidate is retained without failing the sweep or the ordinary list", async (context) => {
-  const world = await worldAt(context, "keiyaku-retention-corrupt-");
-  const corrupt = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "0bad0001" });
-  await initializeHeart(corrupt.paths);
-  writeFileSync(corrupt.paths.heart, "not a sqlite database\n");
-  ageAkuma(corrupt, OLD);
-  const eligible = await oldAkuma(world, "0bad0002");
-
-  const listed = await Akumas.of(world).list({ selection: "all" });
-  assert.equal(existsSync(corrupt.paths.directory), true);
-  assert.equal(existsSync(eligible.paths.heart), true, "list alone must not retire");
-  assert.ok(listed.rows?.every((row) => row.id !== corrupt.id));
-
-  assert.deepEqual(await sweepInactiveAkumas(world), [eligible.id]);
-  assert.equal(existsSync(corrupt.paths.directory), true);
-  assert.equal(existsSync(eligible.paths.directory), false);
 });

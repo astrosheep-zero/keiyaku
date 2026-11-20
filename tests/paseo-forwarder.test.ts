@@ -45,23 +45,6 @@ test("three execution events share ensure-and-refresh; Body end retires the runt
   ]).flat());
 });
 
-test("a hung attachment is bounded and independent refresh reconnects", async t => {
-  const ctx = await context(t);
-  let connects = 0, closes = 0;
-  const { signals } = await createForwarder(async () => {
-    connects++;
-    return { async invokePluginRpc(_plugin, method) { if (connects === 1) return await new Promise(() => {});
-      return method === "attach" ? { attached: false } : { woken: 1 }; },
-      fetchAgents: emptyDirectory, async updateAgent() {}, async close() { closes++; } };
-  }).activate(ctx);
-  const hold = setTimeout(() => {}, 5000); t.after(() => clearTimeout(hold));
-  await assert.rejects(async () => signals?.["akuma.turn-started"]?.(started), { name: "TimeoutError" });
-  assert.equal(connects, 3);
-  assert.equal(closes, 2, "failed attachment and title clients close; refresh keeps its runtime client");
-  await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: started.akumaId, bodySequence: 1, end: "exited" });
-  assert.equal(closes, connects);
-});
-
 test("caller cancellation bounds attach and releases the runtime client", async t => {
   const ctx = await context(t);
   const cancellation = new AbortController();

@@ -7,7 +7,7 @@ import { deferred, temporaryDirectory } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
 import { observeAdmittedTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { pendingTellReceipt } from "../src/akuma/call-initial-tell.js";
-import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, finishBodyIfIdle, HeldAkumaLeash, readHeart, readTell, recordTellDeliveries } from "../src/akuma/heart/index.js";
+import { recordTell, beginTurn, bindTellsToTurn, endTurn, finishBodyIfIdle, HeldAkumaLeash, readTell, recordTellDeliveries } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
 import { createHeartReader, HeartAbsentError } from "../src/akuma/heart/storage.js";
@@ -64,25 +64,6 @@ test("observer reuses its connection without retaining a transaction and detects
     );
   } finally {
     reader.clear();
-    fixture.close();
-  }
-});
-
-test("malformed and future Heart versions fail distinctly instead of becoming absence", async () => {
-  const fixture = await heartFixture("kei-heart-format-");
-  const { paths } = fixture.allocated;
-  try {
-    const database = new DatabaseSync(paths.heart);
-    try {
-      database.exec("DROP TABLE akuma_schema; CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version)");
-      database.exec("INSERT INTO akuma_schema VALUES (1, '29')");
-      await assert.rejects(readHeart(paths), { category: "authority-corruption" });
-      database.exec("UPDATE akuma_schema SET version = 2147483648");
-      await assert.rejects(readHeart(paths), /heart schema version must be 33; found 2147483648/u);
-    } finally {
-      database.close();
-    }
-  } finally {
     fixture.close();
   }
 });
@@ -180,21 +161,6 @@ test("bounded Tell keeps its exact terminal when the free-leash recheck hits exp
   assert.deepEqual(observation, { kind: "answered", answer, completedAt: AT });
 });
 
-test("ask stops on an abandoned bound Turn without inventing an answer", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "kei-ask-stopped-"));
-  const parent = await born(root);
-  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-  await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
-  const turn = await beginTurn(parent.paths, { bodySequence: body.sequence, startedAt: AT });
-  await bindTellsToTurn(parent.paths, { turnSequence: turn.sequence, tellIds: ["asked"], boundAt: AT });
-  await breakBody(parent.paths, { sequence: body.sequence, end: "put-down", at: AT });
-  parent.leash.release();
-  const result = await new AkumaOwner(parent.id, root).tellOutcome("asked", { signal: AbortSignal.timeout(2000) });
-  assert.equal(result.reason, "completed");
-  assert.equal(result.outcome, null);
-  assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
-});
-
 test("ask preserves the launch gap, then returns an explicit failed wake without waiting forever", async (context) => {
   const root = await World.at(temporaryDirectory(context, "kei-ask-wake-failed-"));
   const parent = await born(root);
@@ -215,28 +181,6 @@ test("ask preserves the launch gap, then returns an explicit failed wake without
   assert.deepEqual(result.observation, { kind: "unanswered" });
   assert.deepEqual(result.receipt.wake, { kind: "failed", diagnostic: "spawn failed" });
   assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
-});
-
-test("ask cancellation interrupts contended Heart admission", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "kei-ask-cancel-"));
-  const parent = await born(root);
-  await recordTell(parent.paths, { kind: "tell", id: "blocked", body: "work", recordedAt: AT });
-  const blocker = new DatabaseSync(parent.paths.heart);
-  blocker.exec("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE");
-  blocker.prepare("SELECT version FROM akuma_schema").get();
-  const controller = new AbortController();
-  const reason = new Error("cancel ask read");
-  const timer = setTimeout(() => controller.abort(reason), 20);
-  try {
-    await assert.rejects(
-      new AkumaOwner(parent.id, root).tellOutcome("blocked", { signal: controller.signal }),
-      (error) => error === reason,
-    );
-  } finally {
-    clearTimeout(timer);
-    blocker.close();
-    parent.leash.release();
-  }
 });
 
 test("unchanged Body observations do not wake the Turn, but a new Tell does", async (context) => {

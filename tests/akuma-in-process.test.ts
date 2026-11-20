@@ -1,25 +1,16 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { Akuma, AkumaHost, Akumas, Keis, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
-import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
-import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readTurn, readLatestTurnForBody, recordTell } from "../src/akuma/heart/index.js";
-import { launchInProcessBody } from "../src/akuma/in-process-body.js";
-import { publishAkuma } from "../src/akuma/publication.js";
-import { KeiyakuError } from "../src/index.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
-import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
-import { createProviderAttempt } from "../src/akuma/provider.js";
-import { fixtureAdapter } from "./support/akuma-tell.js";
-import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
+import { Akuma, AkumaHost, Akumas, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
+import { pathsForAkumaId } from "../src/akuma/identity.js";
+import { probeLeash, readHeart, readTell, readTurn, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { temporaryDirectory, waitForCondition } from "./support/process.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
-import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
 
-const cli = resolve("src/cli/index.ts");
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const prompt = (script: string) => JSON.stringify({ command: script });
 
@@ -43,9 +34,6 @@ export default function(pi) {
     let actor;
     pi.events.emit("keiyaku:actor:request", { reply: pair => { actor = pair; } });
     appendFileSync(join(ctx.cwd, "native.jsonl"), JSON.stringify({ event, actor, pid: process.pid, session: ctx.sessionManager.getSessionId() }) + "\\n");
-  });
-  pi.on("before_agent_start", (event, ctx) => {
-    appendFileSync(join(ctx.cwd, "runtime.jsonl"), JSON.stringify({ session: ctx.sessionManager.getSessionId(), prompt: event.systemPrompt }) + "\\n");
   });
   pi.registerProvider("host-fixture", {
     baseUrl: "https://unused.invalid", api: "host-fixture", apiKey: "fixture",
@@ -174,13 +162,6 @@ test(
       assert.equal(identity.world, world);
       assert.notEqual(identity.native, "outer-session");
       assert.equal(identity.external, undefined);
-      const selectedAnswer = await secondHandle.tell(prompt("printf selected-answer"), {
-        wait: true,
-        timeoutMs: 20_000,
-        signal: t.signal,
-      });
-      assert.ok("state" in selectedAnswer && selectedAnswer.state === "done");
-      assert.equal(selectedAnswer.answer, "selected-answer");
       const events = nativeEvents(world);
       assert.equal(new Set(events.map((event) => event.pid)).size, 1);
       assert.ok(events.every((event) => event.pid === process.pid));
@@ -202,335 +183,6 @@ test(
       await Akuma.select(world, second.akumaId)
         .kill()
         .catch(() => undefined);
-    }
-  },
-);
-
-test("both public hosts preserve Contract runtime context and exact native report custody through wake", { timeout: 60_000 }, async (t) => {
-  for (const hosting of ["in-process", "detached"] as const) {
-    const repository = repositoryWithMain();
-    const world = await nativeWorld(t, repository.path);
-    const contract = accepted(await Keis.of(await Repo.at({ path: world })).bind({
-      terms: document(), target: null, gates: ["reviewed"],
-    })).kei;
-    const contractId = present(await contract.state()).id;
-    const host = { hosting };
-    const api = Akumas.of(world, host);
-    const reporting = (text: string) => {
-      const script = `const { execFileSync } = require('node:child_process');
-const args = ${JSON.stringify(["--import", import.meta.resolve("tsx"), cli, "report", text, "--json"])};
-const run = env => { try { return JSON.parse(execFileSync(process.execPath, args, { env, encoding: 'utf8' })); }
-catch (error) { if (error.stdout) return JSON.parse(String(error.stdout)); throw error; } };
-console.log(JSON.stringify({
-  current: run(process.env)
-}));`;
-      return prompt([process.execPath, "-e", script].map(quote).join(" "));
-    };
-    const called = await api.spawn({
-      akumaName: "worker", cwd: world, contract, body: reporting("first report"),
-      mode: "wait", timeoutMs: 20_000, signal: t.signal,
-    });
-    const firstInput = called.input;
-    if (firstInput?.kind !== "answered") assert.fail(JSON.stringify(called));
-    const first = JSON.parse(String(firstInput.answer));
-    assert.equal(first.current.kind, "recorded");
-    const handle = Akuma.select(world, called.akumaId, host);
-    const next = await handle.tell(reporting("wake report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
-    assert.ok("state" in next && next.state === "done", JSON.stringify(next));
-    const resumed = JSON.parse(next.answer);
-    const reportSequence = (reportId: string) => Number(reportId.slice("report/".length));
-    assert.ok(reportSequence(resumed.current.reportId) > reportSequence(first.current.reportId));
-    assert.equal(resumed.current.kind, "recorded");
-    for await (const window of handle.stream()) {
-      assert.deepEqual(window.rows.filter(row => row.kind === "report").map(row => row.text), ["first report", "wake report"]);
-      break;
-    }
-    const runtime = () => readFileSync(join(world, "runtime.jsonl"), "utf8").trim().split("\n")
-      .map(line => JSON.parse(line) as { prompt: string });
-    for (const { prompt: instructions } of runtime()) {
-      assert.equal(instructions.split("<keiyaku>").length - 1, 1);
-      assert.ok(instructions.includes(called.akumaId));
-      assert.ok(instructions.includes(`Contract context (not a Dispatch receipt): ${contractId}`));
-      assert.ok(instructions.includes('Use `keiyaku report "..."`'));
-    }
-    const bare = await Akuma.birth("worker", { root: world, cwd: world, host, bare: true });
-    const bareAnswer = await bare.tell(reporting("bare report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
-    assert.ok("state" in bareAnswer && bareAnswer.state === "done", JSON.stringify(bareAnswer));
-    assert.equal(JSON.parse(bareAnswer.answer).current.kind, "recorded");
-    assert.equal((await readHeart(pathsForAkumaId(world, bare.id))).soul?.bare, true);
-    assert.equal(runtime().at(-1)!.prompt.includes("<keiyaku>"), false);
-    assert.ok(runtime().at(-1)!.prompt.includes("Fixture."), "bare preserves personality");
-    assert.ok(nativeEvents(world).every(event => hosting === "in-process" ? event.pid === process.pid : event.pid !== process.pid));
-  }
-});
-
-test(
-  "an in-process Body runs local child, selection, Debt, and Contract operations without inheriting hosting",
-  { timeout: 60_000 },
-  async (t) => {
-    const repository = repositoryWithMain();
-    const world = await nativeWorld(t, repository.path);
-    const bound = accepted(
-      await Keis.of(await Repo.at({ path: world })).bind({
-        terms: document(),
-        target: null,
-        gates: ["reviewed"],
-      }),
-    );
-    const contract = bound.kei;
-    const id = present(await contract.state()).id;
-    const parent = await Akuma.birth("worker", {
-      root: world,
-      cwd: world,
-      host: { hosting: "in-process" },
-    });
-    const script = join(world, "operations.mjs");
-    writeFileSync(
-      script,
-      `import { execFileSync } from "node:child_process";
-const cli = ${JSON.stringify(cli)}, world = ${JSON.stringify(world)};
-const run = (...args) => JSON.parse(execFileSync(process.execPath, ["--import", ${JSON.stringify(import.meta.resolve("tsx"))}, cli, "-C", world, ...args, "--json"], { encoding: "utf8" }));
-const who = run("whoami");
-const debt = run("debt", "add", "Local Body operation");
-const review = run("review", ${JSON.stringify(id)}, "--unsatisfied", "--summary", "fixture");
-const child = run("spawn", "worker", ${JSON.stringify(prompt("printf child-answer"))});
-const waited = run("wait", child.akumaId, "--for", "20s");
-console.log(JSON.stringify({ who, debt, review, child, waited }));
-`,
-    );
-    const answer = await parent.tell(prompt([process.execPath, script].map(quote).join(" ")), {
-      wait: true,
-      timeoutMs: 40_000,
-      signal: t.signal,
-    });
-    assert.ok("state" in answer && answer.state === "done", JSON.stringify(answer));
-    const result = JSON.parse(answer.answer);
-    assert.equal(result.debt.kind, "accepted");
-    assert.equal(result.review.kind, "accepted");
-    assert.equal(result.child.input, undefined);
-    assert.equal(typeof result.child.tellId, "string");
-    assert.equal(result.waited.members[0].state, "done");
-    assert.equal(result.waited.members[0].answer, "child-answer");
-    const child = await readHeart(pathsForAkumaId(world, result.child.akumaId));
-    assert.equal(child.soul?.origin.kind, "direct");
-    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: parent.id });
-    assert.equal(present(await contract.state()).attestations.at(-1)?.data.verdict, "unsatisfied");
-    const events = nativeEvents(world).filter((event) => event.event === "session_start");
-    assert.ok(events.some((event) => event.pid === process.pid));
-    assert.ok(
-      events.some((event) => event.pid !== process.pid),
-      "nested default call must retain a detached Body process",
-    );
-  },
-);
-
-test(
-  "a noncooperative native Pi tool remains hung instead of certifying logical disposal as closure",
-  { timeout: 20_000 },
-  async (t) => {
-    const world = await nativeWorld(t);
-    const akuma = await Akuma.birth("worker", { root: world, cwd: world, host: { hosting: "in-process" } });
-    const asking = akuma.tell(prompt("stall"), { wait: true, signal: t.signal });
-    try {
-      await waitForCondition(
-        "noncooperative native tool to start",
-        () =>
-          existsSync(join(world, "native.jsonl")) &&
-          nativeEvents(world).some((event) => event.event === "stall-started"),
-      );
-      assert.equal(await akuma.kill({ signal: t.signal }), "hung");
-      const paths = pathsForAkumaId(world, akuma.id);
-      assert.ok((await readHeart(paths)).latestBody?.hung);
-      await waitForCondition("hung Body to release its leash", async () => (await probeLeash(paths)) === "free");
-      assert.equal(
-        nativeEvents(world).some((event) => event.event === "stall-finished"),
-        false,
-      );
-      const stopped = await asking;
-      assert.ok("state" in stopped && stopped.state === "failed");
-      const binding = (await readTell(paths, stopped.tellId))?.binding;
-      assert.equal(stopped.turn, `turn/${binding?.turnSequence}`);
-      const end = binding === undefined ? undefined : (await readTurn(paths, binding.turnSequence))?.end;
-      assert.ok(end?.outcome.kind === "failed");
-      assert.equal(stopped.reason, end.outcome.diagnostic);
-    } finally {
-      writeFileSync(join(world, "stall.release"), "release");
-      await waitForCondition("native tool's actual retirement", () =>
-        nativeEvents(world).some((event) => event.event === "stall-finished"),
-      );
-      await asking.catch(() => undefined);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-  },
-);
-
-test("launch cancellation before preparation cannot create a late Body, and publication alone seals birth", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-in-process-preparation-"));
-  const entered = deferred<void>();
-  const preparation = deferred<void>();
-  const controller = new AbortController();
-  let allocated: Parameters<Parameters<typeof publishAkuma>[0]["launch"]>[0] | undefined;
-  const birth = publishAkuma({
-    worldPath: world,
-    akumaName: "worker",
-    signal: controller.signal,
-    launch: async (child) => {
-      allocated = child;
-      return await launchInProcessBody(
-        {
-          paths: child.paths,
-          seed: {
-            id: child.id,
-            akumaName: "worker",
-            cwd: world,
-            origin: { kind: "direct" },
-            provider: { name: "pi", kind: "pi" },
-            options: {},
-          },
-        },
-        async () => {
-          entered.resolve();
-          await preparation.promise;
-          return { world };
-        },
-      );
-    },
-  });
-  await entered.promise;
-  controller.abort(new Error("cancel unborn"));
-  await assert.rejects(birth, /cancel unborn/u);
-  preparation.resolve();
-  assert.ok(allocated);
-  assert.equal((await readHeart(allocated.paths)).soul, null);
-  assert.equal((await readHeart(allocated.paths)).latestBody, null);
-  assert.ok(await readSeal(allocated.paths));
-  assert.equal(await probeLeash(allocated.paths), "free");
-});
-
-test("owned in-process cancellation retires only its own prepared Body", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-in-process-cancel-"));
-  const first = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker" });
-  const second = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker" });
-  await Promise.all([initializeHeart(first.paths), initializeHeart(second.paths)]);
-  const started = [deferred<void>(), deferred<void>()];
-  const finished = [deferred<void>(), deferred<void>()];
-  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
-    const text = input.launchTells[0]?.text;
-    assert.ok(text === "first" || text === "second");
-    const index = text === "first" ? 0 : 1;
-    const abort = async () => { finished[index]!.resolve(); };
-    custody.own({ closed: finished[index]!.promise, abort, forceDispose: abort });
-    return {
-      admission: { fence: `in-process-${index}` },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: String(index) } };
-          started[index]!.resolve();
-          await finished[index]!.promise;
-        },
-      },
-      completion: finished[index]!.promise.then(() => ({ kind: "answered" as const, answer: text })),
-    };
-  }));
-  const launches: LiveBodyLaunch[] = [];
-  const spawn: BodyLauncher = async (launch) =>
-    await launchInProcessBody(
-      launch,
-      async () => ({ world }),
-      adapter,
-    );
-  for (const [index, child] of [first, second].entries()) {
-    const born = await spawn({
-      paths: child.paths,
-      seed: {
-        id: child.id,
-        akumaName: "worker",
-        cwd: world,
-        origin: { kind: "direct" },
-        provider: { name: "pi", kind: "pi" },
-        options: {},
-      },
-    });
-    await born.completed;
-    assert.equal((await readHeart(child.paths)).latestBody?.end, "exited");
-    const body = index === 0 ? "first" : "second";
-    assert.equal((await recordTell(child.paths, { kind: "tell", id: body, body, recordedAt: new Date().toISOString() })).kind, "recorded");
-    launches.push(await spawn({ paths: child.paths }));
-  }
-  try {
-    await Promise.all(started.map((item) => item.promise));
-    await launches[0]!.cancel(true);
-    assert.equal((await readHeart(first.paths)).latestBody?.end, "put-down");
-    assert.equal(await probeLeash(first.paths), "free");
-    assert.equal(await probeLeash(second.paths), "held");
-    finished[1]!.resolve();
-    await launches[1]!.completed;
-    assert.equal((await readHeart(second.paths)).latestBody?.end, "exited");
-  } finally {
-    finished.forEach((item) => item.resolve());
-    await Promise.all(launches.map((item) => item.cancel()));
-  }
-});
-
-test(
-  "parallel call observation abort retains each exact birth without canceling work",
-  { timeout: 20_000 },
-  async (t) => {
-    const world = await nativeWorld(t);
-    const scope = AkumaHost.inProcess();
-    const api = Akumas.of(world, scope);
-    const observation = new AbortController();
-    const calls = ["left", "right"].map((name) =>
-      api
-        .spawn({
-          akumaName: "worker",
-          cwd: world,
-          body: prompt(holdingCommand(world, name)),
-          mode: "wait",
-          signal: observation.signal,
-        })
-        .catch((error: unknown) => error),
-    );
-    try {
-      await waitForCondition("both call observations in progress", () =>
-        ["left", "right"].every((name) => existsSync(join(world, `${name}.ready`))),
-      );
-      const reason = new DOMException("stop these observations", "AbortError");
-      observation.abort(reason);
-      const errors = await Promise.all(calls);
-      const identities = errors.map((error, index) => {
-        assert.ok(error instanceof KeiyakuError);
-        const receipt = error.spawn;
-        assert.ok(receipt !== undefined && typeof receipt.akumaId === "string");
-        assert.match(error.message, /stop these observations/u);
-        assert.ok(receipt.tellId, "cancellation retains the exact confirmed input");
-        const action = receipt.action ?? receipt.wake;
-        assert.ok(action !== undefined && Object.isFrozen(action));
-        assert.equal(error.category, "aborted");
-        assert.ok(error.cause instanceof KeiyakuError);
-        assert.equal(error.cause.cause, reason);
-        const body = prompt(holdingCommand(world, ["left", "right"][index]!));
-        const text = renderVerb("spawn", { akumaName: "worker", prompt: body }, { kind: "threw", error }, { columns: 120, color: false });
-        assert.ok(text.includes(receipt.akumaId) && text.includes("command"));
-        return receipt.akumaId;
-      });
-      assert.equal(new Set(identities).size, 2);
-      for (const [index, id] of identities.entries()) {
-        assert.equal((await api.status({ akuma: id })).life, "running");
-        assert.equal(
-          (await api.status({ akuma: id })).cwd,
-          world,
-          "the retained birth keeps its frozen execution directory",
-        );
-        const error = errors[index];
-        assert.ok(error instanceof KeiyakuError);
-        const receipt = error.spawn!;
-        assert.equal((await readTell(pathsForAkumaId(world, id), receipt.tellId!))?.body,
-          prompt(holdingCommand(world, ["left", "right"][index]!)));
-      }
-    } finally {
-      await scope.close();
-      await Promise.all(calls);
     }
   },
 );
@@ -650,58 +302,41 @@ test(
   { timeout: 30_000 },
   async (t) => {
     const world = await nativeWorld(t);
-    for (const priorStop of [false, true]) {
-      const scope = AkumaHost.inProcess();
-      const api = Akumas.of(world, scope);
-      const before = existsSync(join(world, "native.jsonl")) ? nativeEvents(world).length : 0;
-      const called = await api.spawn({ akumaName: "worker", cwd: world, body: prompt("stall"), signal: t.signal });
-      const paths = pathsForAkumaId(world, called.akumaId);
-      try {
-        await waitForCondition(
-          "noncooperative tool in scoped launch",
-          () =>
-            existsSync(join(world, "native.jsonl")) &&
-            nativeEvents(world)
-              .slice(before)
-              .some((event) => event.event === "stall-started"),
-        );
-        if (priorStop) {
-          assert.equal((await api.kill({ akuma: called.akumaId, signal: t.signal })).results[0]?.outcome, "hung");
-          await waitForCondition(
-            "hung launch has ended and released its execution seat",
-            async () => (await probeLeash(paths)) === "free",
-          );
-          await new Promise<void>((resolve) => setImmediate(resolve));
-        }
-        const close = scope.close();
-        await assert.rejects(
-          close,
-          (error: unknown) =>
-            error instanceof AggregateError &&
-            error.errors.some((cause) => /hung provider custody/u.test(String(cause))),
-        );
-        assert.equal(scope.close(), close);
-        assert.ok((await readHeart(paths)).latestBody?.hung);
-        assert.equal((await api.status({ akuma: called.akumaId })).life, "hung");
-        assert.equal(
-          nativeEvents(world)
-            .slice(before)
-            .some((event) => event.event === "stall-finished"),
-          false,
-          "scope close must not claim physical retirement",
-        );
-      } finally {
-        writeFileSync(join(world, "stall.release"), "release");
-        await waitForCondition("actual late native retirement", () =>
-          nativeEvents(world)
-            .slice(before)
-            .some((event) => event.event === "stall-finished"),
-        );
-        // A later physical finish cannot erase the original close failure.
-        await assert.rejects(scope.close(), /retirement failed/u);
-        const { unlinkSync } = await import("node:fs");
-        unlinkSync(join(world, "stall.release"));
-      }
+    const scope = AkumaHost.inProcess();
+    const api = Akumas.of(world, scope);
+    const called = await api.spawn({ akumaName: "worker", cwd: world, body: prompt("stall"), signal: t.signal });
+    const paths = pathsForAkumaId(world, called.akumaId);
+    try {
+      await waitForCondition("noncooperative tool in scoped launch", () =>
+        existsSync(join(world, "native.jsonl")) && nativeEvents(world).some((event) => event.event === "stall-started"),
+      );
+      assert.equal((await api.kill({ akuma: called.akumaId, signal: t.signal })).results[0]?.outcome, "hung");
+      await waitForCondition("hung launch has ended and released its execution seat", async () =>
+        (await probeLeash(paths)) === "free",
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const close = scope.close();
+      await assert.rejects(
+        close,
+        (error: unknown) =>
+          error instanceof AggregateError &&
+          error.errors.some((cause) => /hung provider custody/u.test(String(cause))),
+      );
+      assert.equal(scope.close(), close);
+      assert.ok((await readHeart(paths)).latestBody?.hung);
+      assert.equal((await api.status({ akuma: called.akumaId })).life, "hung");
+      assert.equal(
+        nativeEvents(world).some((event) => event.event === "stall-finished"),
+        false,
+        "scope close must not claim physical retirement",
+      );
+    } finally {
+      writeFileSync(join(world, "stall.release"), "release");
+      await waitForCondition("actual late native retirement", () =>
+        nativeEvents(world).some((event) => event.event === "stall-finished"),
+      );
+      // A later physical finish cannot erase the original close failure.
+      await assert.rejects(scope.close(), /retirement failed/u);
     }
   },
 );

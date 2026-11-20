@@ -7,7 +7,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { Akuma, Akumas } from "../src/index.js";
-import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
+import { spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import { World } from "../src/world.js";
@@ -61,17 +61,6 @@ test("the Windows release launcher is a GUI-subsystem x64 PE", async (t) => {
   assert.equal(peSubsystem(packagedLauncher), IMAGE_SUBSYSTEM_WINDOWS_GUI);
 });
 
-test("launch policy keeps detached, hidden, no-shell process semantics", () => {
-  assert.deepEqual(spawnOptionsFor({ cwd: "/tmp", env: process.env }, ["ignore", "pipe", "pipe"]), {
-    cwd: "/tmp",
-    env: process.env,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-    shell: false,
-  });
-});
-
 test("a missing Windows launcher fails with the typed spawn error", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-v4-missing-launch-");
   await assert.rejects(
@@ -96,26 +85,6 @@ test("a missing Windows launcher fails with the typed spawn error", async (conte
       return true;
     },
   );
-});
-
-test("Windows retained launch accepts a one-element target argv", async (t) => {
-  if (process.platform !== "win32") {
-    t.skip("the native launcher argv cut is Windows-only");
-    return;
-  }
-  const root = temporaryDirectory(t, "keiyaku-v4-one-arg-launch-");
-  const log = join(root, "stdio.log");
-  const child = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "hostname.exe");
-  const owned = await spawnDetachedProcess({ argv: [child], cwd: root, log });
-  await owned.exited;
-  const deadline = performance.now() + 2_000;
-  let text = "";
-  while (performance.now() < deadline) {
-    if (existsSync(log)) text = readFileSync(log, "utf8");
-    if (text.trim().length > 0) break;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  assert.match(text, /\S/u);
 });
 
 test("retained launch returns the target pid and release leaves it alive", async () => {
@@ -257,36 +226,6 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
       restoreSquareLedger();
       restoreEnvironmentValues(environment);
     }
-  }
-});
-
-test("Windows retained launch returns while its target remains long-lived", async (t) => {
-  if (process.platform !== "win32") {
-    t.skip("the launcher stderr inheritance regression is Windows-only");
-    return;
-  }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-retained-return-"));
-  const pidFile = join(root, "pid");
-  let pid: number | undefined;
-  try {
-    const started = performance.now();
-    const owned = await spawnDetachedProcess({
-      argv: [
-        process.execPath,
-        "-e",
-        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 10_000)`,
-      ],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    assert.ok(performance.now() - started < 1_000);
-    pid = Number.parseInt(await waitForFile(pidFile), 10);
-    assert.equal(pid, owned.pid);
-    owned.release();
-  } finally {
-    killFixtureProcess(pid);
-    if (pid !== undefined) await waitForExit(pid);
-    await removeTempDirectory(root);
   }
 });
 

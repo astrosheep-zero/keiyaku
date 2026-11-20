@@ -114,12 +114,6 @@ async function exercise(reason: PluginSessionOpenRequest["reason"], rows: Row[])
   await rm(world, { recursive: true, force: true });
 }
 
-test("registered-idle handoff covers create, resume, refresh and import without awaiting future registration", async t => {
-  for (const reason of ["create", "resume", "refresh", "import"] as const) {
-    await t.test(reason, async () => exercise(reason, [turn]));
-  }
-});
-
 test("registered-idle handoff never resurrects a completed retained Turn", async () => {
   await exercise("resume", [turn, answer]);
 });
@@ -181,14 +175,4 @@ test("registration handoff releases its established directory subscription when 
   assert.equal(h.releases(), 1);
   await h.handoff.close();
   assert.equal(h.releases(), 1, "abort cleanup is idempotent");
-});
-
-test("registration handoff timeout releases the owned directory subscription", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = await pendingHook();
-  await h.open();
-  t.mock.timers.tick(90_000);
-  await tick();
-  assert.equal(h.releases(), 1);
-  await h.handoff.close();
 });

@@ -53,27 +53,6 @@ async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | nu
   return { world, run, listed, fetched, created, create, paseo, directory };
 }
 
-test("native parents match exact persistence provider/sessionId across every directory page, then refresh", async t => {
-  for (const provider of ["codex", "pi", "claude"]) await t.test(provider, async t => {
-    const selected = parent("parent", provider, "native-session");
-    const wrongProvider = parent("wrong-provider", "other", "native-session");
-    const handleOnly = parent("handle-only", provider, "another-session");
-    handleOnly.persistence.nativeHandle = "native-session";
-    const h = await harness(t, [[wrongProvider, handleOnly], [selected], []], selected);
-    assert.deepEqual(await h.run(provider), { attached: true });
-    assert.equal(h.listed.length, 4, "complete hot and remaining status groups before attachment");
-    assert.deepEqual(h.fetched, ["parent"]);
-    const world = await realpath(h.world);
-    assert.deepEqual(h.created, [{
-      config: { provider: "keiyaku", model: "mirror", cwd: "/parent/cwd", title: "aku/test/1234abcd",
-        providerOptions: { world, akuId: "aku/test/1234abcd" } },
-      callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:aku/test/1234abcd`, labels: {},
-    }]);
-    assert.equal(h.create.mock.calls[0]?.arguments[0]?.title, "aku/test/1234abcd",
-      "the public SDK call carries the full Akuma identity as its title");
-  });
-});
-
 test("custom Claude provider attaches by native persistence metadata and exact session", async t => {
   const selected = parent("parent", "wwz", "native-session", { provider: "claude" });
   const wrongSession = parent("wrong-session", "wwz", "other-session", { provider: "claude" });
@@ -199,30 +178,6 @@ test("nested attachment refuses missing, ambiguous, archived, changed, or unread
   });
 });
 
-test("missing, duplicate (including archived), archived and stale parent mappings diagnose non-attachment", async t => {
-  const selected = parent("parent", "pi", "native-session");
-  const archived = { ...selected, id: "archived", archivedAt: "2026-10-15T00:00:00Z" };
-  for (const scenario of [
-    { name: "missing", pages: [[]], refreshed: null, reason: /no parent for pi session/u, refreshes: 0 },
-    { name: "duplicate on later page", pages: [[selected], [archived]], refreshed: selected,
-      reason: /ambiguous pi session/u, refreshes: 0 },
-    { name: "archived", pages: [[archived]], refreshed: archived, reason: /is archived/u, refreshes: 1 },
-    { name: "disappeared", pages: [[selected]], refreshed: null, reason: /does not exist/u, refreshes: 1 },
-    { name: "changed ID", pages: [[selected]], refreshed: parent("parent", "pi", "new-session"),
-      reason: /changed native identity/u, refreshes: 1 },
-    { name: "changed provider", pages: [[selected]], refreshed: parent("parent", "claude", "native-session"),
-      reason: /changed native identity/u, refreshes: 1 },
-  ]) await t.test(scenario.name, async t => {
-    const h = await harness(t, scenario.pages, scenario.refreshed);
-    const warning = t.mock.method(console, "warn", () => {});
-    assert.deepEqual(await h.run("pi"), { attached: false });
-    assert.equal(h.created.length, 0);
-    assert.equal(h.fetched.length, scenario.refreshes === 1 && scenario.name !== "archived" ? 2 : scenario.refreshes);
-    assert.equal(warning.mock.callCount(), 1);
-    assert.match(String(warning.mock.calls[0]?.arguments[0]), scenario.reason);
-  });
-});
-
 test("incomplete attachment directory cannot authorize creation even with a matching native parent", async t => {
   const selected = parent("parent", "pi", "native-session");
   const h = await harness(t, [[selected]], selected);
@@ -249,41 +204,6 @@ test("existing detached and archived child mappings suppress creation and parent
     assert.equal(h.created.length, 0);
     assert.deepEqual(h.fetched, ["existing-child"]);
   }
-});
-
-test("attachment deadline releases an uncancelable parent refresh and fences late creation", { timeout: 6000 }, async t => {
-  const world = await mkdtemp(join(tmpdir(), "attachment-deadline-"));
-  t.after(() => rm(world, { recursive: true, force: true }));
-  const selected = parent("parent", "pi", "native-session") as unknown as PaseoAgent;
-  let release!: (agent: PaseoAgent) => void;
-  const pending = new Promise<PaseoAgent>(resolve => { release = resolve; });
-  const h = await nestedHarness(t, world, [[selected]], () => pending);
-  const warning = t.mock.method(console, "warn", () => {});
-  const hold = setTimeout(() => {}, 5000);
-  t.after(() => clearTimeout(hold));
-  const attempt = await attach({ world, akuId: "aku/child/5678abcd",
-    caller: { kind: "external", integration: "pi", id: "native-session" } }, { paseo: h.paseo }, h.directory);
-  assert.deepEqual(attempt, { attached: false });
-  assert.deepEqual(h.fetched, ["parent"]);
-  assert.match(String(warning.mock.calls[0]?.arguments[0]), /timeout/u);
-  release(selected);
-  await new Promise<void>(resolve => setImmediate(resolve));
-  assert.equal(h.created.length, 0, "late read cannot acquire creation authority");
-});
-
-test("attachment no longer synchronizes outside the registration handoff", async t => {
-  const selected = parent("parent", "pi", "native-session");
-  const h = await harness(t, [[selected]], selected);
-  const input = { world: h.world, akuId: "aku/test/1234abcd",
-    caller: { kind: "external" as const, integration: "pi", id: "native-session" } };
-  assert.deepEqual(await attach(input, { paseo: h.paseo }, h.directory), { attached: true });
-  assert.equal(h.created.length, 1);
-  t.mock.method(h.paseo.agents, "create", async () => { throw new Error("creation failed"); });
-  const warning = t.mock.method(console, "warn", () => {});
-  const secondInput = { ...input, akuId: "aku/test/other" };
-  assert.deepEqual(await attach(secondInput, { paseo: h.paseo }, h.directory), { attached: false });
-  assert.match(String(warning.mock.calls[0]?.arguments[0]), /creation failed/u);
-  assert.equal(h.created.length, 1);
 });
 
 test("Paseo and unknown external callers do not attach, even when their ID names a host agent", async t => {

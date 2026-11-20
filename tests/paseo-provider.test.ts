@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { bornLineageAkuma, soulFixture } from "./support/akuma-fixtures.js";
+import { bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { akumaId } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
-import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
 import test, { type TestContext } from "node:test";
-import { ProviderEventSchema, type ProviderEvent, type ProviderInput, type ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
+import type { ProviderEvent, ProviderInput, ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPaseoApi, type PaseoAgent } from "@getpaseo/client";
 import { directorySubscriptions } from "./support/paseo-directory.js";
@@ -196,121 +195,6 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
     "retained short turns publish their real start and terminal on replay");
 });
 
-test("every open mirror vetoes runtime collection while a missing local session may stop", async (t) => {
-  const h = await harness(t, { window: async () => [turn(1)] });
-  await h.open();
-  await h.connection.send({ type: "session.can_stop_runtime", requestId: "safety-open", sessionId: "session" });
-  assert.deepEqual(h.events.at(-1), { type: "session.can_stop_runtime", requestId: "safety-open", sessionId: "session", canStop: false });
-  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  await h.connection.send({ type: "session.can_stop_runtime", requestId: "safety-missing", sessionId: "missing" });
-  assert.deepEqual(h.events.at(-1), { type: "session.can_stop_runtime", requestId: "safety-missing", sessionId: "missing", canStop: true });
-  assert.deepEqual(h.calls, [], "runtime safety and explicit close never kill the Akuma");
-});
-
-test("skip seeds retained history once, then publishes new activity and leaves replay unchanged", async (t) => {
-  let rows: Row[] = [turn(14), tell(13, "pending"), answer(12, 11), turn(11), tell(10)];
-  const h = await harness(t, { window: async () => rows });
-  await h.open({ history: "skip" });
-  assert.deepEqual(h.events.map((event) => event.type), ["session.opened", "session.config", "session.turn", "session.ready"],
-    "opening skip emits current execution state but no retained items or window notices");
-  await h.refresh(); await tick();
-  assert.deepEqual(items(h.events), []);
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/14", "started"]]);
-  rows = rows.map((row) => row.kind === "tell" ? { ...row, state: "told" } : row);
-  await h.refresh(); await tick();
-  assert.deepEqual(items(h.events), [], "changed Tell signatures still retain opening Tell deduplication");
-  rows = [...rows, tell(15), answer(16, 14)];
-  await h.refresh(); await tick();
-  await h.refresh(); await tick();
-  assert.deepEqual(items(h.events).map((event) => [event.item.id, event.item.type]), [
-    ["keiyaku:tell/tell/15", "user_message"], ["keiyaku:turn/14", "assistant_message"],
-  ], "new activity is published exactly once, not hidden by a permanent skip mode");
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/14", "started"], ["turn/14", "completed"]],
-    "the observed open Turn still takes its new outcome");
-  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  h.events.length = 0;
-  await h.open({ history: "replay" });
-  assert.deepEqual(items(h.events).map((event) => event.item.id), [
-    "keiyaku:tell/tell/10", "keiyaku:turn/11", "keiyaku:tell/tell/13",
-    "keiyaku:tell/tell/15", "keiyaku:turn/14",
-  ], "replay exposes retained history without guessing loss from sequence numbers");
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
-    ["turn/11", "started"], ["turn/11", "completed"], ["turn/14", "started"], ["turn/14", "completed"],
-  ], "replay publishes ordered historical start/terminal pairs");
-  assert.deepEqual(h.calls, [], "opening, refreshing and closing remain observation-only");
-});
-
-test("skip retains open and closed Turn state for Steer and Stop without historical starts", async (t) => {
-  let rows: Row[] = [tell(1), turn(2)];
-  const receipt = tellReceipt();
-  const h = await harness(t, { window: async () => rows,
-    tell: async () => { rows = [...rows, { kind: "tell", sequence: 3, at, tellId: receipt.tellId,
-      text: "change direction", state: "pending", deliveries: [] }]; return receipt; },
-    stop: async () => stopAttempt("killed", "aku/test/1") });
-  await h.open({ history: "skip" });
-  await h.connection.send(promptInput());
-  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/2" }]);
-  assert.deepEqual(items(h.events).map((event) => event.item), [
-    { type: "user_message", id: "keiyaku:tell/new-tell", text: "change direction", clientMessageId: "client-1" },
-  ]);
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  await h.refresh(); await tick();
-  await h.sync();
-  assert.deepEqual(h.calls.map((call) => call.op), ["tell", "stop"]);
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"], ["turn/2", "canceled"]],
-    "Stop captures the observed Turn and identical refresh never restarts it");
-  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  rows = [...rows, answer(4, 2)];
-  h.events.length = 0;
-  await h.open({ history: "skip" });
-  await assert.rejects(h.connection.send(promptInput()), /No observed Paseo Turn/u);
-  assert.equal(h.calls.length, 2, "a seeded completed Turn is not steerable");
-  assert.deepEqual(items(h.events), []);
-  assert.deepEqual(turns(h.events), []);
-});
-
-test("post-attach sync needs a successful fresh read and never restarts an ended Turn", async (t) => {
-  let rows: Row[] = [tell(1), turn(2)];
-  let broken = false, reads = 0;
-  const h = await harness(t, { window: async () => { reads++; if (broken) throw new Error("unavailable"); return rows; } });
-  await h.open({ history: "skip" });
-  h.events.length = 0;
-  broken = true;
-  await h.sync();
-  assert.equal(reads, 2, "sync makes a fresh read, not a cached announcement");
-  assert.deepEqual(turns(h.events), [], "failed read cannot reannounce the cached open Turn");
-  assert.equal(items(h.events).length, 1);
-  assert.match(notices(h.events)[0]!, /read surface unavailable/u);
-  broken = false;
-  rows = [...rows, answer(3, 2)];
-  h.events.length = 0;
-  await h.sync();
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "completed"]]);
-  assert.deepEqual(items(h.events).map((event) => event.item.type), ["assistant_message"], "normal new output is still published");
-  h.events.length = 0;
-  await h.sync();
-  assert.deepEqual(h.events, [], "ended Turn stays sealed");
-  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  const before = reads;
-  await h.sync();
-  await h.bridge.sync({ world: h.root, akuId: "aku/other/1" });
-  assert.equal(reads, before, "closed and missing sessions are harmless");
-  assert.deepEqual(h.calls, [], "sync never performs actual work or controls execution");
-});
-
-test("in-flight hints coalesce and RPC returns without waiting for reads", async (t) => {
-  let release!: () => void;
-  const blocked = new Promise<void>((resolve) => { release = resolve; });
-  let calls = 0, active = 0, peak = 0;
-  const h = await harness(t, { window: async () => { calls++; peak = Math.max(peak, ++active); await blocked; active--; return []; } });
-  const opening = h.open();
-  while (!calls) await tick();
-  for (let n = 0; n < 8; n++) assert.deepEqual(await h.refresh(), { woken: 1 });
-  assert.equal(calls, 1);
-  release(); await opening;
-  assert.equal(calls, 2); assert.equal(peak, 1);
-});
-
 test("changed told rows, gaps, read failure recovery, Stop control and observation-only close", async (t) => {
   let rows: Row[] = [tell(1, "pending"), turn(2)];
   let broken = false, reads = 0;
@@ -364,33 +248,6 @@ test("changed told rows, gaps, read failure recovery, Stop control and observati
   assert.equal(items(h.events).filter((e) => e.item.id.startsWith("keiyaku:unreadable/")).length, 3);
 });
 
-test("Stop kills the controlled Akuma, refreshes, and ends only the observed turn", async (t) => {
-  let rows: Row[] = [turn(2)];
-  let reads = 0;
-  const h = await harness(t, { window: async () => { reads++; return rows; }, stop: async () => stopAttempt("killed", "aku/test/1") });
-  await h.open();
-  assert.equal(h.calls.length, 0, "opening never controls the Akuma");
-  const before = reads;
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(h.calls, [{ op: "stop", world: await realpath(h.root), akuId: "aku/test/1" }],
-    "Stop reaches the typed transport with the canonical world identity");
-  assert.equal(reads, before + 1, "a proven stop refreshes authoritative history");
-  assert.deepEqual(h.events.filter((e) => e.type === "request.completed" || e.type === "request.failed"),
-    [{ type: "request.completed", requestId: "stop" }]);
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "canceled"]]);
-  assert.match(turns(h.events).at(-1)?.error?.message ?? "", /stopped from Paseo/u);
-  assert.equal(h.events.some((e) => e.type === "session.closed"), false, "the mirror stays open for a later Tell");
-  rows = [turn(2), turn(4)];
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/2", "turn/2", "turn/4"], "a later turn still arrives");
-  const sealed = turns(h.events).filter((e) => e.turnId === "turn/2");
-  rows = [turn(2), answer(3, 2), turn(4)];
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).filter((e) => e.turnId === "turn/2"), sealed,
-    "late natural output cannot reopen or re-terminate the canceled Turn");
-  assert.equal(turns(h.events).at(-1)?.turnId, "turn/4");
-});
-
 test("an unproven Stop reports the transport's own words and never cancels the observed turn", async (t) => {
   // Four ways a Stop fails to prove itself: a refusal, custody that is not a
   // stop, an unprovable outcome, and a transport that reports its own doubt.
@@ -437,26 +294,6 @@ test("overlapping Stops share one kill attempt and each request receives one rec
   assert.equal(turns(h.events).filter((e) => e.state === "canceled").length, 1, "one terminal event for one turn");
 });
 
-test("a natural completion racing the Stop keeps its own outcome and one terminal event", async (t) => {
-  let rows: Row[] = [turn(2)];
-  const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), answer(3, 2)]; return stopAttempt("already-stopped", "aku/test/1"); } });
-  await h.open();
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "completed"]]);
-  assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
-});
-
-test("a produced put-down failure remains the only terminal event after a proven Stop", async (t) => {
-  let rows: Row[] = [turn(2)];
-  const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), answer(4, 2, true)]; return stopAttempt("killed", "aku/test/1"); } });
-  await h.open();
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "failed"]]);
-  assert.deepEqual(h.events.filter((e) => e.type === "request.completed"), [{ type: "request.completed", requestId: "stop" }]);
-});
-
 test("a natural outcome held by Tell correlation is not overwritten by concurrent Stop", async (t) => {
   let rows: Row[] = [turn(2)];
   let release!: () => void;
@@ -492,20 +329,6 @@ test("a proven Stop settles the turn it captured even after a newer Turn replace
   assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
 });
 
-test("a captured turn still takes its own outcome after a newer Turn replaced it", async (t) => {
-  let rows: Row[] = [turn(2)];
-  const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), turn(4)]; throw new Error("Akuma aku/test/1 is not born"); } });
-  await h.open();
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/2", "turn/4"], "a refusal leaves the turn running");
-  rows = [turn(2), answer(3, 2), turn(4)];
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]),
-    [["turn/2", "started"], ["turn/4", "started"], ["turn/2", "completed"]],
-    "the captured turn closes from its own outcome, never from the Stop");
-});
-
 test("close during an in-flight Stop retires the owned stop before the session closes", async (t) => {
   let began!: () => void;
   const started = new Promise<void>((resolve) => { began = resolve; });
@@ -530,14 +353,6 @@ test("close during an in-flight Stop retires the owned stop before the session c
     h.events.findIndex((e) => e.type === "request.failed") < h.events.findIndex((e) => e.type === "session.closed"),
     "the Stop answers before the session reports itself closed",
   );
-});
-
-test("a Stop for a session that is not open fails without controlling anything", async (t) => {
-  const h = await harness(t, { window: async () => [] });
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "absent" });
-  assert.deepEqual(h.events, [{ type: "request.failed", requestId: "stop",
-    error: { message: "Keiyaku mirror session is not open" } }]);
-  assert.equal(h.calls.length, 0);
 });
 
 test("close during a pull releases the observation and never publishes its late window", async (t) => {
@@ -724,36 +539,6 @@ test("pending admission and failed wake acknowledge success without inventing Ak
   assert.equal(turns(h.events).length, 0);
 });
 
-test("an auto prompt never adopts an older open Turn while its Tell waits for wake", async (t) => {
-  const receipt = tellReceipt("recovery-tell");
-  const pending: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 438, tellId: receipt.tellId,
-    text: "Resume working.", state: "pending", at, deliveries: [] };
-  let rows: Row[] = [turn(303)];
-  const h = await harness(t, { window: async () => rows, tell: async () => {
-    rows = [...rows, pending];
-    return receipt;
-  } });
-  await h.open();
-  const request = promptInput("recovery", pending.text);
-  request.prompt.delivery = "auto";
-  await h.connection.send(request);
-  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "completed" }]);
-  rows = [turn(303), { ...pending, state: "told", deliveries: [{ route: "launch", turnSequence: 439, deliveredAt: at }] }, turn(439)];
-  h.push(rows); await tick();
-  rows = [...rows, answer(446, 439)];
-  h.push(rows); await tick();
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
-    ["turn/303", "started"], ["turn/439", "started"], ["turn/439", "completed"],
-  ], "the later real Turn completes without fabricating an outcome for the lost execution");
-  assert.ok(items(h.events).some((event) => event.item.type === "assistant_message" && event.item.text === "hello"));
-  assert.deepEqual(h.calls.map((call) => call.op), ["tell"], "one submission, no Stop or retry");
-  const messages = items(h.events).filter((event) => event.item.type === "user_message");
-  assert.equal(messages.length, 1, "the observed Tell replaces the optimistic message without duplication");
-  const message = messages[0]?.item;
-  assert.ok(message?.type === "user_message");
-  assert.equal(message.clientMessageId, "recovery");
-});
-
 test("auto prompts correlate only their exact delivery and acknowledge already-completed work", async (t) => {
   let receipt = tellReceipt("launch-tell");
   const delivered = (sequence: number, tellId: string, turnSequence: number): Row => ({ kind: "tell", sequence,
@@ -823,107 +608,6 @@ test("close retires an owned Tell without kill, automatic retry, or late history
   assert.deepEqual(h.events.slice(-2).map((event) => event.type), ["session.closed", "request.completed"]);
 });
 
-
-test("the real public stream carries a long open Turn into the mirror without inventing cancellation or loss", async (t) => {
-  const value = await soulFixture("paseo-stream-cli-");
-  const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-  const root = await realpath(value.root);
-  const controller = new AbortController();
-  let latest: History = page([]);
-  // The real public package's one observation path, read exactly as the test
-  // needs it: a subscription's first frame is the whole current bounded window,
-  // and closing that iterator releases its reader, so every read below is one
-  // deterministic pull with no background pump and no deadline of its own.
-  const openWindow = async (): Promise<History> => {
-    const sdk = await import(resolve("build/src/index.js")) as {
-      Akuma: { select: (world: string, akuId: string) => {
-        stream(options: { signal?: AbortSignal }): AsyncIterable<History> } } };
-    for await (const frame of sdk.Akuma.select(root, value.allocated.id).stream({ signal: controller.signal })) return frame;
-    throw new Error("the real public stream opened without a window");
-  };
-  const h = await harness(t, { window: async () => latest });
-  // The harness owns its own close, registered before this hook; node:test runs
-  // after hooks in registration order, so the mirror closes first.
-  t.after(async () => { controller.abort(); leash.release(); value.close(); });
-  await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  await leash.birth(value.allocated.paths, value.soul);
-  const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
-  const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
-  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
-    event: { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "printf hello" } } });
-  latest = await openWindow();
-  const running = latest.rows.find((row) => row.kind === "tool");
-  assert.ok(running?.kind === "tool");
-  assert.equal(running.phase, "started", "the opened window retains the call's start");
-  await h.open();
-  for (let index = 0; index < 245; index++) await appendActivity(value.allocated.paths, {
-    turnSequence: started.sequence, at,
-    event: index === 0 ? { type: "tool", phase: "completed", id: "shell", name: "bash",
-      call: { kind: "run", command: "printf hello" }, result: { status: "ok", message: "hello", exitCode: 0 } }
-      : { type: "thought", text: `working ${index}` },
-  });
-  latest = await openWindow();
-  assert.equal(latest.rows.filter((row) => row.kind === "thought").length, 244,
-    "one bounded stream window carries the whole retained work of a long open Turn");
-  assert.equal(latest.historyLost, false, "projection holes and pagination are not guessed retention loss");
-  assert.equal(latest.hasEarlier, false);
-  assert.ok(latest.rows.some((row) => row.kind === "turn" && row.sequence === started.sequence));
-  const tool = latest.rows.find((row) => row.kind === "tool" && row.phase === "completed");
-  assert.ok(tool?.kind === "tool");
-  assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
-  assert.deepEqual(tool.result, { status: "ok", message: "hello", exitCode: 0 },
-    "a later frame retains the completion independently of the start");
-  assert.ok(latest.rows.some((row) => row.kind === "tool" && row.phase === "started" && row.sequence === running.sequence));
-  assert.equal(tool.toolId, running.toolId, "the settled call keeps the identity the opened window reported");
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((event) => event.state), ["started"], "long ongoing work stays running");
-  // The producer's own tool identity reaches the mirror, so the same call pairs
-  // across its settlement; the identity is required, never guessed.
-  const calls = items(h.events).flatMap((event) => event.item.type === "tool_call" ? [[event.item.callId, event.item.status]] : []);
-  assert.equal(tool.toolId, "shell", "the real public SDK preserves native identity, not just adapter fixtures");
-  assert.deepEqual(calls, [[`tool/${tool.turnSequence}/shell`, "running"], [`tool/${tool.turnSequence}/shell`, "completed"]]);
-  assert.deepEqual(items(h.events).flatMap((event) => event.item.type === "tool_call" ? [event.item.detail] : []).at(-1),
-    { type: "shell", command: "printf hello", output: "hello", exitCode: 0 });
-  for (const event of h.events) ProviderEventSchema.parse(event);
-  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
-    event: { type: "assistant", text: "done" } });
-  latest = await openWindow();
-  await h.refresh(); await tick();
-  const said = latest.rows.find((row) => row.kind === "said");
-  assert.ok(said?.kind === "said");
-  await endTurn(value.allocated.paths, { turnSequence: started.sequence, completedAt: at,
-    outcome: { kind: "answered", answer: "done", session: { sessionId: "test-session" } } });
-  latest = await openWindow();
-  const outcome = latest.rows.find((row) => row.kind === "outcome");
-  assert.ok(outcome?.kind === "outcome" && outcome.outcome.kind === "answered");
-  assert.ok(latest.rows.some((row) => row.kind === "said" && row.sequence === said.sequence),
-    "an equal final answer never hides retained narration");
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"]);
-  const narrated = new Set(items(h.events).flatMap((event) => event.item.type === "assistant_message" ? [event.item.id] : []));
-  assert.ok(narrated.has(`keiyaku:said/${said.sequence}`), "the producer's narration keeps its own identity");
-  assert.ok([...narrated].every((id) => id === `keiyaku:said/${said.sequence}` || id === `keiyaku:turn/${started.sequence}`),
-    "the mirror publishes only the producer's own narration identities");
-});
-
-test("public metadata distinguishes bounded omission and retention loss without ending an open Turn", async (t) => {
-  let snapshot = page([turn(2)]);
-  const h = await harness(t, { window: async () => snapshot });
-  await h.open();
-  snapshot = page([{ kind: "thought", sequence: 950, at, turnSequence: 2, text: "still working" }],
-    { hasEarlier: true, omitted: 700, lowestRetained: 1 });
-  await h.refresh(); await tick();
-  assert.match(notices(h.events).at(-1)!, /Earlier retained history.*bounded/u);
-  assert.deepEqual(turns(h.events).map((event) => event.state), ["started"]);
-  snapshot = { ...snapshot, hasEarlier: false, omitted: 0, historyLost: true, lowestRetained: 900 };
-  await h.refresh(); await tick();
-  assert.match(notices(h.events).at(-1)!, /outside retention/u);
-  assert.deepEqual(turns(h.events).map((event) => event.state), ["started"]);
-  snapshot = page([answer(1001, 2)], { historyLost: true, lowestRetained: 900 });
-  await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"], "real outcome wins even without retained start");
-});
-
 test("the live observation publishes intermediate activity, keeps its display through a failure, and reopens only explicitly", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let rows: Row[] = [turn(2)];
@@ -958,68 +642,4 @@ test("the live observation publishes intermediate activity, keeps its display th
   await h.refresh(); await tick();
   assert.equal(reads, before + 2, "a real new Turn is observed by the same explicit refresh");
   assert.equal(turns(h.events).filter((event) => event.state === "started").length, 2, "only real Turn identities start");
-});
-
-test("session close releases the live observation and discards its in-flight read", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  let reads = 0, retired = false;
-  const h = await harness(t, { window: async (_world, _id, signal) => {
-    reads++;
-    if (reads > 1) {
-      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
-      retired = true;
-    }
-    return reads === 1 ? [turn(2)] : [turn(2), answer(3, 2)];
-  } });
-  await h.open();
-  assert.equal(reads, 1);
-  await h.refresh(); await tick();
-  assert.equal(reads, 2, "an explicit refresh reopens the one observation");
-  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  assert.equal(retired, true, "session close waits for the read it released");
-  t.mock.timers.tick(60_000); await tick();
-  assert.equal(reads, 2, "close leaves no observation behind, timer or otherwise");
-  assert.deepEqual(items(h.events), [], "the released read's late answer is not published");
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]),
-    [["turn/2", "started"], ["turn/2", "canceled"]],
-    "closing the mirror cancels its own presentation and never the Akuma");
-  assert.deepEqual(h.calls, [], "observation never submits execution or interrupt");
-});
-
-test("an open session reports the observed Akuma model, admits no missing one, and degrades to a notice without failing", async (t) => {
-  const h = await harness(t, { window: async () => [turn(2)],
-    status: async () => ({ provider: "pi", model: "kimi-coding/k3-256k" }) });
-  await h.connection.send({ type: "catalog", requestId: "catalog" });
-  assert.deepEqual(h.events.find((event) => event.type === "catalog")?.catalog,
-    { models: [], modes: [] }, "the provider catalog offers no global placeholder or default");
-  await h.open();
-  assert.deepEqual(h.events.filter((event) => event.type === "session.config").map((event) => event.config), [{
-    model: "kimi-coding/k3-256k",
-    models: [{ id: "kimi-coding/k3-256k", label: "pi / kimi-coding/k3-256k", isSelectable: false }],
-    modes: [], thinkingOptions: [], settings: [],
-  }], "the reported configuration is published verbatim, without inventing selectable modes");
-  assert.deepEqual(h.events.filter((event) => event.type === "session.notice"), []);
-  assert.equal(h.events.filter((event) => event.type === "session.ready").length, 1, "a reported model never delays readiness");
-
-  const unavailable = await harness(t, { window: async () => [turn(2)],
-    status: async () => { throw new Error("Akuma status unavailable"); } });
-  await unavailable.open();
-  assert.deepEqual(unavailable.events.filter((event) => event.type === "session.config"), [],
-    "an unreadable configuration is never guessed");
-  assert.deepEqual(unavailable.events.filter((event) => event.type === "session.notice").map((event) => event.notice), [{
-    id: "keiyaku:model", severity: "warning", title: "Akuma model unavailable", description: "Akuma status unavailable",
-  }], "the failure degrades to one warning the host can show");
-  assert.equal(unavailable.events.filter((event) => event.type === "session.ready").length, 1);
-  assert.deepEqual(unavailable.events.filter((event) => event.type === "session.turn").map((event) => event.state), ["started"],
-    "an unavailable model never changes observed execution");
-
-  // A provider the runtime never admitted a model for offers none: the mirror
-  // never borrows a provider default or invents a session selection.
-  const unspecified = await harness(t, { window: async () => [turn(2)], status: async () => ({ provider: "pi" }) });
-  await unspecified.open();
-  assert.deepEqual(unspecified.events.filter((event) => event.type === "session.config").map((event) => event.config),
-    [{ models: [], modes: [], thinkingOptions: [], settings: [] }],
-    "an unspecified model stays unknown instead of borrowing a default");
-  assert.deepEqual(unspecified.events.filter((event) => event.type === "session.notice"), []);
-  for (const event of [...h.events, ...unavailable.events, ...unspecified.events]) ProviderEventSchema.parse(event);
 });

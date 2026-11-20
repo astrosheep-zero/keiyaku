@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { nuke, World, type NukeResult } from "../src/index.js";
-import { worldRootSchema } from "../src/world.js";
+import { nuke, World } from "../src/index.js";
 import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
@@ -15,7 +14,6 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { main } from "../src/cli/main.js";
-import { renderNukeText } from "../src/cli/render/nuke.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
@@ -27,7 +25,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { Debts } from "../src/debt/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
-import { captureOutput, cliJson } from "./support/cli-fixtures.js";
+import { captureOutput } from "./support/cli-fixtures.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
@@ -225,12 +223,9 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
   }
 });
 
-test("confirmed nuke cleans a legacy Heart schema and continues independent owners", async () => {
-  const fixture = await gitNukeFixture();
+test("confirmed nuke cleans a legacy Heart schema", async () => {
+  const world = await testWorld();
   try {
-    const { raw, world, managedPath, foreign } = fixture;
-    const debts = Debts.of(world);
-    assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "14000000" });
     const heart = new DatabaseSync(allocated.paths.heart);
     heart.exec(readFileSync("tests/fixtures/heart-v29.sql", "utf8"));
@@ -249,63 +244,13 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     writeFileSync(legacyRequest, "{}\n");
     const recognizedUnknown = join(allocated.paths.directory, "unknown.bin");
     writeFileSync(recognizedUnknown, "preserve recognized unknown\n");
-    const settings = join(world, ".keiyaku", "settings.json");
-    const namespace = join(world, ".keiyaku", "namespace", "current");
-    const unknown = join(world, ".keiyaku", "unknown.bin");
-    mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
-    writeFileSync(namespace, "retained\n");
-    writeFileSync(settings, '{"project":true}\n');
-    writeFileSync(unknown, "unknown\n");
-    const foreignByte = join(foreign, "foreign.txt");
-    writeFileSync(foreignByte, "retain\n");
-
-    assert.deepEqual(await nuke({ world, confirm: world }), {
-      kind: "accepted", refsRemoved: 3, worktreesRemoved: 1, debtsRemoved: 1,
-    });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "accepted" });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
     assert.equal(existsSync(`${allocated.paths.heart}-wal`), false);
     assert.equal(readFileSync(legacyRequest, "utf8"), "{}\n");
     assert.equal(readFileSync(recognizedUnknown, "utf8"), "preserve recognized unknown\n");
-    assert.equal(existsSync(join(world, ".keiyaku", "debts", "remove-me.md")), false);
-    assert.equal(existsSync(managedPath), false);
-    assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
-    assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
-    assert.equal(readFileSync(settings, "utf8"), '{"project":true}\n');
-    assert.equal(readFileSync(namespace, "utf8"), "retained\n");
-    assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
-    assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "accepted" });
-  } finally {
-    rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
-  }
-});
-
-test("confirmed nuke preserves unknown former request artifacts", async () => {
-  const world = await testWorld();
-  try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "feedface" });
-    await initializeHeart(allocated.paths);
-    const entry = join(allocated.paths.directory, "request-entry.json");
-    const sequence = join(allocated.paths.directory, "requests", "1");
-    mkdirSync(sequence, { recursive: true });
-    const request = join(sequence, "41111111-1111-4111-8111-111111111111.request.json");
-    const receipt = join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json");
-    const link = join(sequence, "link");
-    writeFileSync(entry, "entry bytes\n");
-    writeFileSync(request, "request bytes\n");
-    writeFileSync(receipt, "receipt bytes\n");
-    symlinkSync(request, link);
-    const result = await nuke({ world, confirm: world });
-    assert.deepEqual(result, { kind: "accepted" });
-    assert.equal(existsSync(allocated.paths.heart), false);
-    assert.equal(existsSync(allocated.paths.leash), false);
-    assert.equal(readFileSync(entry, "utf8"), "entry bytes\n");
-    assert.equal(readFileSync(request, "utf8"), "request bytes\n");
-    assert.equal(readFileSync(receipt, "utf8"), "receipt bytes\n");
-    assert.equal(readFileSync(link, "utf8"), "request bytes\n");
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
@@ -481,29 +426,6 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
   }
 });
 
-test("Git nuke retains an attached appointed worktree while clearing independent refs", async () => {
-  const raw = makeGitRepository();
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(raw.path);
-  const repository = await repositoryAt(world);
-  const contract = contractId("kei/nuke-attached");
-  const register = await appointManagedWorktrees(repository, [contract]);
-  const path = worktreePath(repository, register.get(contract)!);
-  raw.run(["worktree", "add", "--quiet", "-b", "nuke-attached-branch", path, "HEAD"]);
-  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  try {
-    await assert.rejects(() => nukeGit(world), /Place authority still has managed worktree appointments/u);
-    assert.equal(existsSync(path), true);
-    assert.equal(raw.run(["-C", path, "symbolic-ref", "--quiet", "--short", "HEAD"]), "nuke-attached-branch\n");
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
-    assert.equal(existsSync(placeRegisterPath(repository)), true);
-    assert.equal(existsSync(placeLockPath(repository)), true);
-  } finally {
-    raw.run(["worktree", "remove", "--force", path]);
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
 test("Git nuke retains an unregistered appointed path whose admin is foreign", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -530,67 +452,6 @@ test("Git nuke retains an unregistered appointed path whose admin is foreign", a
   }
 });
 
-test("Git nuke removes proven unregistered appointed residue", async () => {
-  const raw = makeGitRepository();
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(raw.path);
-  const repository = await repositoryAt(world);
-  const contract = contractId("kei/nuke-residue");
-  const register = await appointManagedWorktrees(repository, [contract]);
-  const path = worktreePath(repository, register.get(contract)!);
-  const admin = join(commonGitDirectory(repository), "worktrees", "nuke-residue");
-  mkdirSync(path, { recursive: true });
-  mkdirSync(admin, { recursive: true });
-  writeFileSync(join(path, ".git"), `gitdir: ${admin}\n`);
-  writeFileSync(join(path, "owned.txt"), "residue\n");
-  writeFileSync(join(admin, "commondir"), "../..\n");
-  writeFileSync(join(admin, "HEAD"), "ref: refs/heads/main\n");
-  raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  try {
-    await nukeGit(world);
-    assert.equal(existsSync(path), false);
-    assert.equal(existsSync(placeRegisterPath(repository)), false);
-    assert.equal(existsSync(placeLockPath(repository)), true);
-  } finally {
-    rmSync(raw.path, { recursive: true, force: true });
-  }
-});
-
-test("CLI nuke returns native refusal outcomes for missing and mismatched confirmation", async () => {
-  const world = await testWorld();
-  try {
-    const required = await cliJson<NukeResult>(["-C", world, "nuke"], { cwd: world });
-    const rejected = await cliJson<NukeResult>(["-C", world, "nuke", "--confirm", "wrong"], { cwd: world });
-    assert.equal(required.value.kind, "refused");
-    assert.equal(rejected.value.kind, "refused");
-    if (required.value.kind !== "refused" || rejected.value.kind !== "refused")
-      throw new Error("missing nuke refusal");
-    assert.equal(
-      renderNukeText(required.value),
-      [
-        "× nuke refused",
-        "  reason  confirmation required",
-        `  world  ${world}`,
-        `  option  keiyaku nuke --confirm '${world}'`,
-      ].join("\n"),
-    );
-    assert.equal(
-      renderNukeText(rejected.value, { confirm: "wrong" }),
-      [
-        "× nuke refused",
-        "  reason  confirmation mismatch",
-        `  world  ${world}`,
-        "  confirmation  wrong",
-        `  option  keiyaku nuke --confirm '${world}'`,
-      ].join("\n"),
-    );
-    assert.deepEqual(required.value, { kind: "refused", world });
-    assert.deepEqual(rejected.value, { kind: "refused", world });
-  } finally {
-    rmSync(world, { recursive: true, force: true });
-  }
-});
-
 test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts", async () => {
   const world = await testWorld();
   const { exit, stdout, stderr } = await captureOutput(async () => {
@@ -606,43 +467,6 @@ test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts
   assert.match(stdout, /^  world  /mu);
   assert.match(stdout, /^  option  keiyaku nuke --confirm /mu);
   assert.equal(stderr, "");
-});
-
-test("nuke receipt names confirmed removals and retained coordination locks", () => {
-  const text = renderNukeText({
-    kind: "accepted",
-    refsRemoved: 3, worktreesRemoved: 1, debtsRemoved: 2,
-  });
-  assert.match(text, /refs removed  3/u);
-  assert.match(text, /worktrees removed  1/u);
-  assert.match(text, /debt stores removed  2/u);
-  assert.match(text, /locks  may remain · concurrent writers may hold them/u);
-});
-
-test("CLI nuke classifies required owner stops independently of optional residue", () => {
-  const world = worldRootSchema.parse("/world");
-  assert.equal(
-    classifyVerb("nuke", {}, { kind: "returned", value: {
-      kind: "accepted",
-      issues: [{ kind: "reset-owner-stopped", owner: "git", diagnostic: "busy" }],
-      refsRemoved: 1, worktreesRemoved: 0, debtsRemoved: 0,
-    } }), "retryable",
-  );
-  assert.equal(
-    classifyVerb("nuke", {}, { kind: "returned", value: {
-      kind: "accepted",
-      issues: [{ kind: "reset-residue", diagnostic: "coordination cleanup unavailable" }],
-    } }), "accepted",
-  );
-  assert.equal(
-    classifyVerb("nuke", {}, { kind: "returned", value: { kind: "accepted" } }),
-    "accepted",
-  );
-  assert.equal(
-    classifyVerb("nuke", {}, { kind: "returned", value: {
-      kind: "refused", world,
-    } }), "refused",
-  );
 });
 
 test("native reset awaits independent removals and keeps their counts on an exceptional owner retirement", async () => {

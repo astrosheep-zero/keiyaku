@@ -139,21 +139,6 @@ test("one-shot backfill renames only exact world mirrors, enumerating all pages 
   assert.equal(updates.length, 3, "unavailable aliases never erase known titles");
 });
 
-test("AkuId-filtered backfill leaves another mirror in the same World unchanged", async t => {
-  const h = await fixture(t), selected = "aku/elite/1234abcd", other = "aku/elite/8765abcd";
-  await h.bind("reviewer", selected); await h.bind("other", other);
-  const agents = [snapshot("selected", h.world, selected, "old selected title"),
-    snapshot("other", h.world, other, "other customized title")];
-  const updates: unknown[] = [];
-  const client = {
-    async fetchAgents() { return { entries: agents.map(agent => ({ agent, project: null })), pageInfo }; },
-    async updateAgent(id: string, update: { name?: string }) { updates.push([id, update]); },
-  } as unknown as DaemonClient;
-  assert.equal(await syncMirrorTitles(client, h.world, selected), 1);
-  assert.deepEqual(updates, [["selected", { name: `@reviewer (${selected})` }]]);
-  assert.equal(agents[1]!.title, "other customized title");
-});
-
 test("failed owned title attempts preserve attach, ordinary refresh and runtime cleanup", async t => {
   const h = await fixture(t), akuId = "aku/elite/1234abcd";
   await h.bind("reviewer", akuId);

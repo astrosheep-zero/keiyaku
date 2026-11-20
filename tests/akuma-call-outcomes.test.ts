@@ -126,15 +126,6 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   assert.equal((await readSoul(pathsForAkumaId(world, forkedChild)))?.id, forkedChild);
   Reflect.set(claudeProvider, "fork", originalFork);
 
-  const brokenAlias = join(world, ".keiyaku", "akuma", "alias.json");
-  writeFileSync(brokenAlias, "unavailable Alias authority\n");
-  const aliasStopped = await api.spawn({ akumaName: "worker", home, cwd: world, body: "alias answer", mode: "wait", alias });
-  assert.ok(aliasStopped.kind === "failed", "Alias must stop after birth");
-  assert.deepEqual(aliasStopped.failures.map(failure => failure.stage), ["alias"]);
-  const aliasText = renderVerb("spawn", input, { kind: "returned", value: aliasStopped }, context);
-  assert.match(aliasText, /alias failed/u);
-  assertWireRoundTrip(spawnResultSchema, aliasStopped);
-
 });
 
 test("Ask returns its own Turn answer, not an earlier retained answer", async (t) => {

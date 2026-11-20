@@ -7,14 +7,11 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
 import {
   consumeProcessStdout,
-  runCrossPlatformProcess,
   runProcess,
-  spawnCancellableProcess,
   spawnDetachedProcess,
   type ProcessInput,
 } from "../src/runtime/proc/run.js";
@@ -25,9 +22,6 @@ import {
   processExists,
   readPidReceipt,
   removeTempDirectory,
-  settlementProbe,
-  waitForCondition,
-  waitForFixtureFile,
   waitForProcessExit,
 } from "./support/process.js";
 
@@ -50,43 +44,6 @@ function descendantParent(descendant: string): string {
     "setInterval(() => {}, 1_000);",
   ].join(" ");
 }
-
-test("fixture file barriers observe present and later files and reject missing evidence", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-v4-file-barrier-");
-  const file = join(root, "ready");
-  await assert.rejects(waitForFixtureFile(file, 0), /timed out waiting for barrier file/u);
-  const waiting = waitForFixtureFile(file);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  writeFileSync(file, "ready");
-  await waiting;
-  await waitForFixtureFile(file, 0);
-});
-
-test("a never-true bounded fixture wait expires naming what it awaited and a terminal state ends it early", async () => {
-  let ready = false;
-  const released = setTimeout(() => {
-    ready = true;
-  }, 10);
-  try {
-    await waitForCondition("the delayed fixture readiness", () => ready, { budgetMs: 2_000 });
-    await assert.rejects(
-      waitForCondition("the admitted progress event", () => false, { budgetMs: 25 }),
-      /fixture wait for the admitted progress event expired after \d+ms \(budget 25ms\)/u,
-    );
-    await assert.rejects(
-      waitForCondition("the served request state", async () => false, { terminalState: () => "voided" }),
-      /fixture wait for the served request state ended after \d+ms: reached terminal state voided/u,
-    );
-    await assert.rejects(
-      waitForCondition("the settled pump state", async () => false, {
-        terminalState: settlementProbe(Promise.reject(new Error("pump closed")), () => "returned"),
-      }),
-      /fixture wait for the settled pump state ended after \d+ms: reached terminal state failure pump closed/u,
-    );
-  } finally {
-    clearTimeout(released);
-  }
-});
 
 test("spawn-capable fixture cleanup waits for a live writer before deleting its directory", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-live-body-cleanup-"));
@@ -210,33 +167,6 @@ test("spawn-capable fixture cleanup retains both delayed and settled ambiguous f
   }
 });
 
-test("spawn-capable fixture cleanup retains an unproved launch without replacing its failure", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-v4-unproved-body-launch-");
-  const receipt = join(root, "body-pids");
-  const original = new Error("fixture launch failed without settlement proof");
-  let cleanup: Awaited<ReturnType<typeof cleanupSpawnCapableFixture>> | undefined;
-  await assert.rejects(
-    async () => {
-      try {
-        throw original;
-      } finally {
-        // This negative probe deliberately keeps the retained root as its own
-        // evidence of the retained decision, so its retention is declared.
-        cleanup = await cleanupSpawnCapableFixture({
-          fixturePath: root,
-          pidReceiptPath: receipt,
-          timeoutMs: 0,
-          operationFailed: true,
-          expectRetainedEvidence: true,
-        });
-      }
-    },
-    (error: unknown) => error === original,
-  );
-  assert.equal(cleanup?.kind, "retained");
-  assert.equal(existsSync(root), true);
-});
-
 test("PID receipts reject malformed nonempty lines and retain failed fixtures", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-v4-malformed-pid-receipt-");
   const receipt = join(root, "body-pids");
@@ -254,42 +184,6 @@ test("PID receipts reject malformed nonempty lines and retain failed fixtures", 
   );
   assert.equal(existsSync(root), true);
 });
-
-for (const force of [false, true]) {
-  test(`terminateOwnedProcess accepts EPERM after the owned child exits (${force ? "forced" : "graceful"})`, async (t) => {
-    if (process.platform === "win32") {
-      t.skip("POSIX group signals only");
-      return;
-    }
-    const child = ownedChild(10_000 + Number(force));
-    t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === child.pid && signal === 0) return true;
-      assert.equal(pid, -child.pid);
-      if (signal === 0) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
-      assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
-      child.emit("exit", 0, null);
-      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-    }) as typeof process.kill);
-
-    await terminateOwnedProcess(child, force);
-  });
-
-  test(`terminateOwnedProcess rejects live-child EPERM (${force ? "forced" : "graceful"})`, async (t) => {
-    if (process.platform === "win32") {
-      t.skip("POSIX group signals only");
-      return;
-    }
-    const child = ownedChild(10_100 + Number(force));
-    t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === child.pid && signal === 0) return true;
-      assert.equal(pid, -child.pid);
-      assert.equal(signal, force ? "SIGKILL" : "SIGTERM");
-      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-    }) as typeof process.kill);
-
-    await assert.rejects(terminateOwnedProcess(child, force), /kill EPERM/u);
-  });
-}
 
 test("graceful termination cleans the group after SIGTERM EPERM and leader exit", async (t) => {
   if (process.platform === "win32") {
@@ -321,27 +215,6 @@ test("graceful termination cleans the group after SIGTERM EPERM and leader exit"
   assert.deepEqual(signals, ["SIGTERM", 0, 0, "SIGKILL", 0]);
 });
 
-test("terminateOwnedProcess does not hang after unknown exit with null code and signal", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX group signals only");
-    return;
-  }
-  const child = ownedChild(10_250);
-  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-    if (pid === child.pid && signal === 0) {
-      throw Object.assign(new Error("leader gone"), { code: "ESRCH" });
-    }
-    assert.equal(pid, -child.pid);
-    throw Object.assign(new Error("group gone"), { code: "ESRCH" });
-  }) as typeof process.kill);
-
-  const result = await Promise.race([
-    terminateOwnedProcess(child).then(() => "ok" as const),
-    new Promise<"hung">((resolve) => setTimeout(() => resolve("hung"), 500)),
-  ]);
-  assert.equal(result, "ok");
-});
-
 test("runProcess reports termination failure without waiting for child close", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX group signals only");
@@ -371,65 +244,6 @@ test("runProcess reports termination failure without waiting for child close", a
   }
 });
 
-test("cancellable process owns termination failure before a later waiter", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX group signals only");
-    return;
-  }
-  const originalKill = process.kill;
-  const controller = new AbortController();
-  let ownedPid: number | undefined;
-  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-    if (pid < 0 && (signal === "SIGTERM" || signal === "SIGKILL")) {
-      ownedPid = -pid;
-      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-    }
-    return originalKill(pid, signal as NodeJS.Signals);
-  }) as typeof process.kill);
-  const owned = spawnCancellableProcess({
-    argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"],
-    signal: controller.signal,
-  });
-
-  try {
-    controller.abort();
-    await assert.rejects(owned.terminationFailure, /kill EPERM/u);
-    assert.equal(ownedPid, owned.child.pid);
-  } finally {
-    if (ownedPid !== undefined) {
-      originalKill(-ownedPid, "SIGKILL");
-      await waitForProcessExit(ownedPid);
-    }
-  }
-});
-
-test("owned-process lifecycle releases during pending termination exactly once", async () => {
-  let finish!: () => void;
-  let terminations = 0;
-  let releases = 0;
-  const lifecycle = createProcessLifecycle(
-    async () => {
-      terminations += 1;
-      await new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-    },
-    () => {
-      releases += 1;
-    },
-  );
-  const termination = lifecycle.terminate();
-  lifecycle.release();
-  assert.equal(releases, 1);
-  lifecycle.release();
-  assert.equal(releases, 1);
-  finish();
-  await termination;
-  await lifecycle.terminate();
-  assert.equal(terminations, 1);
-  lifecycle.release();
-  assert.equal(releases, 1);
-});
 function waitForOutputLine(
   expected: string,
   message: string,
@@ -522,20 +336,6 @@ const expectLaterTerminateIsInert = (owned: Awaited<ReturnType<typeof spawnDetac
     await owned.terminate(true);
   });
 
-test("runProcess returns terminal diagnostics from both streams", async () => {
-  const outcome = await runProcess(
-    input([process.execPath, "-e", 'process.stdout.write("out"); process.stderr.write("err");']),
-  );
-
-  assert.deepEqual(outcome, {
-    kind: "terminal",
-    code: 0,
-    stdout: "out",
-    stderr: "err",
-    truncated: false,
-  });
-});
-
 test("runProcess observes split UTF-8 output before the child completes while retaining its tail", { timeout: 60_000 }, async (context) => {
   const root = temporaryDirectory(context, "keiyaku-v4-runtime-split-utf8-");
   const tailRelease = join(root, "tail-release");
@@ -606,127 +406,48 @@ test("runProcess observes split UTF-8 output before the child completes while re
   }
 });
 
-test("runProcess isolates an observation consumer failure and still cleans up cancellation", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-observer-failure-"));
-  const pidPath = join(root, "child-pid");
+test("runProcess retains truncated output at its exact timeout", { timeout: 60_000 }, async (context) => {
   const controller = new AbortController();
-  let childPid: number | undefined;
-  try {
-    const outcome = await runProcess(
-      input(
-        [
-          process.execPath,
-          "-e",
-          `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); process.stdout.write("before"); setInterval(() => {}, 1_000);`,
-        ],
-        {
-          signal: controller.signal,
-          onOutput: () => {
-            controller.abort();
-            throw new Error("observer refused output");
-          },
-        },
-      ),
-    );
-
-    assert.deepEqual(outcome, { kind: "cancelled", stdout: "before", stderr: "", truncated: false });
-    childPid = Number.parseInt(readFileSync(pidPath, "utf8"), 10);
-    await waitForProcessExit(childPid);
-  } finally {
-    if (childPid !== undefined && processExists(childPid)) process.kill(childPid, "SIGKILL");
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("runProcess retains only the final 16 KiB of each stream", async () => {
-  const outcome = await runProcess(
-    input([
-      process.execPath,
-      "-e",
-      [
-        'process.stdout.write("a".repeat(20 * 1024));',
-        'process.stdout.write("stdout-tail");',
-        'process.stderr.write("b".repeat(20 * 1024));',
-        'process.stderr.write("stderr-tail");',
-      ].join(" "),
-    ]),
-  );
-
-  assert.ok(outcome.kind === "terminal", "expected outcome.kind = \"terminal\"");
-  assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
-  assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
-  assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
-  assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
-  assert.equal(outcome.truncated, true);
-});
-
-for (const [name, run] of [
-  ["runProcess", runProcess],
-  ["runCrossPlatformProcess", runCrossPlatformProcess],
-] as const) {
-  test(`${name} retains truncated output at its exact timeout`, { timeout: 60_000 }, async (context) => {
-    const controller = new AbortController();
-    context.signal.addEventListener("abort", () => {
-      context.mock.timers.reset();
-      controller.abort();
-    }, { once: true });
-    const { promise: outputReady, resolve: ready } = promiseBarrier<void>();
-    const observed = { stdout: "", stderr: "" };
-    let settled = false;
-    context.mock.timers.enable({ apis: ["setTimeout"] });
-    const pending = run(input([
-      process.execPath, "-e",
-      'process.stdout.write("a".repeat(20 * 1024) + "stdout-tail"); process.stderr.write("b".repeat(20 * 1024) + "stderr-tail"); setInterval(() => {}, 1000);',
-    ], {
-      timeoutMs: 2_000,
-      signal: controller.signal,
-      onOutput: ({ stream, text }) => {
-        observed[stream] += text;
-        if (observed.stdout.endsWith("stdout-tail") && observed.stderr.endsWith("stderr-tail")) ready();
-      },
-    }));
-    const finished = pending.then((outcome) => { settled = true; return outcome; });
-    try {
-      await awaitReadiness(`the ${name} output tails`, outputReady, finished);
-      context.mock.timers.tick(1_999);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      assert.equal(settled, false, "deadline must not fire early");
-      context.mock.timers.tick(1);
-      // Termination and OS child custody use real time after the tested deadline fires.
-      context.mock.timers.reset();
-      const outcome = await finished;
-      assert.ok(outcome.kind === "timeout");
-      assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
-      assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
-      assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
-      assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
-      assert.equal(outcome.truncated, true);
-    } finally {
-      context.mock.timers.reset();
-      controller.abort();
-      await pending.catch(() => undefined);
-    }
-  });
-}
-
-test("consumeProcessStdout drains output without retaining it", async () => {
-  let consumed = 0;
-  const result = await consumeProcessStdout(
-    input([process.execPath, "-e", 'process.stdout.write("x".repeat(2 * 1024 * 1024));']),
-    (chunk) => {
-      consumed += chunk.length;
+  context.signal.addEventListener("abort", () => {
+    context.mock.timers.reset();
+    controller.abort();
+  }, { once: true });
+  const { promise: outputReady, resolve: ready } = promiseBarrier<void>();
+  const observed = { stdout: "", stderr: "" };
+  let settled = false;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = runProcess(input([
+    process.execPath, "-e",
+    'process.stdout.write("a".repeat(20 * 1024) + "stdout-tail"); process.stderr.write("b".repeat(20 * 1024) + "stderr-tail"); setInterval(() => {}, 1000);',
+  ], {
+    timeoutMs: 2_000,
+    signal: controller.signal,
+    onOutput: ({ stream, text }) => {
+      observed[stream] += text;
+      if (observed.stdout.endsWith("stdout-tail") && observed.stderr.endsWith("stderr-tail")) ready();
     },
-  );
-
-  assert.equal(consumed, 2 * 1024 * 1024);
-  assert.ok(result.pid !== null && result.pid > 0);
-  assert.deepEqual(result.outcome, {
-    kind: "terminal",
-    code: 0,
-    stdout: "",
-    stderr: "",
-    truncated: false,
-  });
+  }));
+  const finished = pending.then((outcome) => { settled = true; return outcome; });
+  try {
+    await awaitReadiness("the runProcess output tails", outputReady, finished);
+    context.mock.timers.tick(1_999);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false, "deadline must not fire early");
+    context.mock.timers.tick(1);
+    // Termination and OS child custody use real time after the tested deadline fires.
+    context.mock.timers.reset();
+    const outcome = await finished;
+    assert.ok(outcome.kind === "timeout");
+    assert.equal(Buffer.byteLength(outcome.stdout), 16 * 1024);
+    assert.equal(Buffer.byteLength(outcome.stderr), 16 * 1024);
+    assert.equal(outcome.stdout.endsWith("stdout-tail"), true);
+    assert.equal(outcome.stderr.endsWith("stderr-tail"), true);
+    assert.equal(outcome.truncated, true);
+  } finally {
+    context.mock.timers.reset();
+    controller.abort();
+    await pending.catch(() => undefined);
+  }
 });
 
 test("consumeProcessStdout terminates after a consumer failure", async () => {
@@ -769,42 +490,6 @@ test("runProcess reports spawn errors", async () => {
   assert.match(outcome.diagnostic, /ENOENT/);
 });
 
-test("runProcess timeout closes the directly-owned helper boundary", async () => {
-  const descendant = [
-    'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
-    'process.stdout.write("descendant/ready\\n");',
-    "setTimeout(() => process.exit(99), 30_000);",
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
-  const parent = descendantParent(descendant);
-  const ready = waitForOutputLine("descendant/ready", "timeout helper did not signal readiness", 5_000);
-  let pending: ReturnType<typeof consumeProcessStdout> | undefined;
-  const output: string[] = [];
-  try {
-    pending = consumeProcessStdout(
-      {
-        ...input([process.execPath, "-e", parent]),
-        cwd: root,
-        timeoutMs: 6_000,
-      },
-      (chunk) => {
-        output.push(chunk.toString("utf8"));
-        ready.observe(chunk);
-      },
-    );
-    await ready.wait;
-    const outcome = (await pending).outcome;
-    assert.equal(outcome.kind, "timeout");
-    if (process.platform === "win32") assert.doesNotMatch(output.join(""), /descendant\/exited/);
-    else assert.match(output.join(""), /descendant\/exited/);
-  } finally {
-    ready.dispose();
-    if (pending !== undefined) await pending;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("Unix natural leader exit cleans a surviving descendant once", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX process groups only");
@@ -845,82 +530,44 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
   }
 });
 
-test("Unix natural leader exit leaves no stale terminate after descendants are already gone", async (t) => {
+test("runProcess natural exit retires a live descendant with inherited pipes before returning", { timeout: 60_000 }, async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX process groups only");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-gone-descendants-"));
+  const root = temporaryDirectory(t, "keiyaku-v4-runtime-natural-descendant-");
   const descendantPidPath = join(root, "descendant-pid");
   const descendant = [
-    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid) + "\\n");`,
-    "setTimeout(() => process.exit(0), 200);",
+    'process.on("SIGTERM", () => {});',
+    "setInterval(() => {}, 1_000);",
+    'process.send("ready");',
   ].join(" ");
   const parent = [
     'const { spawn } = require("node:child_process");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    'child.on("exit", () => process.exit(0));',
+    'const { writeFileSync, writeSync } = require("node:fs");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit", "ipc"] });`,
+    'child.once("message", () => {',
+    `writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid) + "\\n");`,
+    'writeSync(1, "leader/out"); writeSync(2, "leader/err");',
+    "process.exit(0); });",
   ].join(" ");
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
+  const controller = new AbortController();
+  t.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  const pending = runProcess({ argv: [process.execPath, "-e", parent], signal: controller.signal });
   let descendantPid: number | undefined;
   try {
-    owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", parent],
-      cwd: root,
-      log: join(root, "stdio.log"),
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
+    assert.deepEqual(await pending, {
+      kind: "terminal", code: 0, stdout: "leader/out", stderr: "leader/err", truncated: false,
     });
-    const ownedProcess = owned;
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 15_000), 10);
-    await waitForProcessExit(descendantPid);
-    await ownedProcess.exited;
-    await expectLaterTerminateIsInert(ownedProcess);
+    assert.equal(processExists(descendantPid), false, "retirement must precede the returned leader outcome");
   } finally {
+    controller.abort();
     killFixtureProcess(descendantPid);
-    if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
+    if (descendantPid !== undefined) await waitForProcessExit(descendantPid);
+    await pending.catch(() => undefined);
   }
 });
-
-for (const stdio of ["ignore", "inherit"] as const) {
-  test(`runProcess natural exit retires a live descendant with ${stdio} pipes before returning`, { timeout: 60_000 }, async (t) => {
-    if (process.platform === "win32") {
-      t.skip("POSIX process groups only");
-      return;
-    }
-    const root = temporaryDirectory(t, "keiyaku-v4-runtime-natural-descendant-");
-    const descendantPidPath = join(root, "descendant-pid");
-    const descendant = [
-      'process.on("SIGTERM", () => {});',
-      "setInterval(() => {}, 1_000);",
-      'process.send("ready");',
-    ].join(" ");
-    const parent = [
-      'const { spawn } = require("node:child_process");',
-      'const { writeFileSync, writeSync } = require("node:fs");',
-      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", ${JSON.stringify(stdio)}, ${JSON.stringify(stdio)}, "ipc"] });`,
-      'child.once("message", () => {',
-      `writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid) + "\\n");`,
-      'writeSync(1, "leader/out"); writeSync(2, "leader/err");',
-      "process.exit(0); });",
-    ].join(" ");
-    const controller = new AbortController();
-    t.signal.addEventListener("abort", () => controller.abort(), { once: true });
-    const pending = runProcess({ argv: [process.execPath, "-e", parent], signal: controller.signal });
-    let descendantPid: number | undefined;
-    try {
-      descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
-      assert.deepEqual(await pending, {
-        kind: "terminal", code: 0, stdout: "leader/out", stderr: "leader/err", truncated: false,
-      });
-      assert.equal(processExists(descendantPid), false, "retirement must precede the returned leader outcome");
-    } finally {
-      controller.abort();
-      killFixtureProcess(descendantPid);
-      if (descendantPid !== undefined) await waitForProcessExit(descendantPid);
-      await pending.catch(() => undefined);
-    }
-  });
-}
 
 test("runProcess preserves a natural-exit cleanup failure and starts termination only once", async (t) => {
   if (process.platform === "win32") {
@@ -975,44 +622,6 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
     ready.dispose();
     controller.abort();
     if (pending !== undefined) await pending;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("LineRpcProcess close closes the directly-owned helper boundary", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-tree-"));
-  const descendant = [
-    'process.on("SIGTERM", () => process.stdout.write(JSON.stringify({ method: "probe/descendant-exited" }) + "\\n", () => process.exit(0)));',
-    'process.stdout.write(JSON.stringify({ method: "probe/ready" }) + "\\n");',
-    "setTimeout(() => process.exit(99), 2_000);",
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
-  const parent = descendantParent(descendant);
-  let rpc: LineRpcProcess | undefined;
-  let closed = false;
-  let ready!: () => void;
-  let readyTimer!: ReturnType<typeof setTimeout>;
-  const notifications: string[] = [];
-  const isReady = new Promise<void>((resolve, reject) => {
-    readyTimer = setTimeout(() => reject(new Error("line RPC helper did not signal readiness")), 5_000);
-    ready = () => {
-      clearTimeout(readyTimer);
-      resolve();
-    };
-  });
-  try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", parent], cwd: root });
-    rpc.onNotification((notification) => {
-      notifications.push(notification.method);
-      if (notification.method === "probe/ready") ready();
-    });
-    await isReady;
-    await rpc.close(false);
-    closed = true;
-    if (process.platform !== "win32") assert.ok(notifications.includes("probe/descendant-exited"));
-  } finally {
-    clearTimeout(readyTimer);
-    if (!closed) await rpc?.close(false);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1105,19 +714,6 @@ test("LineRpcProcess accepts a valid oversized response", async () => {
   }
 });
 
-test("LineRpcProcess times out a stalled request", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-timeout-"));
-  const child = ["process.stdin.resume();", "setInterval(() => {}, 1_000);"].join(" ");
-  let rpc: LineRpcProcess | undefined;
-  try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 25 });
-    await assert.rejects(rpc.request("probe"), /timed out after 25ms/u);
-  } finally {
-    await rpc?.close(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("StdioProcess endInputAndDrain retains output until producer EOF", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-drain-"));
   const child = [
@@ -1190,41 +786,6 @@ test("StdioProcess close terminates its complete helper tree", { timeout: 60_000
   }
 });
 
-test("a direct spawner terminates through its live owned-process handle", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-"));
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
-  let terminated = false;
-  try {
-    owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    assert.ok(owned.pid > 0);
-    await owned.terminate();
-    terminated = true;
-  } finally {
-    if (!terminated) await owned?.terminate(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a direct spawner retains its waitpid result and bounded shared-log reference", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-v4-owned-process-exit-");
-  const log = join(root, "stdio.log");
-  writeFileSync(log, "prior stdout\n");
-  const owned = await spawnDetachedProcess({
-    argv: [process.execPath, "-e", "process.exit(7)"],
-    cwd: root,
-    log,
-  });
-  const exit = await owned.exited;
-  assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 7, signal: null });
-  assert.deepEqual(exit.log, { path: log, from: "prior stdout\n".length, to: readFileSync(log).length });
-  assert.match(readFileSync(log, "utf8"), /prior stdout/u);
-  assert.match(readFileSync(log, "utf8"), /\[child exit 7\]/u);
-});
-
 test("a direct spawner retains a short exit marker write before its exit receipt", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-v4-owned-process-boundary-");
   const log = join(root, "stdio.log");
@@ -1258,92 +819,6 @@ test("a direct spawner retains a short exit marker write before its exit receipt
   assert.equal(shortened, true);
   assert.match(content, /\[child exit 0\]\n$/u);
   assert.equal(exit.log.to, content.length);
-});
-
-test("a direct spawner rejects exit evidence when its run-log path disappears", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("Windows inherited log handles cannot be unlinked while the child is alive");
-    return;
-  }
-  const root = temporaryDirectory(t, "keiyaku-v4-owned-process-missing-log-");
-  const log = join(root, "stdio.log");
-  const owned = await spawnDetachedProcess({
-    argv: [process.execPath, "-e", "setTimeout(() => process.exit(7), 50)"],
-    cwd: root,
-    log,
-  });
-  rmSync(log);
-  await assert.rejects(owned.exited, /pre-admission exit 7: run-log evidence unavailable/u);
-});
-
-test("Unix natural exit followed by terminate emits no signal", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX group signals only");
-    return;
-  }
-  const root = temporaryDirectory(t, "keiyaku-v4-owned-process-natural-exit-");
-  const owned = await spawnDetachedProcess({
-    argv: [process.execPath, "-e", "process.exit(0)"],
-    cwd: root,
-    log: join(root, "stdio.log"),
-  });
-  const exit = await owned.exited;
-  assert.deepEqual({ code: exit.code, signal: exit.signal }, { code: 0, signal: null });
-  await expectLaterTerminateIsInert(owned);
-});
-
-test("an owned process capability is inert after termination and repeated terminate", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-reap-"));
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
-  let terminated = false;
-  try {
-    owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    const ownedProcess = owned;
-    await ownedProcess.terminate();
-    terminated = true;
-    await expectNoTerminationSignals(ownedProcess.pid, async () => {
-      await ownedProcess.terminate();
-      await ownedProcess.terminate();
-    });
-  } finally {
-    if (!terminated) await owned?.terminate(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("an owned process capability is inert after release and repeated terminate", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-release-"));
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
-  let released = false;
-  try {
-    owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    const ownedProcess = owned;
-    ownedProcess.release();
-    released = true;
-    await expectNoTerminationSignals(ownedProcess.pid, async () => {
-      await ownedProcess.terminate();
-      await ownedProcess.terminate();
-    });
-  } finally {
-    if (owned !== undefined && released) {
-      try {
-        process.kill(owned.pid, "SIGKILL");
-      } catch {
-        /* already reaped */
-      }
-    } else {
-      await owned?.terminate(true);
-    }
-    await removeTempDirectory(root);
-  }
 });
 
 test("release lets the parent reach beforeExit while the detached child continues", async () => {

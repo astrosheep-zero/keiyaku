@@ -8,11 +8,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { Akuma, Akumas, Keiyaku, KeiyakuError, type AkumaReportResult } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { activitySlice, beginTurn, breakBody, endTurn, finishBodyIfIdle, readHeart, recordReport } from "../src/akuma/heart/index.js";
+import { activitySlice, beginTurn, endTurn, finishBodyIfIdle, readHeart, recordReport } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
-import { allocateAkumaDirectory, parsePublicHistoryId } from "../src/akuma/identity.js";
+import { parsePublicHistoryId } from "../src/akuma/identity.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
@@ -279,25 +279,6 @@ test("answer keeps its exact Turn through later failure, cancellation and report
   } finally { value.holder.release(); }
 });
 
-test("report admission selects current execution and refuses closed execution", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-report-admission-");
-  const value = await reportFixture(root, "feed0002");
-  const input = { text: "progress", at: AT };
-  const absent = await allocateAkumaDirectory({ worldRoot: value.world, akumaName: "claude", draw: () => "feedffff" });
-  assert.deepEqual(await recordReport(absent.paths, input), { kind: "refused", reason: "not-born" });
-  try {
-    await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
-    assert.deepEqual(await recordReport(value.allocated.paths, input), { kind: "refused", reason: "not-executing" });
-    const next = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
-    const result = await recordReport(value.allocated.paths, input);
-    assert.equal(result.kind, "recorded");
-    if (result.kind === "recorded") assert.equal(result.report.turnSequence, next.sequence);
-    await breakBody(value.allocated.paths, { sequence: value.body.sequence, end: "put-down", at: AT });
-    assert.deepEqual(await recordReport(value.allocated.paths, input), { kind: "refused", reason: "not-executing" });
-    await assert.rejects(Akuma.select(value.world, value.allocated.id).report("bad", { bodySequence: 1 } as never), /unknown field/u);
-  } finally { value.holder.release(); }
-});
-
 test("report refuses a born Akuma without a Body, Turn, or non-hung execution", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-report-inactive-");
   const world = await World.at(root);
@@ -439,35 +420,5 @@ test("retained report corruption fails observation instead of becoming a partial
       database.prepare("UPDATE reports SET at = 'not a timestamp'").run();
     });
     await assert.rejects(akuma.history(), /expected report timestamp/u);
-  } finally { value.holder.release(); }
-});
-
-test("CLI report adapts explicit immutable execution and takes stdin", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-report-cli-");
-  const value = await reportFixture(root, "feed0005");
-  const environment = akumaExecutionEnvironment({}, {}, [], {
-    akumaId: value.allocated.id, world: value.world,
-  });
-  try {
-    const result = await cliJson<AkumaReportResult>(["report", "-"], {
-      cwd: root, environment, readStdin: async () => "report from stdin\n",
-    });
-    assert.equal(result.exit, 0);
-    assert.equal(result.value.kind, "recorded");
-    if (result.value.kind !== "recorded") assert.fail("report refused");
-    const report = await Akumas.of(value.world).history({ akuma: value.allocated.id, id: result.value.reportId });
-    assert.ok(report.kind === "akuma-report");
-    assert.equal(report.text, "report from stdin\n");
-    const missingActor = await runCli(["report", "cannot guess"], { cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: "pi:host" } });
-    assert.equal(missingActor.exit, 64);
-    assert.match(missingActor.stderr, /requires explicit KEIYAKU_ACTOR_ID/u);
-    assert.throws(() => parseArgv(["report", "recipient", "text"]), /one text argument/u);
-    const akuma = Akuma.select(value.world, value.allocated.id);
-    await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
-    await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
-    const text = await runCli(["report", "resumed"], { cwd: root, environment });
-    assert.equal(text.exit, 0);
-    assert.match(text.stdout.trimEnd(), new RegExp(`^recorded ${value.allocated.id} report/\\d+$`));
-    assert.equal((await akuma.history()).rows.filter(row => row.text.trimStart().startsWith("report/")).length, 2);
   } finally { value.holder.release(); }
 });

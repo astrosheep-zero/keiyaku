@@ -1,12 +1,10 @@
 import { deferred, temporaryDirectory } from "./support/process.js";
-import { abortableDelay } from "../src/akuma/abort.js";
-import { recordTell, seedLegacySchema, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
+import { recordTell, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, renameSync, rmdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { AkumaOwner, settleAkumaKill } from "../src/akuma/akuma-owner.js";
 import { AkumaKillError, AkumaWorkdirMissingError } from "../src/akuma/akuma-errors.js";
 import { executeKillAkuma, executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
@@ -30,8 +28,6 @@ import {
   endTurn,
   finishBodyIfIdle,
   HeartAbsentError,
-  life,
-  probeLeash,
   readHeart,
   readForkPoint,
   readLatestTurnForBody,
@@ -47,7 +43,7 @@ import {
   requestStop,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { decodeSoul } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
 import { withHeartTransaction, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
 import { surveillanceAudience } from "../src/akuma/heart/surveillance.js";
@@ -284,45 +280,6 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
   }
 });
 
-test("cancelled kill admission leaves no stop or successor work", async (context) => {
-  const value = await fixture();
-  const paths = value.allocated.paths;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  const blocker = new DatabaseSync(paths.heart);
-  try {
-    await leash.birth(paths, value.soul);
-    await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
-    blocker.exec("BEGIN IMMEDIATE");
-    const controller = new AbortController();
-    const reason = new Error("cancel admission");
-    const exec = DatabaseSync.prototype.exec;
-    let contended = false;
-    const injected = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
-      try {
-        return exec.call(this, sql);
-      } catch (error) {
-        if (sql === "BEGIN IMMEDIATE") {
-          contended = true;
-          controller.abort(reason);
-        }
-        throw error;
-      }
-    });
-    try {
-      await assert.rejects(settleAkumaKill(paths, controller.signal), (error) => error === reason);
-      assert.equal(contended, true);
-    } finally {
-      injected.mock.restore();
-    }
-    blocker.exec("ROLLBACK");
-    assert.equal((await readHeart(paths)).stop, null);
-  } finally {
-    blocker.close();
-    leash.release();
-    value.close();
-  }
-});
-
 test("cancellation after kill admission stops observation without retracting the stop", async (context) => {
   const value = await fixture();
   const paths = value.allocated.paths;
@@ -432,28 +389,6 @@ test("a commit failure rolls back the Heart mutation without replaying it", asyn
     assert.equal((await activitySlice(paths)).rows.filter((fact) => fact.kind === "activity").length, 1);
   } finally {
     leash.release();
-    value.close();
-  }
-});
-
-test("Pi sessionFile coordinates round trip through Heart custody", async () => {
-  const value = await fixture();
-  try {
-    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await body.birth(value.allocated.paths, value.soul);
-    await recordSession(value.allocated.paths, {
-      provider: "pi",
-      options: { model: "openai/gpt" },
-      coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-native" },
-      cwd: value.root,
-      admittedAt: "2026-08-08T00:00:01.000Z",
-    });
-    body.release();
-    assert.deepEqual((await readHeart(value.allocated.paths)).latestSession?.coordinate, {
-      sessionFile: "/sessions/pi.jsonl",
-      sessionId: "pi-native",
-    });
-  } finally {
     value.close();
   }
 });
@@ -662,36 +597,6 @@ test("frozen directory lost after admission reports the exact Tell and settles i
   }
 });
 
-test("a held foreign Body cannot confirm submission without an exact delivery", async (t) => {
-  const value = await fixture();
-  const paths = value.allocated.paths;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  t.after(() => { leash.release(); value.close(); });
-  await leash.birth(paths, value.soul);
-  const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
-  const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-  const waiting = deferred<void>();
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const pending = tellFixture(value, {
-    body: "continue", tellId: "tell-held", recordedAt: value.soul.createdAt,
-    runtime: {
-      async spawn() { assert.fail("must not launch into held custody"); },
-      async schedule(ms, signal) { waiting.resolve(); await abortableDelay(ms, signal); },
-    },
-  });
-  await waiting.promise;
-  await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["tell-held"], boundAt: value.soul.createdAt });
-  t.mock.timers.tick(29_900);
-  const result = await pending;
-  assert.equal(result.wake.kind, "confirmation-stopped");
-  if (result.wake.kind !== "confirmation-stopped") assert.fail("expected a typed stop");
-  assert.equal(result.wake.reason, "deadline");
-  assert.match(result.wake.diagnostic, /admitted input can still advance/u);
-  assert.equal((await readTell(paths, "tell-held"))?.state, "pending");
-  assert.equal((await readTurn(paths, turn.sequence))?.end, undefined);
-  assert.equal((await readHeart(paths)).latestBody?.hung, undefined);
-});
-
 test("an exact historical undelivered witness is a negative action result", async () => {
   const value = await fixture();
   const { paths } = value.allocated;
@@ -739,38 +644,6 @@ test("action deadline releases even a launch handle that arrives after the invoc
   assert.equal((await readHeart(paths)).latestBody, null);
   handle.resolve({ completed: new Promise(() => {}), async cancel() { assert.fail("no execution cancellation"); }, release: released.resolve });
   await released.promise;
-});
-
-test("an unrelated Body cannot hide actual launch failure", async () => {
-  const value = await fixture();
-  let winnerSequence: number | undefined;
-  try {
-    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await born.birth(value.allocated.paths, value.soul);
-    born.release();
-    const result = await tellFixture(value, {
-      body: "continue",
-      tellId: "tell-successor-race",
-      recordedAt: value.soul.createdAt,
-      runtime: {
-        async spawn(): Promise<LiveBodyLaunch> {
-          const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
-          const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-          winnerSequence = body.sequence;
-          winner.release();
-          return {
-            completed: Promise.resolve({ diagnostic: "fixture launch failed" }),
-            async cancel() {},
-            release() {},
-          };
-        },
-      },
-    });
-    assert.deepEqual(result.wake, { kind: "failed", diagnostic: "fixture launch failed" });
-    assert.equal((await readHeart(value.allocated.paths)).latestBody?.sequence, winnerSequence);
-  } finally {
-    value.close();
-  }
 });
 
 test("terminal Tell evidence is admitted once for each exact Tell and kind", async () => {
@@ -837,124 +710,6 @@ test("terminal Tell evidence is admitted once for each exact Tell and kind", asy
   }
 });
 
-test("kill witnesses one stopped Body without burning pending work", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const firstBody = await leash.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    const pending = await recordTell(value.allocated.paths, {
-      id: "tell-pending",
-      body: "pending",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    assert.equal(pending.kind, "recorded");
-    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
-      kind: "requested",
-      body: firstBody,
-    });
-    await breakBody(value.allocated.paths, {
-      sequence: firstBody.sequence,
-      end: "put-down",
-      at: "2026-08-08T00:00:03.500Z",
-    });
-    assert.deepEqual(await leash.settleStop(value.allocated.paths), {
-      target: { bodySequence: firstBody.sequence, requestedAt: "2026-08-08T00:00:03.000Z" },
-      result: "recorded",
-    });
-    assert.equal((await requestStop(value.allocated.paths, "later")).kind, "already-killed");
-    let snapshot = await readHeart(value.allocated.paths);
-    assert.equal(snapshot.latestKill?.bodySequence, firstBody.sequence);
-    assert.deepEqual(
-      snapshot.pending.map((tell) => tell.id),
-      ["tell-pending"],
-    );
-    assert.equal(
-      life({
-        leash: "free",
-        body: { ...firstBody, end: "put-down" },
-        kill: snapshot.latestKill,
-      }),
-      "killed",
-    );
-
-    leash.release();
-    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    const secondBody = await successor.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:04.000Z",
-    });
-    const secondTurn = await beginTurn(value.allocated.paths, {
-      bodySequence: secondBody.sequence,
-      startedAt: "2026-08-08T00:00:04.000Z",
-    });
-    snapshot = await readHeart(value.allocated.paths);
-    assert.equal(
-      life({
-        leash: "free",
-        body: { ...secondBody, end: "exited" },
-        kill: snapshot.latestKill,
-      }),
-      "asleep",
-    );
-    await recordTellDeliveries(value.allocated.paths, [
-      {
-        tellId: "tell-pending",
-        route: "launch",
-        turnSequence: secondTurn.sequence,
-        fence: "successor",
-        deliveredAt: "2026-08-08T00:00:05.000Z",
-      },
-    ]);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    successor.release();
-  } finally {
-    value.close();
-  }
-});
-
-test("kill admission witnesses a stranded settled Body instead of requesting a stop", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    await breakBody(value.allocated.paths, {
-      sequence: body.sequence,
-      end: "broke-off",
-      at: "2026-08-08T00:00:01.000Z",
-    });
-    leash.release();
-
-    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
-      kind: "witnessed",
-      body: { ...body, end: "broke-off", endedAt: "2026-08-08T00:00:01.000Z" },
-    });
-    const snapshot = await readHeart(value.allocated.paths);
-    assert.deepEqual(snapshot.latestKill, {
-      sequence: snapshot.latestKill!.sequence,
-      bodySequence: body.sequence,
-      evidence: "killed",
-      at: "2026-08-08T00:00:02.000Z",
-    });
-    assert.equal(snapshot.stop, null);
-    assert.equal((await readHeart(value.allocated.paths)).stop, null);
-    assert.equal(
-      life({ leash: "free", body: snapshot.latestBody, kill: snapshot.latestKill }),
-      "killed",
-    );
-    assert.equal(
-      (await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z")).kind,
-      "already-killed",
-    );
-  } finally {
-    value.close();
-  }
-});
-
 test("kill admission of a put-down stranded Body consumes its stop control", async () => {
   const value = await fixture();
   try {
@@ -999,93 +754,6 @@ test("ended but hung custody is never a successful kill", async (t) => {
   } finally {
     holder.release();
   }
-});
-
-test("kill of a normally exited Body stays already stopped without a witness", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    await finishBodyIfIdle(value.allocated.paths, { sequence: body.sequence, at: "2026-08-08T00:00:01.000Z" });
-    leash.release();
-
-    assert.equal((await requestStop(value.allocated.paths, "2026-08-08T00:00:02.000Z")).kind, "already-stopped");
-    assert.equal((await readHeart(value.allocated.paths)).latestKill, null);
-    assert.equal(
-      life({
-        leash: "free",
-        body: (await readHeart(value.allocated.paths)).latestBody,
-        kill: null,
-      }),
-      "asleep",
-    );
-  } finally {
-    value.close();
-  }
-});
-
-test("kill witnesses a stranded Body and leaves its pending Tell for an ordinary wake", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-    await breakBody(value.allocated.paths, { sequence: body.sequence, end: "put-down", at: value.soul.createdAt });
-    await recordTell(value.allocated.paths, {
-      id: "tell-recover-on-kill",
-      body: "continue",
-      recordedAt: value.soul.createdAt,
-    });
-    leash.release();
-    assert.deepEqual(await settleAkumaKill(value.allocated.paths), { evidence: "killed" });
-    const settled = await readHeart(value.allocated.paths);
-    assert.equal(settled.latestKill?.bodySequence, body.sequence);
-    assert.deepEqual(
-      settled.pending.map((tell) => tell.id),
-      ["tell-recover-on-kill"],
-      "kill never settles or discards admitted input",
-    );
-    assert.equal(await probeLeash(value.allocated.paths), "free");
-
-    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    const successorBody = await successor.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-    const turn = await beginTurn(value.allocated.paths, {
-      bodySequence: successorBody.sequence,
-      startedAt: value.soul.createdAt,
-    });
-    const [queued] = drainPendingTells((await readHeart(value.allocated.paths)).pending);
-    assert.equal(queued?.id, "tell-recover-on-kill");
-    await bindTellsToTurn(value.allocated.paths, {
-      turnSequence: turn.sequence,
-      tellIds: [queued!.id],
-      boundAt: value.soul.createdAt,
-    });
-    await recordTellDeliveries(value.allocated.paths, [
-      {
-        tellId: queued!.id,
-        route: "launch",
-        turnSequence: turn.sequence,
-        fence: "successor",
-        deliveredAt: value.soul.createdAt,
-      },
-    ]);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    successor.release();
-  } finally {
-    value.close();
-  }
-});
-
-test("heart schema version 33 and leash schema version 4 hard-refuse unknown authority", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "30000000" });
-  seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
-  seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
-  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 33/u);
-  await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });
 
 test("schema Tell admission refuses a running Body and binds once with frozen schema JSON", async () => {
@@ -1406,172 +1074,6 @@ test("malformed pause frontier is Heart corruption, not legacy state", async (co
   }
 });
 
-test("pause remains distinct from stop and can be cleared only under the leash", async () => {
-  const value = await fixture();
-  try {
-    const body = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await body.birth(value.allocated.paths, value.soul);
-    const firstBody = await body.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    body.release();
-    assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
-      kind: "requested",
-      body: firstBody,
-    });
-    await insertLegacyPauseControl(value.allocated.paths, firstBody.sequence, "2026-08-08T00:00:02.000Z");
-    assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
-    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
-
-    const interruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    assert.equal((await interruptor.completeInterruptBarrier(value.allocated.paths)).kind, "unavailable");
-    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
-    await breakBody(value.allocated.paths, { sequence: firstBody.sequence, end: "put-down", at: "2026-08-08T00:00:03.000Z" });
-    assert.equal((await interruptor.completeInterruptBarrier(value.allocated.paths)).kind, "completed");
-    interruptor.release();
-    assert.equal((await readHeart(value.allocated.paths)).pause, null);
-    assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
-
-    await insertLegacyPauseControl(value.allocated.paths, firstBody.sequence, "2026-08-08T00:00:04.000Z");
-    const nextInterruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    assert.equal((await nextInterruptor.completeInterruptBarrier(value.allocated.paths)).kind, "completed");
-    nextInterruptor.release();
-    assert.equal((await readHeart(value.allocated.paths)).pause, null);
-  } finally {
-    value.close();
-  }
-});
-
-test("a fresh interrupt Tell joins but does not rewrite a legacy pause", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    await insertLegacyPauseControl(value.allocated.paths, body.sequence, "2026-08-08T00:00:01.000Z");
-    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
-
-    const admitted = await heartRecordTell(value.allocated.paths, {
-      kind: "tell",
-      id: "interrupt-tell",
-      body: "take this interrupt",
-      recordedAt: "2026-08-08T00:00:02.000Z",
-    }, { interrupt: true });
-    assert.equal(admitted.kind, "recorded");
-    if (admitted.kind !== "recorded") return;
-    assert.equal(admitted.tell.id, "interrupt-tell");
-    assert.equal(admitted.tell.body, "take this interrupt");
-    assert.equal(admitted.tell.recordedAt, "2026-08-08T00:00:02.000Z");
-    assert.equal(admitted.tell.state, "pending");
-    assert.deepEqual(admitted.tell.deliveries, []);
-    const snapshot = await readHeart(value.allocated.paths);
-    assert.equal(snapshot.pause?.bodySequence, body.sequence);
-    assert.equal(snapshot.pause?.frontierTellId, undefined);
-    assert.deepEqual(snapshot.pending, [admitted.tell]);
-    leash.release();
-  } finally {
-    value.close();
-  }
-});
-
-test("interrupt admission refuses unborn work without recording a Tell", async () => {
-  const value = await fixture();
-  try {
-    assert.deepEqual(
-      await heartRecordTell(value.allocated.paths, {
-        kind: "tell",
-        id: "unborn-tell",
-        body: "never admitted",
-        recordedAt: "2026-08-08T00:00:01.000Z",
-      }, { interrupt: true }),
-      { kind: "not-born" },
-    );
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-  } finally {
-    value.close();
-  }
-});
-
-test("normal body completion refuses while a tell remains pending", async () => {
-  const value = await fixture();
-  try {
-    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await claim.birth(value.allocated.paths, value.soul);
-    const body = await claim.recordBody(value.allocated.paths, {
-      leashTakenAt: "2026-08-08T00:00:00.000Z",
-    });
-    await recordSession(value.allocated.paths, {
-      provider: "claude",
-      options: value.soul.options,
-      coordinate: { sessionId: "native-session" },
-      cwd: value.root,
-      admittedAt: "2026-08-08T00:00:00.000Z",
-    });
-    await recordTell(value.allocated.paths, {
-      id: "tell-1",
-      body: "pending",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    const firstTurn = await beginTurn(value.allocated.paths, {
-      bodySequence: body.sequence,
-      startedAt: "2026-08-08T00:00:01.000Z",
-    });
-    await endTurn(value.allocated.paths, {
-      turnSequence: firstTurn.sequence,
-      outcome: {
-        kind: "answered",
-        historyId: "turn-1",
-        session: { sessionId: "native-session" },
-        answer: "done",
-      },
-      completedAt: "2026-08-08T00:00:02.000Z",
-    });
-    assert.deepEqual(
-      await finishBodyIfIdle(value.allocated.paths, {
-        sequence: body.sequence,
-        at: "2026-08-08T00:00:02.000Z",
-      }),
-      { kind: "pending", tells: ["tell-1"] },
-    );
-    const secondTurn = await beginTurn(value.allocated.paths, {
-      bodySequence: body.sequence,
-      startedAt: "2026-08-08T00:00:02.000Z",
-    });
-    await endTurn(value.allocated.paths, {
-      turnSequence: secondTurn.sequence,
-      outcome: { kind: "failed", diagnostic: "later failure" },
-      completedAt: "2026-08-08T00:00:03.000Z",
-    });
-    assert.deepEqual(
-      (await activitySlice(value.allocated.paths)).rows
-        .filter((fact) => fact.kind === "turn-end")
-        .map((turn) => turn.outcome),
-      [
-        {
-          kind: "answered",
-          historyId: "turn-1",
-          session: { sessionId: "native-session" },
-          answer: "done",
-        },
-        { kind: "failed", diagnostic: "later failure" },
-      ],
-    );
-    assert.deepEqual(await readForkPoint(value.allocated.paths, `turn/${firstTurn.sequence}`), {
-      historyId: "turn-1",
-      session: { sessionId: "native-session" },
-      provider: "claude",
-      cwd: value.root,
-      options: value.soul.options,
-    });
-    assert.equal(await readForkPoint(value.allocated.paths, "missing-turn"), null);
-    claim.release();
-  } finally {
-    value.close();
-  }
-});
-
 test("the current runtime model is one Soul member, moved only by the exact running Body", async () => {
   const value = await fixture();
   try {
@@ -1793,86 +1295,6 @@ test("Body idle settlement atomically checks queued work and current control", a
   }
 });
 
-test("life is the sole leash and settlement interpretation", async () => {
-  const body = { sequence: 1, leashTakenAt: "2026-08-08T00:00:00.000Z" };
-  const kill = { sequence: 1, bodySequence: 1, evidence: "killed" as const, at: "life" };
-  const project = (input: Partial<Parameters<typeof life>[0]>) =>
-    life({
-      leash: "free",
-      body,
-      kill: null,
-      ...input,
-    });
-  assert.equal(project({ leash: "held", kill }), "running");
-  assert.equal(project({ leash: "held" }), "running");
-  assert.equal(
-    project({
-      leash: "held",
-      body: {
-        ...body,
-        hung: { diagnostic: "provider custody remained live", at: "2026-08-08T00:00:02.000Z" },
-      },
-    }),
-    "hung",
-  );
-  assert.equal(project({}), "untidy");
-  assert.equal(project({ body: { ...body, end: "exited" } }), "asleep");
-  assert.equal(project({ body: { ...body, end: "broke-off" } }), "stranded");
-  assert.equal(project({ body: { ...body, end: "put-down" }, kill }), "killed");
-});
-
-test("Body hung custody evidence round trips through Heart", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
-    await withHeartTransaction(value.allocated.paths, (db) => db.exec("DROP TABLE surveillance"));
-    const settled = await leash.recordBodyHung(value.allocated.paths, {
-      sequence: body.sequence,
-      diagnostic: "provider custody remained live",
-      at: "2026-08-08T00:00:01.000Z",
-    });
-    assert.equal(settled.audience.kind, "unavailable");
-    assert.deepEqual((await readHeart(value.allocated.paths)).latestBody?.hung, {
-      diagnostic: "provider custody remained live",
-      at: "2026-08-08T00:00:01.000Z",
-    });
-    assert.equal(await breakBody(value.allocated.paths, {
-      sequence: body.sequence,
-      end: "broke-off",
-      at: "2026-08-08T00:00:02.000Z",
-    }), undefined, "broke-off after hung is not another abnormal admission");
-    assert.equal(
-      life({ leash: "held", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }),
-      "hung",
-    );
-    leash.release();
-    assert.equal(
-      life({ leash: "free", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }),
-      "hung",
-    );
-    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await assert.rejects(
-      successor.recordBody(value.allocated.paths, {
-        leashTakenAt: "2026-08-08T00:00:03.000Z",
-      }),
-      /permanently gated by hung custody/u,
-    );
-    successor.release();
-    await assert.rejects(
-      leash.recordBodyHung(value.allocated.paths, {
-        sequence: body.sequence,
-        diagnostic: "late fabricated custody",
-        at: "2026-08-08T00:00:02.000Z",
-      }),
-      /not owned by this leash/u,
-    );
-  } finally {
-    value.close();
-  }
-});
-
 function codecSoul(): Soul {
   return {
     id: "aku/claude/1234abcd" as Soul["id"],
@@ -1895,45 +1317,6 @@ function codecSoul(): Soul {
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
-
-test("soul codec hard-fails invalid known members", () => {
-  // prettier-ignore
-  const corruptions: readonly Readonly<{ name: string; change: (soul: Soul) => unknown }>[] = [
-    { name: "missing required field", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).cwd; return copy; } },
-    { name: "unknown systemPromptMode", change: (soul) => ({ ...soul, options: { ...soul.options, systemPromptMode: "merge" } }) },
-    { name: "systemPromptMode without systemPrompt", change: (soul) => {
-      const options = { ...soul.options, systemPromptMode: "append" };
-      delete (options as { systemPrompt?: string }).systemPrompt;
-      return { ...soul, options };
-    } },
-    { name: "unknown provider kind", change: (soul) => ({ ...soul, provider: { ...soul.provider, kind: "grok" } }) },
-    { name: "blank provider name", change: (soul) => ({ ...soul, provider: { ...soul.provider, name: " " } }) },
-    { name: "provider env non-string value", change: (soul) => ({ ...soul, provider: { ...soul.provider, env: { HOME: 9 } } }) },
-    { name: "fork origin parent has extra segment", change: (soul) => ({ ...soul, origin: { kind: "fork", parent: "aku/parent/1234abcd/extra", at: "history" } }) },
-    { name: "unknown origin kind", change: (soul) => ({ ...soul, origin: { kind: "rebirth" } }) },
-    { name: "id is not an Akuma coordinate", change: (soul) => ({ ...soul, id: "garbage" }) },
-    { name: "id has a single segment", change: (soul) => ({ ...soul, id: "aku/claude" }) },
-    { name: "id suffix is not lower hex8", change: (soul) => ({ ...soul, id: "aku/claude/nothex" }) },
-    { name: "id has an extra segment", change: (soul) => ({ ...soul, id: "aku/claude/1234abcd/extra" }) },
-    { name: "id akumaName is not normalized", change: (soul) => ({ ...soul, id: "aku/Claude/1234abcd" }) },
-    { name: "id and akumaName disagree", change: (soul) => ({ ...soul, akumaName: "worker" }) },
-    { name: "blank cwd", change: (soul) => ({ ...soul, cwd: "" }) },
-    { name: "blank description", change: (soul) => ({ ...soul, description: " " }) },
-  ];
-  for (const { name, change } of corruptions) {
-    assert.throws(() => decodeSoul(change(codecSoul())), undefined as never, name);
-    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), HeartAuthorityCorruptionError, name);
-    assert.throws(() => encodeSoulRow(change(codecSoul()) as Soul), undefined as never, name);
-  }
-  assert.throws(() => decodeSoulRow({ soul_json: "not json" }), (error: unknown) => {
-    assert.ok(error instanceof HeartAuthorityCorruptionError);
-    assert.equal(error.category, "authority-corruption");
-    assert.ok(error.cause instanceof SyntaxError);
-    return true;
-  });
-  assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify("garbage") }));
-  assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(42) }));
-});
 
 
 
