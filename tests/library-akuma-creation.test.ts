@@ -180,10 +180,7 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
     assert.deepEqual(source.provider.config, configured.config);
     assert.match(soul?.options.systemPrompt ?? "", /Work\./u);
     const history = await handle.history();
-    assert.equal(
-      history.rows.some((row) => row.kind === "tell"),
-      false,
-    );
+    assert.deepEqual(history.rows, []);
     // Birth is settled, but PID-receipt cleanup still awaits physical process
     // departure before removing this publication's execution directory.
     operationFailed = false;
@@ -267,12 +264,16 @@ test("prompt-free spawn settles before immediate Ask and retains native config t
     assert.equal(asked.kind, "answered");
     if (asked.kind !== "answered") assert.fail(JSON.stringify(asked));
     assert.deepEqual(asked.answer, { ok: true });
-    const history = await PublicAkuma.select(world, result.akumaId).history();
-    const tells = history.rows.filter((row) => row.kind === "tell");
-    assert.equal(tells.length, 1);
-    assert.equal(tells[0]?.kind, "tell");
-    if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "schema-call");
-    assert.equal(history.rows.filter((row) => row.kind === "turn").length, 1);
+    let answeredTurn: `turn/${number}` | undefined;
+    for await (const window of PublicAkuma.select(world, result.akumaId).stream()) {
+      assert.deepEqual(window.rows.filter(row => row.kind === "tell").map(row => row.text), ["schema-call"]);
+      assert.equal(window.rows.filter(row => row.kind === "turn").length, 1);
+      assert.ok(!window.rows.some(row => row.kind === "call"));
+      const outcome = window.rows.find(row => row.kind === "outcome");
+      assert.ok(outcome?.outcome.kind === "answered");
+      answeredTurn = `turn/${outcome.turnSequence}`;
+      break;
+    }
 
     // Reopening after Settings change must use the retained native recipe.
     writeFileSync(join(configured.home, "settings.json"), JSON.stringify({ providers: {} }));
@@ -281,18 +282,11 @@ test("prompt-free spawn settles before immediate Ask and retains native config t
     const continued = await reopened.tell("continue", { wait: true, timeoutMs: 10_000 });
     assert.deepEqual(settledInput(continued.input), { kind: "answered", answer: '{"ok":true}' });
     assert.deepEqual((await readSoul(pathsForAkumaId(world, result.akumaId)))?.provider.config, configured.config);
-    const answered = (await reopened.history()).rows.find(
-      (row) => row.kind === "outcome" && row.outcome.kind === "answered",
-    );
-    assert.ok(answered && answered.kind === "outcome");
-    const fork = await Akumas.of(world).fork({ akuma: result.akumaId, at: `turn/${answered.turnSequence}` });
+    assert.ok(answeredTurn);
+    const fork = await api.fork({ akuma: result.akumaId, at: answeredTurn });
     assert.equal(fork.kind, "forked");
     if (fork.kind !== "forked") assert.fail(JSON.stringify(fork));
     assert.deepEqual((await readSoul(pathsForAkumaId(world, fork.childAkumaId)))?.provider.config, configured.config);
-    assert.equal(
-      history.rows.some((row) => row.kind === "call"),
-      false,
-    );
     operationFailed = false;
   } finally {
     try {
@@ -361,13 +355,11 @@ test("local Akumas.spawn starts its zero observation budget after birth", async 
     assert.equal((await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!))?.body, "zero-budget-after-birth");
     releaseAnswer();
     assert.equal((await PublicAkuma.select(world, result.akumaId).idle({ timeoutMs: 15_000 })).reason, "completed");
-    const history = await PublicAkuma.select(world, result.akumaId).history();
-    const tells = history.rows.filter((row) => row.kind === "tell");
-    assert.equal(tells.length, 1);
-    assert.equal(tells[0]?.kind === "tell" ? tells[0].text : undefined, "zero-budget-after-birth");
-    const outcome = history.rows.find((row) => row.kind === "outcome")?.outcome;
-    assert.equal(outcome?.kind, "answered");
-    if (outcome?.kind === "answered") assert.equal(outcome.answer, '{"ok":true}');
+    for await (const window of PublicAkuma.select(world, result.akumaId).stream()) {
+      assert.deepEqual(window.rows.filter(row => row.kind === "tell").map(row => row.text), ["zero-budget-after-birth"]);
+      assert.deepEqual(window.rows.find(row => row.kind === "outcome")?.outcome, { kind: "answered", answer: '{"ok":true}' });
+      break;
+    }
     operationFailed = false;
   } finally {
     try {
@@ -691,7 +683,7 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
     const child = PublicAkuma.select(world, result.akumaId);
     assert.equal((await child.status()).life, "asleep");
     const history = await child.history();
-    assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
+    assert.deepEqual(history.rows, []);
     operationFailed = false;
   } finally {
     try {

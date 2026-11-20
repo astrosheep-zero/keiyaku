@@ -40,10 +40,9 @@ test("model status retains native current work, turn coordinates and reported ch
   const value = akumaObservationSchema.parse({
     kind: "akuma", id: "aku/worker/12345678", life: "running", cwd: "/work", provider: "fixture",
     work: {
-      kind: "open", turn: { sequence: 1, bodySequence: 1 },
-      activeTools: [{ id: 2, turnSequence: 1, toolId: "read" }], latestActivity: 3,
-      summary: { id: 2, text: "read source.ts" }, pending: [{ id: 3, tellId: "next" }],
-      outcome: { historyId: "turn/1", activityId: 4, verdict: "answered" },
+      kind: "open", turn: { sequence: 1 },
+      summary: { id: 2, text: "read source.ts" }, pending: [{ id: 3 }],
+      outcome: { historyId: "turn/1", verdict: "answered" },
     },
     changes: [{ path: "source.ts", diffstat: { added: 2, removed: 1 } }],
     moreChanges: true, outsideChanges: 1,

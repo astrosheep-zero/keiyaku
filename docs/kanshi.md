@@ -84,9 +84,9 @@ than a selected timeline window; optional recent detail never controls its
 approval or pending-input evidence. No terminal-chat timeline or answer preview
 belongs in the World report.
 Unborn allocations have no frontier, and failed frontier observation remains
-explicit without changing roster membership. Native history and live observation
-keep exact retained detail. The bounded report retains owner order and whether
-more rows exist without claiming totals or supplying a complete selector set.
+explicit without changing roster membership. The bounded report retains owner
+order and whether more rows exist without claiming totals or supplying a
+complete selector set.
 
 Active-work status is a roster-free observation over each owner's complete
 active membership, before any display bound. It counts Contracts whose delivered

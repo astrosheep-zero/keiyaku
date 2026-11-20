@@ -11,7 +11,7 @@ import {
 } from "../../library/keiyaku-verbs.js";
 import { KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure, type FailureProjection } from "../../library/outcome.js";
-import { historyRawAnswer, historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
+import { historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
@@ -25,7 +25,7 @@ import { resetFailureLines } from "./receipt.js";
 import { renderRefusal, renderStructuredRefusal } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
-import { formatNextCall, previewLines, safeText, type TextRenderContext } from "./terminal.js";
+import { exactIndentedLines, formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
 export function aliasSelector(selector: string | undefined): string | undefined {
@@ -112,14 +112,19 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">): strin
   const selectedAlias = input.selectors.length === 1 ? aliasSelector(input.selectors[0]) : undefined;
   const rows = result.members.map((member) => {
     if (member.kind === "contract") return contractWaitMemberText(member.observation);
-    if (member.observation.kind === "unknown") return `? ${member.observation.id} (unobserved)`;
-    const row = waitText(
-      { kind: "akuma", reason: result.reason === "deadline" ? "deadline" : "completed", results: [member.observation] },
-      selectedAlias === undefined ? {} : { alias: selectedAlias },
-    );
-    if (result.reason !== "reported" || result.report.akumaId !== member.observation.id) return row;
-    const { reportId, text, clipped } = result.report;
-    return [row, `  ${reportId}`, ...previewLines(text, "    ", 3, clipped === true)].join("\n");
+    const row =
+      member.observation.kind === "unknown"
+        ? `? ${member.observation.id} (unobserved)`
+        : waitText(
+            {
+              kind: "akuma",
+              reason: result.reason === "deadline" ? "deadline" : "completed",
+              results: [member.observation],
+            },
+            selectedAlias === undefined ? {} : { alias: selectedAlias },
+          );
+    if (member.report === undefined) return row;
+    return [row, `  ${member.report.report}`, ...exactIndentedLines(member.report.text, "    ")].join("\n");
   });
   return [result.reason, ...rows].join("\n");
 }
@@ -140,18 +145,13 @@ function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history"
     result.kind === "contract-missing"
   )
     throw new Error("Akuma history returned a non-Akuma result");
-  const answer = "item" in query && query.item === "answer";
-  const id = "item" in query && !answer ? query.item : undefined;
+  const id = "item" in query ? query.item : undefined;
   const selectedAlias = aliasSelector(query.selector);
-  return (
-    historyRawAnswer(result, id) ??
-    historyText(result, {
-      ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
-      ...(id === undefined ? {} : { id }),
-      ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
-      answer,
-    })
-  );
+  return historyText(result, {
+    ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
+    ...(id === undefined ? {} : { id }),
+    ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
+  });
 }
 
 type DebtVerbName = Extract<VerbName, `debt.${string}`>;

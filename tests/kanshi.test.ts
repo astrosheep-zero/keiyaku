@@ -238,8 +238,8 @@ test("World selects active Akumas before bounding and exposes native work under 
       const exact = await Akumas.of(world).status({ akuma: row.id });
       assert.deepEqual(exact.work, row.work);
       const retained = await Akumas.of(world).history({ akuma: row.id, id: String(row.work.summary!.id) });
-      assert.ok(retained.kind === "akuma" && retained.events[0]?.kind === "tool");
-      assert.equal(retained.events[0].toolId, command);
+      assert.ok(retained.kind === "akuma-activity" && retained.row.kind === "tool");
+      assert.equal(retained.row.toolId, command);
     }
     assertWireRoundTrip(akumaCatalogueSchema, await Akumas.of(world).list());
   } finally { for (const worker of workers) worker.holder.release(); }

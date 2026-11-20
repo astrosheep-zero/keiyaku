@@ -38,11 +38,10 @@ import {
   stopFact,
 } from "./rows.js";
 import { insertTellFact } from "./tells.js";
-import { pruneActivityFacts } from "./timeline.js";
+import { ACTIVITY_LIMIT, pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
 import { insertSurveillanceFact } from "./surveillance.js";
 
-const ACTIVITY_LIMIT = 5_000;
 const SQLITE_CANTOPEN = 14;
 const TRANSACTION_ACQUISITION_MS = 5_000;
 

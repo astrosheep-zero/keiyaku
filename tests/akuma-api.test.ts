@@ -352,7 +352,7 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
       assert.deepEqual(observed, [[`turn/${turn.sequence}`]]);
       assert.equal((await readTurn(paths, next.sequence))?.end, undefined);
       const page = await value.akuma.history();
-      assert.equal(page.rows.find((row) => row.kind === "outcome")?.outcome.kind, "canceled");
+      assert.ok(page.rows.some(row => row.text === `○ turn/${turn.sequence} · canceled`));
       const stream = value.akuma.stream()[Symbol.asyncIterator]();
       try {
         const first = await stream.next();
@@ -433,12 +433,8 @@ test("schema ask parses JSON and typed failures stay distinct", async () => {
     assert.equal(value.kind, "answered");
     if (value.kind !== "answered") throw new Error("expected answer");
     assert.deepEqual(value.answer, { ok: true });
-    const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
-    assert.equal(fact?.kind, "tell");
-    if (fact?.kind === "tell") {
-      const recorded = await readTell(decoded.allocated.paths, fact.tellId);
-      assert.equal(recorded?.schemaJson, canonicalDocument(schema).jsonText);
-    }
+    const recorded = await readTell(decoded.allocated.paths, value.tellId);
+    assert.equal(recorded?.schemaJson, canonicalDocument(schema).jsonText);
 
     for (const [draw, text, type, expected] of [
       ["a1000022", "42", "number", 42], ["a1000023", "null", "null", null],
@@ -624,7 +620,7 @@ test("idle after kill names the killed life", async () => {
 test("idle returns untidy execution while preserving a pending tell", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-api-idle-pending-");
   const { allocated, akuma } = await bornWorld(root, "a1000010");
-  await recordTell(allocated.paths, {
+  const queued = await recordTell(allocated.paths, {
     kind: "tell",
     id: "queued",
     body: "later",
@@ -635,7 +631,8 @@ test("idle returns untidy execution while preserving a pending tell", async (con
   assert.equal(timed.status.life, "untidy");
   assert.equal(timed.status.id, allocated.id);
   assert.equal(timed.status.pending, true, "the compact observation names pending input without a full status");
-  assert.equal((await akuma.status()).work.pending?.[0]?.tellId, "queued");
+  assert.ok(queued.kind === "recorded");
+  assert.equal((await akuma.status()).work.pending?.[0]?.id, queued.tell.sequence);
 });
 
 const LIVE_WAIT_AT = "2026-10-01T00:00:00.000Z";
@@ -698,7 +695,7 @@ test("each live read decodes and projects its own retained frontier", async (con
   assert.ok(rounds.every((round) => JSON.stringify(round) === JSON.stringify(rounds[0])));
   assert.ok(rounds.every((round) => round.status.life === "running"));
   assert.equal(rounds[0]!.rows.length, 14);
-  assert.ok(rounds[0]!.rows.some((row) => row.kind === "thought" && row.text === "reuse-wait-0"));
+  assert.ok(rounds[0]!.rows.some((row) => row.text.includes("reuse-wait-0")));
   reader.clear();
   const fresh = await reader.read();
   assert.equal(decodes, 60, "a cleared reader decodes anew");
@@ -737,8 +734,9 @@ test("live reads follow Tell binding, delivery, and receipt without timeline gro
   ]);
   const delivered = await reader.read();
   assert.notDeepEqual(delivered, bound);
-  assert.equal(delivered.rows.find((row) => row.kind === "tell")?.deliveries.length, 1);
-  assert.equal(delivered.rows.find((row) => row.kind === "tell")?.state, "pending");
+  const delivery = await readTell(member.paths, "steer");
+  assert.equal(delivery?.deliveries.length, 1);
+  assert.ok(delivered.status.recent?.some(row => row.id === delivery?.sequence && row.text.startsWith("⧗")));
   await recordTellReceipt(member.paths, {
     evidence: "fence",
     turnSequence: member.turn.sequence,
@@ -748,7 +746,7 @@ test("live reads follow Tell binding, delivery, and receipt without timeline gro
   });
   const settled = await reader.read();
   assert.notDeepEqual(settled, delivered);
-  assert.equal(settled.rows.find((row) => row.kind === "tell")?.state, "told");
+  assert.ok(settled.rows.some(row => row.id === delivery?.sequence && row.text.startsWith("▸")));
   assert.deepEqual(await reader.read(), settled);
   const after = new DatabaseSync(member.paths.heart);
   assert.equal(after.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value, highest);
@@ -788,14 +786,9 @@ test("a native wait completes on a Turn closure and keeps the latest Turn's tail
   const final = await reader.read();
   assert.equal(final.status.life, "asleep");
   assert.equal(final.status.work.kind, "idle");
-  assert.equal(final.rows.filter((row) => row.kind === "thought").length, 12);
-  assert.equal(final.rows.at(-1)?.kind, "outcome");
-  assert.deepEqual(
-    final.status.recent?.map((row) => row.sequence),
-    final.rows.slice(-3).map((row) => row.sequence),
-    "status carries exactly the latest Turn's three newest retained rows",
-  );
-  assert.equal(final.status.recent?.at(-1)?.kind, "outcome");
+  assert.equal(final.rows.filter((row) => row.text.includes("reuse-wait-")).length, 12);
+  assert.deepEqual(final.status.recent, final.rows.slice(-3));
+  assert.match(final.status.recent?.at(-1)?.text ?? "", /^! turn\/\d+\n +done/u);
   assert.equal(final.status.work.outcome?.verdict, "failed");
 });
 
@@ -947,9 +940,9 @@ test("plural wait keeps an unreadable member local and reads it anew when it rec
     }
     return prepare.call(this, sql);
   });
-  const observer = createAkumaWaitObserver(root, members.map((member) => member.id));
+  const observer = createAkumaWaitObserver(root, members.map((member) => member.id), { includeRecent: true });
   try {
-    await observer.observe(AbortSignal.timeout(1_000), true);
+    await observer.observe(AbortSignal.timeout(1_000));
     const [readable, unreadable] = members.map((member) => observer.items.get(member.id));
     assert.equal(readable?.kind, "observed", "the readable peer still reports its own evidence");
     assert.ok(readable?.kind === "observed" && readable.events?.length === 3);
@@ -963,7 +956,7 @@ test("plural wait keeps an unreadable member local and reads it anew when it rec
     injected.mock.restore();
   }
   try {
-    await observer.observe(AbortSignal.timeout(1_000), true);
+    await observer.observe(AbortSignal.timeout(1_000));
     for (const member of members) {
       const item = observer.items.get(member.id);
       assert.equal(item?.kind, "observed");

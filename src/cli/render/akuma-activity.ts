@@ -1,8 +1,7 @@
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillAdmission } from "../../akuma/akuma-errors.js";
-import type { ActivityRow, OutcomeRow, PermissionRow } from "../../akuma/projection.js";
-import { parseExactHistorySelector } from "../../akuma/identity.js";
-import { permissionText, renderDiffstat, toolRepr, type CurrentWork } from "../../akuma/status-projection.js";
+import type { CurrentWork } from "../../akuma/status-projection.js";
+import { approvalLines, exactActivityText, outcomeText, renderDiffstat } from "../../akuma/timeline-text.js";
 import type {
   AkumaAskResult,
   AkumaTellResult,
@@ -79,121 +78,6 @@ export function actionReceipt(
   return [`${input.mark} ${input.verb} ${identity(input.id, input.alias)}`, ...subordinateLines(input.evidence ?? [])];
 }
 
-function outcomeText(outcome: OutcomeRow["outcome"]): string {
-  return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
-}
-
-function rowText(row: Exclude<ActivityRow, { kind: "tool" }>): string {
-  if (
-    row.kind === "report" ||
-    row.kind === "said" ||
-    row.kind === "thought" ||
-    row.kind === "note" ||
-    row.kind === "call" ||
-    row.kind === "tell"
-  ) {
-    return row.text;
-  }
-  if (row.kind === "permission") return permissionText(row);
-  if (row.kind === "outcome") return outcomeText(row.outcome);
-  return "";
-}
-
-function toolLines(row: Extract<ActivityRow, { kind: "tool" }>): readonly string[] {
-  const { call, result } = row;
-  const tool = toolRepr(row);
-  const mark = row.phase === "started" ? "?" : result?.status === "ok" ? " " : "!";
-  const label = tool.label === row.name ? tool.label : `${tool.label} (${row.name})`;
-  const lines = [`${mark} ${safeText(label)} ${row.sequence}`];
-  let path: string | undefined;
-  let text = tool.text;
-  let clipped = row.truncated;
-  switch (call.kind) {
-    case "read":
-      path = call.path;
-      text = "";
-      break;
-    case "fileChange": {
-      const [first, second] = call.changes;
-      if (first !== undefined) {
-        path = first.path;
-        text = second === undefined ? "" : `${call.changes.length} files`;
-      }
-      break;
-    }
-    case "search":
-      if (call.path !== undefined) {
-        path = call.path;
-        text = [call.query, call.glob].filter(Boolean).join(FACT_SEPARATOR);
-      }
-      break;
-    case "other":
-      if (call.input !== undefined) {
-        text = call.input.json;
-        clipped ||= call.input.truncated;
-      }
-      break;
-  }
-  const clauses = tool.suffix.trimStart().replace(/^(?:· |— )/u, "");
-  const detail = [clauses, result?.exitCode === 0 ? "exit 0" : ""].filter(Boolean).join(FACT_SEPARATOR);
-  if (path !== undefined) lines.push(`  path  ${safeText(path)}`);
-  if (text !== "" || clipped) lines.push(...previewLines(text, "  ", 1, clipped));
-  if (detail !== "") lines.push(`  detail  ${safeText(detail)}`);
-  if (tool.diagnostic !== "") lines.push("  cause", ...previewLines(tool.diagnostic, "    "));
-  return lines;
-}
-
-function approvalLines(requests: PermissionRow["requests"], clipped?: true): readonly string[] {
-  const lines = requests.map(({ action, tool, resources }) =>
-    [action, ...(tool === undefined ? [] : [tool]), ...resources].map(safeText).join(FACT_SEPARATOR),
-  );
-  if (lines.length === 0) lines.push("Approval wait cleared");
-  else lines[0] = `Awaiting approval: ${lines[0]}`;
-  return clipped ? [...lines, "…"] : lines;
-}
-
-function surveillanceText(row: Extract<ActivityRow, { kind: "surveillance" }>): string {
-  return `${row.off ? "unsurveilled" : "surveilled"} ${opaqueCoordinate(row.owner)}`;
-}
-
-function renderRow(row: Exclude<ActivityRow, { kind: "turn" }>): readonly string[] {
-  if (row.kind === "tool") return toolLines(row);
-  if (row.kind === "surveillance") return [`  ${row.sequence} ${surveillanceText(row)}`];
-  if (row.kind === "permission")
-    return [`  approval ${row.sequence}`, ...subordinateLines(approvalLines(row.requests, row.truncated))];
-  const lead = (() => {
-    switch (row.kind) {
-      case "report":
-        return `  report/${row.sequence}`;
-      case "outcome":
-        return `${row.outcome.kind === "answered" ? "✓" : row.outcome.kind === "canceled" ? "○" : "!"} turn/${row.turnSequence}`;
-      case "said":
-        return `▎ ${row.sequence}`;
-      case "tell":
-        return `${row.state === "pending" ? "⧗" : "▸"} ${safeText(row.tellId)} · ${row.sequence}`;
-      case "call":
-        return `▸ ${row.sequence}`;
-      case "thought":
-        return `  think ${row.sequence}`;
-      case "note":
-        return `  note ${row.sequence}`;
-    }
-  })();
-  if (row.kind === "outcome" && row.outcome.kind === "canceled") return [`${lead} · canceled`];
-  const text = rowText(row);
-  const clipped = "truncated" in row && row.truncated === true;
-  return [
-    lead,
-    ...(text === "" && !clipped
-      ? []
-      : previewLines(text, "  ", row.kind === "call" || row.kind === "tell" ? 1 : 3, clipped)),
-  ];
-}
-
-function activityLines(rows: readonly ActivityRow[]): readonly string[] {
-  return rows.flatMap((row) => (row.kind === "turn" ? [] : renderRow(row)));
-}
-
 function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{ mark: string; verb: string }> {
   if (life === "running") return { mark: "●", verb: "running" };
   if (life === "asleep") return pending ? { mark: "⧗", verb: "pending tell" } : { mark: "✓", verb: "completed" };
@@ -224,9 +108,7 @@ export function currentWorkLines(work: CurrentWork): readonly string[] {
         ? []
         : [`${summary.id} ${safeText(summary.text)}`]),
     ...(work.pending === undefined ? [] : [`pending input ${work.pending.map((item) => item.id).join(" ")}`]),
-    ...(work.outcome === undefined
-      ? []
-      : [`${work.outcome.verdict} ${work.outcome.historyId} · activity ${work.outcome.activityId}`]),
+    ...(work.outcome === undefined ? [] : [`${work.outcome.verdict} ${work.outcome.historyId}`]),
   ];
 }
 
@@ -301,26 +183,6 @@ export function askRawAnswer(result: AkumaAskResult): string | undefined {
   return result.kind === "answered" ? JSON.stringify(result.answer) : undefined;
 }
 
-export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
-  if (historyId === undefined) return undefined;
-  const selector = parseExactHistorySelector(historyId);
-  if (selector?.kind === "activity" && result.kind === "akuma" && result.events.length === 1) {
-    const row = result.events[0]!;
-    if (row.sequence !== selector.sequence || row.kind === "turn" || row.kind === "outcome") return undefined;
-    if (row.kind === "surveillance") return surveillanceText(row);
-    if (row.kind === "tool") {
-      const tool = toolRepr(row);
-      const prefix = row.phase === "completed" && row.result?.status === "error" ? "error: " : "";
-      return `${prefix}${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
-    }
-    const kind = row.kind === "tell" && row.state === "pending" ? "pending-tell" : row.kind;
-    return `${kind}: ${rowText(row)}`;
-  }
-  if (result.kind === "akuma-report") return result.text;
-  if (result.kind !== "akuma-exact") return undefined;
-  return outcomeText(result.outcome);
-}
-
 /**
  * The final public snapshot as one wait summary. A stopped life stays explicit over any older
  * outcome; pending input stays visible beside the life it belongs to; a sleeping member without
@@ -370,7 +232,7 @@ export function waitText(result: AkumaWaitResult, presentation: AkumaPresentatio
       return [
         `${mark} ${subject} — ${summary}`,
         ...(member.lastActivityAt === undefined ? [] : [`  activity ${safeText(member.lastActivityAt)}`]),
-        ...activityLines(member.events ?? []),
+        ...(member.events ?? []).map(({ text }) => text).filter(Boolean),
         ...(member.eventsUnavailable === undefined ? [] : diagnosticLines("recent activity", member.eventsUnavailable)),
         ...(outcome === undefined ? [] : [`  ${outcome.historyId} · ${outcome.kind}`]),
         ...(payload === undefined ? [] : exactIndentedLines(payload, "  ")),
@@ -381,18 +243,19 @@ export function waitText(result: AkumaWaitResult, presentation: AkumaPresentatio
 
 export function historyText(
   result: AkumaHistoryResult,
-  presentation: AkumaPresentation & Readonly<{ id?: string; answer?: boolean; since?: number }>,
+  presentation: AkumaPresentation & Readonly<{ id?: string; since?: number }>,
 ): string {
-  if (presentation.id !== undefined) {
-    return historyRawAnswer(result, presentation.id) ?? `${presentation.id} has no matching retained history`;
-  }
-  if (presentation.answer === true) return result.kind === "akuma-answer" ? result.answer : "no answer retained";
-  if (result.kind !== "akuma") throw new Error("history result lacks page");
+  if (result.kind === "akuma-activity") return exactActivityText(result.row);
+  if (result.kind === "akuma-exact") return outcomeText(result.outcome);
+  if (result.kind === "akuma-answer") return result.answer;
+  if (result.kind === "akuma-report") return result.text;
+  if (result.kind === "akuma-no-answer") return "no answer retained";
+  if (result.kind === "akuma-unknown-history") return `${presentation.id} has no matching retained history`;
   const paging = presentation.since !== undefined ? "later events · showing first" : "earlier events · showing last";
   return [
     ...panelHead(result.akumaId, presentation.alias, undefined),
     ...(result.omitted === undefined ? [] : [`  ${OMISSION} ${result.omitted} ${paging} ${result.events.length}`]),
-    ...activityLines(result.events),
+    ...result.events.map(({ text }) => text).filter(Boolean),
   ].join("\n");
 }
 

@@ -8,7 +8,7 @@ import type { BodyLauncher } from "../src/akuma/body-launch.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import * as root from "../src/index.js";
-import { activityHistorySchema } from "../src/akuma/projection.js";
+import { activityHistorySchema, activityStreamSnapshotSchema } from "../src/akuma/projection.js";
 import { akumaStatusSchema } from "../src/akuma/akuma.js";
 import {
   akumaAskResultSchema, akumaCatalogueSchema, akumaKillResultSchema, akumaObservationSchema,
@@ -108,7 +108,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   assertWireRoundTrip(killEvidenceSchema, await fixture.akuma.kill());
   const stream = fixture.akuma.stream()[Symbol.asyncIterator]();
   const first = await stream.next();
-  assertWireRoundTrip(activityHistorySchema, first.value);
+  assertWireRoundTrip(activityStreamSnapshotSchema, first.value);
   await stream.return?.();
 });
 
@@ -131,13 +131,33 @@ test("standalone public status shares one direct current-work observation and ke
     const active = await aku.status();
     assert.deepEqual(active, native, "the standalone face serves the owner's one native observation");
     assertWireRoundTrip(akumaStatusSchema, active);
-    assert.equal("timeline" in active, false, "status carries no second timeline carrier");
-    assert.equal(active.recent?.length, 3, "optional recent detail is the latest three flat frontier rows");
-    assert.ok(active.recent?.every(row => row.kind === "note"));
-    assert.equal(active.recent?.at(-1)?.sequence, active.work.latestActivity);
+    assert.deepEqual(active.recent, (await aku.history({ limit: 3 })).rows);
     assert.ok(active.work.summary?.id === activeId && active.work.summary.clipped);
-    assert.match(active.work.summary.text, /^run \$ npm test/u);
-    assert.deepEqual(active.work.activeTools, [{ id: activeId, turnSequence: turn.sequence, toolId: "native-long-tool" }]);
+    assert.match(active.work.summary.text, /^run \$ npm test 🙂+…$/u);
+    assert.equal(Array.from(active.work.summary.text).length, 300);
+    const exact = await root.Akumas.of(world).history({ akuma: aku.id, id: String(activeId) });
+    assertWireRoundTrip(akumaHistoryResultSchema, exact);
+    assert.ok(exact.kind === "akuma-activity" && exact.row.kind === "tool");
+    assert.equal(exact.row.toolId, "native-long-tool");
+    const running = await aku.idle({ timeoutMs: 0 });
+    assert.equal(running.reason, "deadline");
+    assert.equal(running.status.kind, "observed");
+    assert.equal(running.status.life, active.life);
+
+    const resource = `/outside/${"nested/".repeat(28)}target.txt`;
+    const request = { id: "per_read", action: "external_directory", tool: "read", resources: [resource] };
+    const approval = await appendActivity(born.allocated.paths, {
+      turnSequence: turn.sequence, at: "2026-10-30T00:00:03.000Z", event: { type: "permission", requests: [request] },
+    });
+    const pending = await aku.status();
+    assert.deepEqual(pending.work.awaiting?.requests, [request]);
+    const preview = pending.recent?.at(-1);
+    assert.ok(preview?.id === approval);
+    assert.match(preview.text, /Awaiting approval:.*external_directory.*read.*…$/u);
+    assert.ok(!preview.text.includes(resource));
+    const exactApproval = await root.Akumas.of(world).history({ akuma: aku.id, id: String(approval) });
+    assert.ok(exactApproval.kind === "akuma-activity" && exactApproval.row.kind === "permission");
+    assert.deepEqual(exactApproval.row.requests, [request]);
     const answer = `answer ${"🙂".repeat(600)}`;
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:04.000Z", outcome: { kind: "answered", answer, session: { sessionId: "compact-status" } } });
     const idle = await aku.status();
@@ -145,20 +165,18 @@ test("standalone public status shares one direct current-work observation and ke
     assert.equal(idle.work.kind, "idle");
     assert.equal(idle.work.outcome?.verdict, "answered");
     assert.equal(idle.work.outcome?.historyId, `turn/${turn.sequence}`);
-    assert.equal(idle.work.latestActivity, idle.work.outcome?.activityId);
     const waited = await aku.idle({ timeoutMs: 0 });
     assertWireRoundTrip(akumaIdleResultSchema, waited);
     assert.equal(waited.status.kind, "observed");
     assert.equal(waited.status.id, born.allocated.id);
     assert.equal(waited.status.life, idle.life);
     assert.equal(waited.status.outcome?.historyId, `turn/${turn.sequence}`);
-    assert.equal(waited.status.events, undefined, "a native wait does not decode narration it will not use");
-    const history = await aku.history();
-    assert.ok(history.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
+    assert.deepEqual(waited.status.outcome, { kind: "answered", historyId: `turn/${turn.sequence}`, answer });
     const stream = aku.stream()[Symbol.asyncIterator]();
     try {
-      const window = activityHistorySchema.parse((await stream.next()).value);
+      const window = activityStreamSnapshotSchema.parse((await stream.next()).value);
       assert.ok(window.rows.some(row => row.kind === "tool" && row.toolId === "native-long-tool"));
+      assert.ok(window.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
     } finally { await stream.return?.(); }
   } finally { born.holder.release(); }
 });
@@ -181,11 +199,11 @@ test("current work selects active commands before narration and preserves pendin
   assert.deepEqual(captured.summary, { id: 4, text: 'custom {"path":"cut…', clipped: true });
   const pending = { kind: "tell", sequence: 11, at, tellId: "pending", text: "next step", state: "pending", deliveries: [] } as const;
   const work = projectCurrentWork([pending, { kind: "outcome", sequence: 9, turnSequence: 1, at, outcome: { kind: "answered", answer: "exact answer" } }]);
-  assert.deepEqual(work.pending, [{ id: 11, tellId: "pending" }]);
-  assert.deepEqual(work.outcome, { historyId: "turn/1", activityId: 9, verdict: "answered" });
+  assert.deepEqual(work.pending, [{ id: 11 }]);
+  assert.deepEqual(work.outcome, { historyId: "turn/1", verdict: "answered" });
 });
 
-test("public history wire is strict, deeply readonly, exact-optional, and phases results", () => {
+test("typed timeline wire is strict, deeply readonly, exact-optional, and phases results", () => {
   const at = "2026-10-30T00:00:00.000Z";
   const started = {
     kind: "tool", sequence: 2, turnSequence: 1, at, name: "read", toolId: "native-read",
@@ -207,31 +225,31 @@ test("public history wire is strict, deeply readonly, exact-optional, and phases
     lowestRetained: 1,
     highest: 3,
   };
-  const parsed = activityHistorySchema.parse(history);
+  const parsed = activityStreamSnapshotSchema.parse(history);
   assert.ok(Object.isFrozen(parsed));
   assert.ok(Object.isFrozen(parsed.rows));
   const row = parsed.rows[1]!;
   assert.ok(Object.isFrozen(row));
   if (row.kind !== "tool") throw new Error("expected tool row");
   assert.ok(Object.isFrozen(row.call));
-  assert.equal(activityHistorySchema.safeParse({ ...history, extra: true }).success, false);
+  assert.equal(activityStreamSnapshotSchema.safeParse({ ...history, extra: true }).success, false);
   assert.equal(
-    activityHistorySchema.safeParse({ ...history, rows: [...history.rows, { ...started, sequence: 4, result: { status: "ok" } }] }).success,
+    activityStreamSnapshotSchema.safeParse({ ...history, rows: [...history.rows, { ...started, sequence: 4, result: { status: "ok" } }] }).success,
     false,
     "a started tool never carries a result",
   );
   assert.equal(
-    activityHistorySchema.safeParse({ ...history, rows: [...history.rows, { ...completed, sequence: 4, result: undefined }] }).success,
+    activityStreamSnapshotSchema.safeParse({ ...history, rows: [...history.rows, { ...completed, sequence: 4, result: undefined }] }).success,
     false,
     "a completed tool always carries its result",
   );
   assert.equal(
-    activityHistorySchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, offset: undefined } }] }).success,
+    activityStreamSnapshotSchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, offset: undefined } }] }).success,
     false,
     "absent members stay absent rather than explicit undefined",
   );
   assert.equal(
-    activityHistorySchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, extra: true } }] }).success,
+    activityStreamSnapshotSchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, extra: true } }] }).success,
     false,
   );
 });
@@ -354,12 +372,9 @@ test("spawn and fork results describe real creation and refusal", async (context
   const original = mutable.fork;
   mutable.fork = () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "forked-session" } }));
   try {
-    const history = await akumas.history({ akuma: observed.akumaId });
-    assert.equal(history.kind, "akuma");
-    if (history.kind !== "akuma") throw new Error("missing history");
-    const outcome = history.events.find((row) => row.kind === "outcome");
-    assert.ok(outcome);
-    const forked = await akumas.fork({ akuma: observed.akumaId, at: `turn/${outcome.turnSequence}` });
+    const latest = await akumas.history({ akuma: observed.akumaId, last: true });
+    assert.ok(latest.kind === "akuma-answer");
+    const forked = await akumas.fork({ akuma: observed.akumaId, at: latest.historyId });
     assert.equal(forked.kind, "forked");
     assertWireRoundTrip(forkResultSchema, forked);
     assertWireConformance(root.Keiyaku.verbs.fork.normal, forked);

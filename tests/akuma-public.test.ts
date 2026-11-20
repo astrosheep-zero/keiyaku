@@ -23,7 +23,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { AkumaNotBornError } from "../src/akuma/akuma-errors.js";
 import type { AkumaCaller } from "../src/akuma/caller.js";
-import { projectFact, selectHistory, activityHistorySchema, type ActivityHistory } from "../src/akuma/projection.js";
+import { projectFact, selectHistory, type ActivityHistory } from "../src/akuma/projection.js";
 import { frontierRows, summarizeFrontier } from "../src/akuma/status-projection.js";
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -169,10 +169,6 @@ async function bornHistoryHandle(root: string, suffix: string) {
   return { allocated, holder, turn, handle: new AkumaOwner(allocated.id, await World.at(root)) };
 }
 
-function toolRow(rows: readonly { kind: string; sequence: number; state?: unknown }[]) {
-  return rows.filter((row) => row.kind === "tool");
-}
-
 test("malformed public history IDs refuse before Heart reads", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-history-id-");
   const born = await bornHistoryHandle(root, "c0000005");
@@ -214,25 +210,48 @@ test("compact activity ids recover retained input, tool phases and narration thr
     const rawStart = await runCli(["history", born.allocated.id, "--id", String(active.id)], { cwd: root });
     assert.equal(rawStart.exit, 0);
     assert.equal(rawStart.stdout, `run $ ${command.trim()}`);
-    const callEntry = historyPage(await owner.history()).rows.find(row => row.kind === "call");
-    assert.ok(callEntry?.kind === "call");
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(callEntry.sequence)], { cwd: root })).stdout, `call: ${call}`);
+    const nativePage = historyPage(await owner.history());
+    const composedStatus = await api.status({ akuma: born.allocated.id });
+    assert.deepEqual(observed.value, composedStatus);
+    assert.deepEqual(composedStatus.recent, nativePage.rows);
+    assert.deepEqual((await owner.status()).recent, nativePage.rows);
+    const composedPage = await api.history({ akuma: born.allocated.id });
+    assert.ok(composedPage.kind === "akuma");
+    assert.deepEqual(composedPage.events, nativePage.rows);
+    const pageJson = await cliJson(["history", born.allocated.id], { cwd: root });
+    assert.deepEqual(pageJson.value, composedPage);
+    const pageText = await runCli(["history", born.allocated.id], { cwd: root });
+    assert.match(pageText.stdout, /\? run \(bash\).*\n +\$ npm test .*…/u);
+    assert.equal(nativePage.rows[0]?.id, turn.sequence);
+    assert.equal(nativePage.rows[0]?.text, "", "opening Turn still counts but is not visible or openable");
+    const callEntry = nativePage.rows.find(row => row.text.startsWith("▸"));
+    assert.ok(callEntry);
+    assert.equal((await runCli(["history", born.allocated.id, "--id", String(callEntry.id)], { cwd: root })).stdout, `call: ${call}`);
 
     const done = await appendActivity(born.allocated.paths, {
       turnSequence: turn.sequence, at: "2026-08-10T00:00:03.000Z",
       event: { type: "tool", phase: "completed", id: "native-run", name: "bash", call: { kind: "run", command }, result: { status: "error", exitCode: 7, output: "retained output", message: "test failed" } },
     });
     const displaced = await api.history({ akuma: born.allocated.id, id: String(active.id) });
-    assert.ok(displaced.kind === "akuma" && displaced.events[0]?.kind === "tool");
-    if (displaced.kind !== "akuma" || displaced.events[0]?.kind !== "tool") assert.fail("missing retained start");
-    assert.equal(displaced.events[0].sequence, start);
-    assert.equal(displaced.events[0].phase, "started");
+    assert.ok(displaced.kind === "akuma-activity" && displaced.row.kind === "tool");
+    assert.equal(displaced.row.sequence, start);
+    assert.equal(displaced.row.phase, "started");
     assert.equal((await runCli(["history", born.allocated.id, "--id", String(start)], { cwd: root })).stdout, `run $ ${command.trim()}`);
     const settled = await cliJson<Awaited<ReturnType<typeof api.history>>>(["history", born.allocated.id, "--id", String(done)], { cwd: root });
-    assert.ok(settled.value.kind === "akuma" && settled.value.events[0]?.kind === "tool");
-    if (settled.value.kind !== "akuma" || settled.value.events[0]?.kind !== "tool") assert.fail("missing completion");
-    assert.equal(settled.value.events[0].phase, "completed");
-    assert.deepEqual(settled.value.events[0].result, { status: "error", exitCode: 7, output: "retained output", message: "test failed" });
+    assert.ok(settled.value.kind === "akuma-activity" && settled.value.row.kind === "tool");
+    assert.equal(settled.value.row.sequence, done);
+    assert.equal(settled.value.row.phase, "completed");
+    assert.equal(settled.value.row.toolId, displaced.row.toolId);
+    assert.equal(settled.value.row.turnSequence, displaced.row.turnSequence);
+    assert.deepEqual(settled.value.row.result, { status: "error", exitCode: 7, output: "retained output", message: "test failed" });
+    const beforeDone = historyPage(await owner.history({ before: done, limit: 1 }));
+    const sinceStart = historyPage(await owner.history({ since: start }));
+    assert.deepEqual(beforeDone.rows, nativePage.rows.slice(-1));
+    assert.equal(beforeDone.omitted, 2);
+    assert.equal(beforeDone.hasEarlier, true);
+    assert.deepEqual(sinceStart.rows.map(row => row.id), [done]);
+    assert.equal(sinceStart.lowestRetained, turn.sequence);
+    assert.equal(sinceStart.highest, done);
     assert.ok((await runCli(["history", born.allocated.id, "--id", String(done)], { cwd: root })).stdout.includes(command.trim()));
 
     const tellText = `continue\n  ${"direction ".repeat(50)}`;
@@ -249,7 +268,9 @@ test("compact activity ids recover retained input, tool phases and narration thr
     const preview = (await api.status({ akuma: born.allocated.id })).work.summary;
     assert.ok(preview?.id === said && preview.text.startsWith("first ") && preview.clipped);
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-08-10T00:00:07.000Z", outcome: { kind: "answered", answer, session: { sessionId: "exact-native" } } });
-    assert.equal(historyPage(await owner.history()).rows.some(row => row.sequence === said), true);
+    const page = historyPage(await owner.history());
+    assert.ok(page.rows.some(row => row.id === said && row.text.startsWith("▎")));
+    assert.ok(page.rows.at(-1)?.text.startsWith(`✓ turn/${turn.sequence}\n`));
     const rawSaid = await runCli(["history", born.allocated.id, "--id", String(said)], { cwd: root });
     assert.equal(rawSaid.stdout, `said: ${answer}`);
     assert.equal((await runCli(["history", born.allocated.id, "--answer"], { cwd: root })).stdout, answer);
@@ -265,77 +286,6 @@ test("compact activity ids recover retained input, tool phases and narration thr
     assert.equal((await runCli(["history", born.allocated.id, "--id", String(idlePending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
     assert.deepEqual((await owner.status()).work, idleStatus.work);
   } finally { born.holder.release(); }
-});
-
-test("history preserves tool start and completion under their own sequences", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-remint-"));
-  const born = await bornHistoryHandle(root, "c0000001");
-  try {
-    const start = await appendActivity(born.allocated.paths, {
-      turnSequence: born.turn.sequence,
-      event: {
-        type: "tool",
-        phase: "started",
-        id: "bash-1",
-        name: "Bash",
-        call: { kind: "run", command: "npm test" },
-      },
-      at: "2026-08-10T00:00:02.000Z",
-    });
-    const active = historyPage(await born.handle.history());
-    const activeTool = active.rows.find((row) => row.kind === "tool");
-    assert.ok(activeTool?.kind === "tool");
-    assert.equal(activeTool.toolId, "bash-1");
-    assert.equal(activeTool.turnSequence, born.turn.sequence);
-    assert.deepEqual(
-      toolRow(active.rows).map((row) => row.sequence),
-      [start],
-    );
-    const done = await appendActivity(born.allocated.paths, {
-      turnSequence: born.turn.sequence,
-      event: {
-        type: "tool",
-        phase: "completed",
-        id: "bash-1",
-        name: "Bash",
-        call: { kind: "run", command: "npm test" },
-        result: { status: "ok" },
-      },
-      at: "2026-08-10T00:00:03.000Z",
-    });
-    assert.deepEqual([born.turn.sequence, start, done], [1, 2, 3]);
-
-    const page = historyPage(await born.handle.history());
-    const tools = toolRow(page.rows);
-    assert.equal(tools.length, 2);
-    assert.deepEqual(tools.map(row => row.sequence), [start, done]);
-    const completed = page.rows.find((row) => row.kind === "tool" && row.phase === "completed");
-    assert.ok(completed?.kind === "tool");
-    assert.equal(completed.at, "2026-08-10T00:00:03.000Z");
-    assert.equal(completed.toolId, activeTool.toolId);
-    assert.equal(completed.turnSequence, activeTool.turnSequence);
-    assert.deepEqual(completed.result, { status: "ok" });
-
-    const sinceStart = historyPage(await born.handle.history({ since: 2 }));
-    assert.deepEqual(
-      toolRow(sinceStart.rows).map((row) => row.sequence),
-      [done],
-    );
-    assert.equal(
-      sinceStart.rows.some((row) => row.sequence === start),
-      false,
-    );
-
-    const beforeDone = historyPage(await born.handle.history({ before: done }));
-    assert.deepEqual(toolRow(beforeDone.rows).map((row) => row.sequence), [start]);
-    assert.deepEqual(
-      toolRow(historyPage(await born.handle.history()).rows).map((row) => row.sequence),
-      [start, done],
-    );
-  } finally {
-    born.holder.release();
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("overlapping file tools order each Turn and reported changes by completion", () => {
@@ -378,8 +328,6 @@ test("overlapping file tools order each Turn and reported changes by completion"
   const rows = facts.map(projectFact);
   assert.deepEqual(rows.map(row => row.sequence), [1, 2, 3, 4, 5, 6]);
   const view = summarizeFrontier(rows, "/work");
-  assert.deepEqual(activityHistorySchema.parse({ rows, omitted: 0, hasEarlier: false, hasLater: false,
-    historyLost: false, lowestRetained: 1, highest: 6 }).rows, rows);
   assert.deepEqual(rows.filter(row => row.kind === "tool").map(row => row.toolId), ["a", "b", "b", "a"]);
   assert.deepEqual(view.changes, [
     { path: "src/b.ts", diffstat: { added: 1, removed: 0 } },
@@ -398,7 +346,7 @@ test("overlapping file tools order each Turn and reported changes by completion"
     turnEndFact(8, 1, at(8), { kind: "failed", diagnostic: "stopped" })].map(projectFact);
   const unmatched = closed.find(row => row.kind === "tool" && row.sequence === 7);
   assert.ok(unmatched?.kind === "tool" && unmatched.phase === "started");
-  assert.equal(summarizeFrontier(closed, "/work").work.activeTools, undefined);
+  assert.equal(summarizeFrontier(closed, "/work").work.summary, undefined);
 });
 
 test("forward history reports a pruned interval after its cursor", async () => {
@@ -599,9 +547,9 @@ test("direct current work follows the latest Turn while history retains earlier 
   const rows = facts.map(projectFact);
   const selected = summarizeFrontier(rows, "/work");
   assert.equal(selected.work.kind, "open");
-  assert.deepEqual(selected.recent?.map(row => row.sequence), [5, 6, 8]);
-  assert.deepEqual(selected.work.pending, [{ id: 7, tellId: "tell-1" }]);
-  assert.deepEqual(selected.work.activeTools, [{ id: 8, turnSequence: 4, toolId: "current" }]);
+  assert.deepEqual(selected.recent?.map(row => row.id), [5, 6, 8]);
+  assert.deepEqual(selected.work.pending, [{ id: 7 }]);
+  assert.equal(selected.work.summary?.id, 8);
   assert.equal(selected.work.outcome?.historyId, "turn/1");
   assert.ok(rows.some(row => row.kind === "tool" && row.sequence === 2 && row.phase === "started"));
   const closed = [
@@ -614,9 +562,9 @@ test("direct current work follows the latest Turn while history retains earlier 
   const idle = summarizeFrontier(closed, "/work");
   assert.equal(idle.work.kind, "idle");
   assert.equal(idle.work.outcome?.verdict, "answered");
-  assert.equal(idle.work.activeTools, undefined);
-  assert.deepEqual(idle.recent?.map(row => row.sequence), [8, 9, 10]);
-  assert.deepEqual(idle.work.pending, [{ id: 7, tellId: "tell-1" }]);
+  assert.equal(idle.work.summary?.id, 9);
+  assert.deepEqual(idle.recent?.map(row => row.id), [8, 9, 10]);
+  assert.deepEqual(idle.work.pending, [{ id: 7 }]);
 
   const mixedRows = [
     { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
@@ -631,7 +579,7 @@ test("direct current work follows the latest Turn while history retains earlier 
     turnEndFact(4, 3, "2026-08-10T00:00:04.000Z", { kind: "failed", diagnostic: "latest failed" }),
   ].map(projectFact);
   assert.equal(summarizeFrontier(mixedRows, "/work").work.kind, "idle");
-  assert.equal(summarizeFrontier(mixedRows, "/work").work.activeTools, undefined);
+  assert.equal(summarizeFrontier(mixedRows, "/work").work.summary, undefined);
   assert.ok(mixedRows.some(row => row.kind === "tool" && row.sequence === 2 && row.phase === "started"));
 });
 
@@ -655,15 +603,15 @@ test("recent detail is the fixed three-row tail without opening or speech pins",
   ];
   const rows = facts.map(projectFact);
   const selected = summarizeFrontier(rows, "/work");
-  assert.deepEqual(selected.recent?.map(row => row.sequence), [9, 10, 11]);
+  assert.deepEqual(selected.recent?.map(row => row.id), [9, 10, 11]);
   assert.equal(selected.work.summary?.id, 9);
   assert.equal(selected.work.summary?.text, "four");
-  assert.equal(selected.recent?.some(row => row.sequence === 5), false);
+  assert.equal(selected.recent?.some(row => row.id === 5), false);
   const page = selectHistory({ rows, lowestRetained: 1, highest: 11 }, { limit: 50 });
   assert.ok(page.rows.some(row => row.kind === "call" && row.sequence === 5));
 });
 
-test("recent file-change rows keep typed evidence beside the current speech", () => {
+test("recent file-change rows name the observed file and diffstat beside the current speech", () => {
   const completedTool = (sequence: number, id: string, call: ToolCall) =>
     activityFact(sequence, 1, `2026-08-10T00:00:${String(sequence).padStart(2, "0")}.000Z`, {
       type: "tool",
@@ -689,11 +637,8 @@ test("recent file-change rows keep typed evidence beside the current speech", ()
   const selected = summarizeFrontier(rows, "/work");
   assert.equal(selected.work.kind, "open");
   assert.equal(selected.work.summary?.id, 7);
-  assert.deepEqual(selected.recent?.map(row => row.sequence), [6, 7, 8]);
-  const edit = selected.recent?.find(row => row.sequence === 8);
-  assert.ok(edit?.kind === "tool" && edit.call.kind === "fileChange");
-  assert.equal(edit.call.changes[0]?.path, "src/two.ts");
-  assert.deepEqual(edit.call.changes[0]?.diffstat, { added: 4, removed: 2 });
+  assert.deepEqual(selected.recent?.map(row => row.id), [6, 7, 8]);
+  assert.match(selected.recent?.at(-1)?.text ?? "", /src\/two\.ts[\s\S]*\+4 -2/u);
 });
 
 test("frontier includes all delivered Tells for its Turn and excludes other Turns", () => {
@@ -741,7 +686,7 @@ test("frontier includes all delivered Tells for its Turn and excludes other Turn
   const rows = facts.map(projectFact);
   const selected = summarizeFrontier(rows, "/work");
   assert.equal(selected.work.summary?.id, 7);
-  assert.deepEqual(selected.recent?.map(row => row.sequence), [5, 7, 8]);
+  assert.deepEqual(selected.recent?.map(row => row.id), [5, 7, 8]);
   assert.deepEqual(frontierRows(rows).map(row => row.sequence), [1, 2, 4, 5, 7, 8]);
   const callFacts: TimelineFact[] = [
     ...facts,
@@ -799,20 +744,10 @@ test("pending and active work remain visible independently of the recent tail", 
   ].map(projectFact);
   const selected = summarizeFrontier(rows, "/work");
   assert.equal(selected.work.kind, "open");
-  assert.deepEqual(selected.work.pending, [{ id: 6, tellId: "pending" }]);
-  assert.deepEqual(selected.work.activeTools, [{ id: 5, turnSequence: 2, toolId: "active" }]);
+  assert.deepEqual(selected.work.pending, [{ id: 6 }]);
   assert.equal(selected.work.summary?.id, 5);
-  assert.deepEqual(selected.recent?.map(row => row.sequence), [4, 5, 7]);
+  assert.deepEqual(selected.recent?.map(row => row.id), [4, 5, 7]);
   assert.equal(rows.filter(row => row.sequence === 1).length, 1);
-});
-
-test("history schema preserves independently addressed rows", () => {
-  const rows = [
-    projectFact({ kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" }),
-    projectFact({ kind: "call", sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", body: "opening" }),
-  ];
-  const page = selectHistory({ rows, lowestRetained: 1, highest: 2 }, { limit: 50 });
-  assert.deepEqual(activityHistorySchema.parse(page), page);
 });
 
 test("reported file changes follow the open or latest closed frontier and aggregate files", () => {
@@ -999,7 +934,7 @@ test("reported file changes keep the newest five independently of recent detail"
   );
   assert.equal(view.changes?.at(-1)?.diffstat, undefined);
   assert.equal(view.moreChanges, true);
-  assert.deepEqual(view.recent?.map(row => row.sequence), [6, 7, 8]);
+  assert.deepEqual(view.recent?.map(row => row.id), [6, 7, 8]);
 });
 
 test("identical final narration and exact answer retain independent identities", () => {
@@ -1014,8 +949,6 @@ test("identical final narration and exact answer retain independent identities",
   assert.deepEqual(rows.map(row => [row.kind, row.sequence]), [
     ["turn", 1], ["said", 2], ["said", 3], ["outcome", 4],
   ]);
-  const page = selectHistory({ rows, lowestRetained: 1, highest: 4 }, { limit: 50 });
-  assert.deepEqual(activityHistorySchema.parse(page), page);
   const outcome = rows.at(-1);
   assert.ok(outcome?.kind === "outcome" && outcome.outcome.kind === "answered");
   assert.equal(outcome.outcome.answer, "same answer");
@@ -1087,10 +1020,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
   assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork", historyId: "turn/2" });
-  assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
-    kind: "answered",
-    answer: "complete without fork",
-  });
+  assert.match(historyPage(await handle.history()).rows.at(-1)?.text ?? "", /✓ turn\/2\n +complete without fork/u);
   const exact = await handle.history({ id: "turn/2" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
   assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history" });
@@ -1306,10 +1236,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal(status.work.outcome?.verdict, "answered");
   assert.equal(status.work.turn?.sequence, 2);
   assert.equal("history" in status, false);
-  assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
-    kind: "answered",
-    answer: "public answer",
-  });
+  assert.match(historyPage(await handle.history()).rows.at(-1)?.text ?? "", /✓ turn\/2\n +public answer/u);
   const exact = await handle.history({ id: "turn/2" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
   assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer" });

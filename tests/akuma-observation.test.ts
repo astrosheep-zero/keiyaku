@@ -27,6 +27,7 @@ import {
   recordTellDeliveries,
   recordTellReceipt,
   readStatusFacts,
+  readTell,
 } from "../src/akuma/heart/index.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
@@ -82,7 +83,7 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     assert.equal(json.outsideChanges, outside.length);
     const frontier = (await readStatusFacts(paths)).map(projectFact);
     assert.deepEqual(
-      json.recent?.map(row => row.sequence),
+      json.recent?.map(row => row.id),
       frontier.slice(-3).map(row => row.sequence),
       "status carries exactly the latest Turn's three newest retained rows",
     );
@@ -336,7 +337,7 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
     assert.equal(item.kind === "observed" ? item.pending : undefined, true);
     const status = await bornStatus(paths, id);
     assert.equal(status.work.kind, "idle");
-    assert.equal(status.work.pending?.[0]?.tellId, "new-pending", "pending input stays independently visible");
+    assert.equal(status.work.pending?.[0]?.id, (await readTell(paths, "new-pending"))?.sequence);
   } finally {
     leash.release();
     value.close();
@@ -373,9 +374,8 @@ test("wait returns stranded failure without consuming pending input", async () =
     const status = await bornStatus(paths, id);
     assert.equal(status.work.kind, "idle");
     assert.equal(status.work.outcome?.verdict, "failed");
-    assert.equal(status.work.pending?.[0]?.tellId, "undelivered");
-    assert.equal(status.recent?.at(-1)?.kind, "outcome");
-    assert.match(JSON.stringify(status.recent), /session creation: 405/u);
+    assert.equal(status.work.pending?.[0]?.id, (await readTell(paths, "undelivered"))?.sequence);
+    assert.match(status.recent?.at(-1)?.text ?? "", /^! turn\/\d+\n +session creation: 405/u);
   } finally {
     leash.release();
     value.close();
@@ -414,15 +414,12 @@ test("a live status observation pairs its bounded status with the same complete 
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt, call: "live frontier" });
     const observed = await readLiveStatus(value.root, id);
-    const rows = (await readStatusFacts(paths)).map(projectFact);
+    const history = await Akumas.of(value.root).history({ akuma: id });
+    assert.ok(history.kind === "akuma");
     assert.equal(observed.status.provider, "claude");
     assert.equal(observed.status.model, "claude-sonnet-4-5");
-    assert.deepEqual(observed.rows, rows, "the callback companion is the complete projection of that frontier");
-    assert.deepEqual(
-      observed.status.recent,
-      rows.slice(-3),
-      "status keeps only the latest Turn's three newest rows, projected from the same facts",
-    );
+    assert.deepEqual(observed.rows, history.events);
+    assert.deepEqual(observed.status.recent, observed.rows.slice(-3));
     assert.equal(observed.status.work.kind, "open");
     assert.equal("rows" in observed.status, false, "the public status itself carries no companion field");
   } finally {
@@ -616,8 +613,7 @@ test("status reads retain delivered frontier Tells without a global told substit
     );
     const status = await bornStatus(paths, id);
     assert.equal(status.work.kind, "open");
-    assert.deepEqual(status.recent?.map(row => row.sequence), [opening.tell.sequence, frontier.sequence, live.tell.sequence]);
-    assert.equal(status.recent?.some(row => row.kind === "tell" && row.tellId === unrelated.tell.id), false);
+    assert.deepEqual(status.recent?.map(row => row.id), [opening.tell.sequence, frontier.sequence, live.tell.sequence]);
     assert.equal(status.work.summary?.id, live.tell.sequence);
   } finally {
     leash.release();
@@ -646,7 +642,7 @@ test("status preserves pending input before any Turn without inventing recent wo
       assert.equal(observed.work.turn, undefined);
       assert.equal(observed.recent, undefined);
       assert.deepEqual(observed.work.pending, phase === "pending"
-        ? [{ id: (await readStatusFacts(paths)).find(fact => fact.kind === "tell")!.sequence, tellId: "only-tell" }]
+        ? [{ id: (await readStatusFacts(paths)).find(fact => fact.kind === "tell")!.sequence }]
         : undefined);
     }
   } finally {

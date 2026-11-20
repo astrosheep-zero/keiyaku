@@ -77,6 +77,7 @@ import { progressStrip } from "../src/cli/render/contract-observation.js";
 import type { ContractHistoryEvent } from "../src/index.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
+import { compactTimelineItem } from "../src/akuma/timeline-text.js";
 
 test("canceled outcomes render as canceled in CLI history and snapshots", () => {
   const row = {
@@ -147,7 +148,7 @@ function placedDelivery(
 function statusFields(rows: readonly ActivityRow[]) {
   return {
     work: projectCurrentWork(rows),
-    ...(rows.length === 0 ? {} : { recent: rows.slice(-3) }),
+
   };
 }
 
@@ -194,7 +195,7 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
 type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
 const genericLines = (rows: readonly GenericFixture[]) =>
   nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
-    events: rows.map(([sequence, name, input]) => genericTool(sequence, name, input)),
+    events: rows.map(([sequence, name, input]) => compactTimelineItem(genericTool(sequence, name, input))),
   }, {}).split("\n").slice(1);
 /** One native Debt summary row; scenario deltas are explicit overrides. */
 function debtSummary(overrides: Partial<DebtSummary> = {}): DebtSummary {
@@ -1906,7 +1907,7 @@ test("World and addressed status retain the outcome's exact history coordinate a
     birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "asleep", ...statusFields(snapshot),
   });
   for (const text of [board, snapshotText(observation(status), context)])
-    assert.match(text, /answered turn\/1 · activity 1/u);
+    assert.match(text, /answered turn\/1/u);
 });
 
 test("native history retains diagnostics beneath a bounded command row", () => {
@@ -1914,11 +1915,11 @@ test("native history retains diagnostics beneath a bounded command row", () => {
   const row = completedTool(1, "bash", { kind: "run", command: `bash -lc 'npm test ${"long-file ".repeat(30)}'` },
     { status: "error", exitCode: 7, message: diagnostic });
   const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
-  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {});
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [compactTimelineItem(row)] }, {});
   assert.match(text, /! run \(bash\) 1\n  \$[^…\n]+…\n  detail  exit 7\n  cause\n/u);
   assert.equal(text.split("\n").at(-1), `    ${diagnostic}`);
   const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
-  const textShort = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [short] }, {});
+  const textShort = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [compactTimelineItem(short)] }, {});
   assert.equal(textShort.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
 });
 
@@ -1926,7 +1927,7 @@ test("native history bounds long diagnostics with a visible omission", () => {
   const message = "diagnostic word ".repeat(1000);
   const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: "error", message });
   const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
-  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {});
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [compactTimelineItem(row)] }, {});
   assert.equal(text.split("\n").at(-1), `    ${message.slice(0, 160)}…`);
 });
 
@@ -1950,10 +1951,10 @@ test("a settled successful tool spends no mark while voice and input rows keep t
     { kind: "tell", sequence: 3, at: AKUMA_ACTIVITY_AT, tellId: "tell/mark-law", text: "told direction", state: "told",
       deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }] },
   ];
-  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId(id).id, events: rows }, {});
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId(id).id, events: rows.map(compactTimelineItem) }, {});
   assert.match(text, /^ {2}read 1\n  path  src\/a\.ts\n  detail  L0-0$/mu, "a settled tool spends no mark");
   assert.match(text, /^▎ 2\n  spoken$/mu, "speech keeps its distinct mark and no quotes");
-  assert.match(text, /^▸ tell\/mark-law · 3\n  told direction$/mu, "a told input keeps its input lead");
+  assert.match(text, /^▸ 3\n  told direction$/mu, "a told input keeps its input lead");
   assert.equal((text.match(/✓/gu) ?? []).length, 0, "settled work adds no completion to running status");
 });
 
@@ -1984,7 +1985,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
     ),
     completedTool(2, "future_tool", { kind: "other", input: preview({}) }, { status: "error", exitCode: 7 }),
   ];
-  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {});
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events: events.map(compactTimelineItem) }, {});
   for (const [pattern, message] of [
     [/\{"alpha":1\}\n  detail  error\n  cause\n    refused$/mu, "argument, failure and cause remain distinct"],
     [/future_tool 2\n  \{\}\n  detail  exit 7$/mu, "an empty argument object never swallows failure evidence"],
@@ -1992,7 +1993,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
     assert.match(text, pattern, message);
   assert.doesNotMatch(text, / — ok/u);
   const legacy = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
-    events: [completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" })],
+    events: [compactTimelineItem(completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" }))],
   }, {});
   assert.match(legacy, /mystery 1\n  detail  error\n  cause\n    refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
@@ -2013,7 +2014,7 @@ test("generic tool names are complete; only argument previews use the content ap
 test("long read paths and read ranges sit outside the text preview budget", () => {
   const path = `/work/${"source/".repeat(30)}nested.ts`;
   const row = completedTool(1, "read", { kind: "read", path, offset: 7, limit: 4 });
-  const page = { kind: "akuma" as const, akumaId: parseAkumaId("aku/worker/abcd1234").id, events: [row] };
+  const page = { kind: "akuma" as const, akumaId: parseAkumaId("aku/worker/abcd1234").id, events: [compactTimelineItem(row)] };
   assert.deepEqual(nativeHistoryText(page, {}).split("\n").slice(1), ["  read 1", `  path  ${path}`, "  detail  L7-10"]);
 });
 
@@ -2065,7 +2066,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
     ...statusFields(idleRows([], answeredOutcome(1, "the answer"))),
   });
   const snapshot = snapshotText(observation(sleeping), { columns: 80, color: false });
-  assert.match(snapshot, /answered turn\/1 · activity 1/u);
+  assert.match(snapshot, /answered turn\/1/u);
   assert.match(snapshot, /✓ completed$/u);
 
   const answerless = liveStatusObservationSchema.unwrap().shape.status.parse({
@@ -2151,7 +2152,6 @@ test("status keeps current evidence while history retains thought narration", ()
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.match(statusText, /12 run \$ c9/u, "the owner-selected current work remains visible");
-  assert.deepEqual(observation(status).work.activeTools, [{ id: 12, turnSequence: 1, toolId: "tool-12" }]);
 
   const outcomeSnapshot = idleRows(
     [
@@ -2176,7 +2176,7 @@ test("status keeps current evidence while history retains thought narration", ()
     ...statusFields(outcomeSnapshot),
   });
   const outcomeText = snapshotText(observation(answeredStatus), DEFAULT_CONTEXT);
-  assert.match(outcomeText, /answered turn\/1 · activity 13/u);
+  assert.match(outcomeText, /answered turn\/1/u);
 
   const failedOutcome: OutcomeRow = {
     kind: "outcome",
@@ -2196,7 +2196,7 @@ test("status keeps current evidence while history retains thought narration", ()
     ),
     DEFAULT_CONTEXT,
   );
-  assert.match(failedText, /failed turn\/1 · activity 13/u);
+  assert.match(failedText, /failed turn\/1/u);
 
   const historyInvocation = parseArgv(["history", id]);
   assert.ok("command" in historyInvocation);
@@ -2205,7 +2205,7 @@ test("status keeps current evidence while history retains thought narration", ()
     {
       kind: "akuma",
       akumaId: status.id,
-      events,
+      events: events.map(compactTimelineItem),
       omitted: 55,
       lowestRetainedSequence: 1,
       highestSequence: 12,
@@ -2268,7 +2268,7 @@ test("status current work follows the native overlapping-tool frontier", () => {
   assert.match(snapshot(third), /running/u);
   assert.doesNotMatch(snapshot(third), /\$ [AB]/u, "settled tools are no longer current work");
   const completions = third.map(projectFact).filter(row => row.kind === "tool" && row.phase === "completed");
-  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: completions }, {});
+  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: completions.map(compactTimelineItem) }, {});
   assert.ok(history.indexOf("$ B") < history.indexOf("$ A"), "native history retains both completion identities in durable order");
 });
 

@@ -71,6 +71,7 @@ export type {
 } from "./akuma/index.js";
 export type { AskObserver, AskProgress } from "./akuma/akuma-selection-execution.js";
 export type { LiveStatusObservation } from "./akuma/akuma-observe.js";
+export type { TimelineItem } from "./akuma/projection.js";
 export type { TellResult, TellWake } from "./akuma/call-initial-tell.js";
 export type { AkumaAlias } from "./identity/selector.js";
 export type { AkumaAddressRefusal, AkumaSetAddressInput } from "./library/address.js";

@@ -35,8 +35,10 @@ completion keep their own durable identities, correlated by the producer's
 native invocation identity within the Turn. Completion neither relocates nor
 replaces the start, and observation synthesizes no tool duration or execution
 state. Narration remains visible even when it equals a later final answer.
-History, exact reads, live observation, current work, and reported changes share
-this one interpretation.
+Recent status, paged history, and live snapshots share the Akuma owner's bounded
+text projection of retained activity. The snapshot keeps the retained identity
+and makes omission visible; it is not a machine transcript. Current work and
+reported changes derive from the same evidence without interpreting preview text.
 A born status reports its frozen execution directory and provider, and the
 Akuma's one current model. The model is the selection its birth admitted until
 the running Body's own native evidence replaces it, and that evidence afterwards.
@@ -56,16 +58,16 @@ permission policy, or a channel for answering the request. Absence of such
 evidence never proves that the provider cannot be waiting.
 
 A status reports semantic current work directly from the retained frontier:
-open or idle work, pending input, the latest Turn and known outcome, and exact
-activity coordinates. A bounded current-action summary prioritizes pending
-approval, then the latest unmatched tool start on an open Turn, then the latest
+open or idle work, pending input, the latest Turn and known outcome, and
+coordinates that address retained evidence rather than internal execution mirrors.
+A bounded current-action summary prioritizes pending approval, then the latest unmatched tool start on an open Turn, then the latest
 speech or delivered input. Its clipping remains visible. Optional recent detail
 is a fixed small tail of frontier rows, independent of approval, tool, and input
 evidence; there are no pinned rows, inline gaps, or shared detail budgets.
 Status never proves native liveness, and an absent summary proves neither
 inactivity nor idle. Its latest retained activity time has the same Heart-owned
-meaning as roster activity ([akuma-heart.md](akuma-heart.md)). Exact history and
-live observation retain their complete typed meaning.
+meaning as roster activity ([akuma-heart.md](akuma-heart.md)). Exact reads and
+native timeline streams preserve the complete typed evidence.
 
 Reported changes summarize successful file-change completions on the latest
 Turn. Distinct paths retain their latest-change order and accumulate known
@@ -111,10 +113,9 @@ observations fabricate neither cursor nor result nor loss marker.
 
 A stream observes that same retained timeline continuously: the caller pulls
 complete bounded timeline windows, one at a time, instead of asking for a page.
-Each emission is the whole latest window through the existing history
-projection, never a delta, so a consumer reassembles nothing and owns no
-cursor. Its retention and loss evidence keeps the ordinary history meaning. An
-initial window always emits; later windows emit only when their content
+Each emission is the whole latest typed window, never a delta, so a consumer
+reassembles nothing and owns no cursor. Its retention and loss evidence keeps
+the ordinary history meaning. An initial window always emits; later windows emit only when their content
 changes. Observation is pull-driven: the stream reads while its consumer pulls
 and retains nothing beyond the current window and one internal reader, so a
 slow consumer accumulates no backlog. Complete windows coalesce, and
@@ -199,11 +200,12 @@ evidence, without an intermediate full-status collection or a private alternate
 completion predicate. Wait returns stopped life, pending input, concurrent
 failure, and the exact retained outcome and answer, distinguishing missing from
 unreadable subjects. Lightweight probes read life and pending input without
-narration. Final detail derives from the same directly observed native frontier;
-invocation deadline detail may retain bounded recent events, but never substitutes
-that tail for an exact input-bound answer. Life, outcome and recent detail share
-one observation rather than later inferred evidence. Activity failure remains
-local; final processing stays bounded and cancellable after the deadline.
+narration. Lifecycle-only waits do not decode retained activity. When a caller
+requests bounded activity, only a witnessed running member carries a compact
+tail of its current Turn, never a previous settled Turn's tail or a substitute
+for an exact answer. Life, outcome, and requested detail share one observation.
+Activity failure remains local; final processing stays bounded and cancellable
+after the deadline.
 Every return says whether it completed
 or reached the deadline; completion wins when the final deadline-edge observation
 satisfies the judgment. A deadline

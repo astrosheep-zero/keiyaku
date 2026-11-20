@@ -10,50 +10,37 @@ import {
   type WaitReason,
   type OutcomeObserver,
 } from "./akuma-observe.js";
-import { akumaIdSchema, pathsForAkumaId, reportHistoryIdSchema, type AkumaId } from "./identity.js";
+import { pathsForAkumaId, reportHistoryIdSchema, type AkumaId } from "./identity.js";
 import type { WaitReportFrontier } from "./heart/index.js";
 import { UnsupportedHistoricalHeartError } from "./heart/schema.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
 import { projectFact, type OutcomeRow } from "./projection.js";
 import { frontierTail } from "./status-projection.js";
+import { clipActionText } from "./timeline-text.js";
 
 export type NativeWaitResult = Readonly<{ reason: WaitReason; results: readonly AkumaWaitItem[] }>;
 export const AKUMA_WAIT_POLL_MS = 250;
 
-const REPORT_PREVIEW_LIMIT = 300;
-export const waitReportSchema = z
-  .strictObject({
-    akumaId: akumaIdSchema,
-    reportId: reportHistoryIdSchema,
-    text: z.string().max(REPORT_PREVIEW_LIMIT),
-    clipped: z.literal(true).exactOptional(),
-  })
-  .readonly();
-type WaitReport = z.output<typeof waitReportSchema>;
+export const waitReportSchema = z.strictObject({ report: reportHistoryIdSchema, text: z.string() }).readonly();
+type WaitReport = Readonly<{ id: AkumaId; preview: z.output<typeof waitReportSchema> }>;
 
 function waitOutcome(row: OutcomeRow): AkumaWaitOutcome {
   return { ...row.outcome, historyId: `turn/${row.turnSequence}` };
 }
 
-function reportPreview(id: AkumaId, report: Readonly<{ sequence: number; text: string }>): WaitReport {
-  const { sequence, text } = report;
-  return {
-    akumaId: id,
-    reportId: `report/${sequence}`,
-    ...(text.length <= REPORT_PREVIEW_LIMIT
-      ? { text }
-      : { text: text.slice(0, REPORT_PREVIEW_LIMIT).replace(/[\uD800-\uDBFF]$/u, ""), clipped: true }),
-  };
-}
-
 function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
   const end = snapshot.outcome;
   const row = end === undefined ? undefined : (projectFact(end) as OutcomeRow);
+  const running = snapshot.life === "running";
+  const rows = running ? snapshot.activity?.map(projectFact) : undefined;
+  const turn = rows?.findLast((item) => item.kind === "turn");
   const events =
-    snapshot.activity === undefined || snapshot.life !== "running"
+    rows === undefined
       ? undefined
-      : frontierTail(snapshot.activity.map(projectFact));
+      : turn !== undefined && turn.bodySequence === snapshot.latestBody?.sequence && end?.turnSequence !== turn.sequence
+        ? frontierTail(rows)
+        : [];
   return {
     kind: "observed",
     id: snapshot.id,
@@ -62,7 +49,7 @@ function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
     ...(snapshot.hasPendingTell ? { pending: true } : {}),
     ...(row === undefined ? {} : { outcome: waitOutcome(row) }),
     ...(events === undefined ? {} : { events }),
-    ...(snapshot.activityDiagnostic === undefined
+    ...(!running || snapshot.activityDiagnostic === undefined
       ? {}
       : { eventsUnavailable: diagnostic(snapshot.activityDiagnostic) }),
   };
@@ -93,7 +80,11 @@ async function probeCompletion(
 }
 
 /** One compact native observer supplies every set-wait caller; only invocation tracks reports. */
-export function createAkumaWaitObserver(path: WorldRoot, selected: readonly AkumaId[], trackReports = false) {
+export function createAkumaWaitObserver(
+  path: WorldRoot,
+  selected: readonly AkumaId[],
+  { includeRecent = false, trackReports = false }: Readonly<{ includeRecent?: boolean; trackReports?: boolean }> = {},
+) {
   const ids = [...new Set(selected)];
   const readers = new Map<AkumaId, ReturnType<typeof createLiveStatusReader>>();
   const items = new Map<AkumaId, AkumaWaitItem>();
@@ -104,7 +95,10 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
   const observeReport = (id: AkumaId, frontier: WaitReportFrontier): void => {
     if (watermarks === undefined || frontier === undefined) return;
     if (!watermarks.has(id)) watermarks.set(id, frontier.sequence);
-    if (frontier.report !== undefined) report = reportPreview(id, frontier.report);
+    if (frontier.report !== undefined) {
+      const { sequence, text } = frontier.report;
+      report = { id, preview: { report: `report/${sequence}`, text: clipActionText(text).text } };
+    }
   };
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
@@ -118,12 +112,12 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
     const item = items.get(id);
     return item?.kind === "missing" || (item?.kind === "observed" && waitComplete(item.life, item.pending === true));
   };
-  const observe = async (signal: AbortSignal | undefined, mode: "compact" | "recent" | "paced"): Promise<void> => {
+  const observe = async (signal?: AbortSignal, paced = false): Promise<void> => {
     for (const id of ids) {
       signal?.throwIfAborted();
       try {
-        const skipAdvancing = mode === "paced" && items.get(id)?.kind === "observed" && !satisfied(id);
-        const snapshot = await readerFor(id).wait(mode === "recent", reportAfter(id), skipAdvancing, signal);
+        const skipAdvancing = paced && items.get(id)?.kind === "observed" && !satisfied(id);
+        const snapshot = await readerFor(id).wait(includeRecent, reportAfter(id), skipAdvancing, signal);
         observeReport(id, snapshot.reportFrontier);
         // Keep an earlier coherent observation of advancing work rather than mixing it with a thin probe.
         if (snapshot.outcomeRead) items.set(id, completionItem(snapshot));
@@ -143,14 +137,8 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
     items,
     satisfied,
     reported: () => report,
-    observe: (signal?: AbortSignal, recent = false) => observe(signal, recent ? "recent" : "compact"),
-    observePaced: (signal: AbortSignal) => observe(signal, "paced"),
-    unavailableRecent(message: string): void {
-      for (const [id, item] of items) {
-        if (item.kind === "observed" && item.life === "running" && item.events === undefined)
-          items.set(id, { ...item, eventsUnavailable: diagnostic(message) });
-      }
-    },
+    observe: (signal?: AbortSignal) => observe(signal),
+    observePaced: (signal: AbortSignal) => observe(signal, true),
     probe: (completion: "any" | "all", signal?: AbortSignal) => probeCompletion(ids, readerFor, completion, signal),
     async notify(observer?: OutcomeObserver): Promise<void> {
       await Promise.all(

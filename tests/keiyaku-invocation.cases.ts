@@ -260,11 +260,11 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
     });
     await assert.rejects(external.report({ text: "not an actor" }), /explicit Akuma execution identity/u);
     const history = await native.history();
-    assert.ok(history.rows.some((row) => row.kind === "report" && row.text === "facet milestone"));
-    assert.deepEqual(
-      await facet.history({ selector: born.allocated.id }),
-      await Akumas.of(world).history({ akuma: born.allocated.id }),
-    );
+    assert.match(history.rows.at(-1)?.text ?? "", new RegExp(`${recorded.reportId}\\n +facet milestone`, "u"));
+    const page = await facet.history({ selector: born.allocated.id });
+    assert.deepEqual(page, await Akumas.of(world).history({ akuma: born.allocated.id }));
+    assert.ok(page.kind === "akuma");
+    assert.deepEqual(page.events, history.rows);
     for (const invalid of [{ ...environment, KEIYAKU_ACTOR_ID: "invalid" }, {}]) {
       await assert.rejects(
         Keiyaku.for({ cwd: world, environment: invalid, home }).report({ text: "bad" }),

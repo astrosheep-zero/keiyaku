@@ -53,6 +53,7 @@ import {
 import { HeartUnbornError, type ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectFact, selectExactHistory, selectHistory } from "./projection.js";
+import { compactTimelineItem } from "./timeline-text.js";
 import type { AkumaWaitItem } from "./selection-observation.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
@@ -257,13 +258,14 @@ export class AkumaOwner {
       return exact;
     }
     const limit = input.limit ?? 12;
-    const history = selectHistory(await this.historyTimeline(), {
+    const history = selectHistory(await activitySlice(this.paths), {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
       limit,
     });
-    await observeOutcomeRows(this.id, history.rows, this.outcomeObserved);
-    return history;
+    const selected = history.rows.map(projectFact);
+    await observeOutcomeRows(this.id, selected, this.outcomeObserved);
+    return { ...history, rows: selected.map(compactTimelineItem) };
   }
 
   /**

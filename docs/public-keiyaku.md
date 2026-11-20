@@ -197,15 +197,15 @@ full monitoring detail. Returned Contract members include thin journal-derived
 summary facts from their witnessed observation, without physical workspace or
 target enrichment. Akuma members preserve native life, available activity time
 and full exact-turn outcomes; optional association already known to the
-observation does not justify new joins. Still-running deadline members retain
-a bounded tail of actual recent events from the same observed frontier, with
-local unavailability rather than loss of the member's outcome. Invocation wait
-also observes new retained progress reports from its frozen Akuma selection. Each
+observation does not justify new joins. Running members keep any compact
+current-Turn tail witnessed with that native observation, with local activity
+unavailability rather than loss of the member's outcome. Invocation wait also
+observes new retained progress reports from its frozen Akuma selection. Each
 wait starts from the report frontier it first observes for each member, so earlier
 reports do not wake it. A newer witnessed report interrupts observation in either
 completion mode but satisfies no member; witnessed group completion takes
-precedence. The result identifies the reporting Akuma and its exact report with
-bounded text. This is a read, not a stream or a delivery guarantee; it creates no
+precedence. The reporting member carries the exact report address and a bounded
+preview. This is a read, not a stream or a delivery guarantee; it creates no
 facts and does not depend on optional notification. Standalone completion waits
 are unchanged. Waiting is not a full status read or reported-change observation.
 History selects one subject and either a bounded timeline page or one exact item.

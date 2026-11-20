@@ -1,7 +1,13 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { akumaIdSchema, turnHistoryIdSchema } from "../akuma/identity.js";
-import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
+import {
+  exactActivityRowSchema,
+  outcomeRowSchema,
+  reportRowSchema,
+  timelineItemSchema,
+  type ActivityHistory,
+} from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { HeartUnbornError } from "../akuma/heart/facts.js";
 import { AkumaOwner, historyInputSchemas } from "../akuma/akuma-owner.js";
@@ -15,7 +21,6 @@ import {
 } from "../akuma/akuma-selection-execution.js";
 import { executeWaitAkuma } from "../akuma/akuma-wait.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
-import { type ActivityHistory } from "../akuma/projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "../akuma/schema.js";
 import type {
   AkumaAskResult,
@@ -81,13 +86,14 @@ export const akumaHistoryResultSchema = z.union([
     .strictObject({
       kind: z.literal("akuma"),
       ...historyCommon,
-      events: z.array(activityRowSchema).readonly(),
+      events: z.array(timelineItemSchema).readonly(),
       omitted: z.number().int().positive().exactOptional(),
       retentionLost: z.literal(true).exactOptional(),
       lowestRetainedSequence: z.number().int().positive().exactOptional(),
       highestSequence: z.number().int().positive().exactOptional(),
     })
     .readonly(),
+  z.strictObject({ kind: z.literal("akuma-activity"), ...historyCommon, row: exactActivityRowSchema }).readonly(),
   outcomeRowSchema
     .unwrap()
     .extend({ kind: z.literal("akuma-exact"), ...historyCommon })
@@ -406,7 +412,7 @@ export async function historyAkuma(
     const history = await handle.history(options);
     if ("id" in options) {
       if ("kind" in history && history.kind === "exact-activity")
-        return { kind: "akuma", ...subject, events: [history.row] };
+        return { kind: "akuma-activity", ...subject, row: history.row };
       if ("kind" in history && history.kind === "exact") {
         const { kind: _kind, ...row } = history.outcome;
         return { kind: "akuma-exact", ...subject, ...row };

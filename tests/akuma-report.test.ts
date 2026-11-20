@@ -72,12 +72,10 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
   const akuma = Akuma.select(world, allocated.id);
   assert.equal((await akuma.status()).life, "asleep");
   const history = await akuma.history();
-  const report = history.rows.find(row => row.kind === "report");
-  assert.equal(report?.text, "milestone from actual child");
-  const outcome = history.rows.at(-1);
-  assert.equal(outcome?.kind, "outcome");
-  if (outcome?.kind !== "outcome" || outcome.outcome.kind !== "answered") assert.fail("expected final answer");
-  assert.equal(outcome.outcome.answer, "final, not the report");
+  assert.ok(history.rows.some(row => row.text.includes("milestone from actual child")));
+  const latest = await Akumas.of(world).history({ akuma: akuma.id, last: true });
+  assert.ok(latest.kind === "akuma-answer");
+  assert.equal(latest.answer, "final, not the report");
 });
 
 test("native report is a distinct durable history/stream row and does not complete work", async (context) => {
@@ -92,28 +90,31 @@ test("native report is a distinct durable history/stream row and does not comple
       const recorded = await akuma.report(text);
       assert.equal(recorded.kind, "recorded");
       if (recorded.kind !== "recorded") assert.fail("report refused");
-      const history = await akuma.history();
-      const report = history.rows.find(row => row.kind === "report");
+      const changed = await stream.next();
+      assert.ok(!changed.done);
+      const report = changed.value.rows.find(row => row.kind === "report");
       assert.ok(report?.kind === "report");
       assert.deepEqual(recorded, { kind: "recorded", reportId: `report/${report.sequence}` });
       assert.deepEqual(report, { kind: "report", sequence: report.sequence, bodySequence: value.body.sequence,
         turnSequence: value.turn.sequence, at: report.at, text });
-      assert.equal(history.rows.some(row => row.kind === "outcome"), false);
-      const changed = await stream.next();
-      assert.equal(changed.done, false);
-      assert.deepEqual(changed.value?.rows.filter(row => row.kind === "report"), [report]);
+      assert.equal(changed.value.rows.some(row => row.kind === "outcome"), false);
+      const history = await akuma.history();
+      const item = history.rows.find(row => row.id === report.sequence);
+      assert.match(item?.text ?? "", new RegExp(recorded.reportId, "u"));
       const status = await akuma.status();
       assert.equal(status.life, "running");
       assert.equal(status.work.kind, "open");
+      assert.deepEqual(status.recent?.at(-1), item);
       const idle = await akuma.idle({ timeoutMs: 0 });
       assert.equal(idle.reason, "deadline");
       await endTurn(value.allocated.paths, {
         turnSequence: value.turn.sequence, completedAt: AT,
         outcome: { kind: "answered", answer: "the final answer", session: { sessionId: "native" } },
       });
-      const final = await akuma.history();
-      assert.equal(final.rows.at(-1)?.kind, "outcome");
-      assert.deepEqual(final.rows.filter(row => row.kind === "report"), [report]);
+      const final = await stream.next();
+      assert.ok(!final.done);
+      assert.equal(final.value.rows.at(-1)?.kind, "outcome");
+      assert.deepEqual(final.value.rows.filter(row => row.kind === "report"), [report]);
     } finally { await stream.return?.(); }
   } finally { value.holder.release(); }
 });
@@ -186,20 +187,23 @@ test("exact report history selects retained identity without observing outcomes"
     const second = await akuma.report(` second\n  ${"complete ".repeat(80)}\n`);
     if (first.kind !== "recorded" || second.kind !== "recorded") assert.fail("report refused");
     const id = second.reportId;
-    const reports = (await akuma.history()).rows.filter(row => row.kind === "report");
-    const firstReport = reports.find(row => `report/${row.sequence}` === first.reportId)!;
-    const secondReport = reports.find(row => `report/${row.sequence}` === second.reportId)!;
+    const exactSecond = await owner.history({ id });
+    const exactFirst = await owner.history({ id: first.reportId });
+    assert.ok("kind" in exactSecond && exactSecond.kind === "exact-report");
+    assert.ok("kind" in exactFirst && exactFirst.kind === "exact-report");
+    const secondReport = exactSecond.report;
     assert.equal(secondReport.text, ` second\n  ${"complete ".repeat(80)}\n`);
-    const current = (await Akumas.of(value.world).status({ akuma: value.allocated.id })).work;
-    assert.equal(current.latestActivity, secondReport.sequence);
+    assert.equal(exactFirst.report.text, "first");
+    const page = await akuma.history();
+    const item = page.rows.at(-1);
+    assert.equal(item?.id, secondReport.sequence);
+    assert.ok(item?.text.includes(id) && item.text.endsWith("…"));
     const decimal = String(secondReport.sequence);
     const activity = await owner.history({ id: decimal });
     assert.deepEqual(activity, { kind: "exact-activity", row: secondReport });
     assert.equal((await runCli(["history", value.allocated.id, "--id", decimal], { cwd: root })).stdout, `report: ${secondReport.text}`);
     assert.equal(parsePublicHistoryId(id), null);
     assert.deepEqual(await owner.fork({ at: id }, noBodyLaunch), { kind: "unknown-history" });
-    assert.deepEqual(await owner.history({ id }), { kind: "exact-report", report: secondReport });
-    assert.deepEqual(await owner.history({ id: first.reportId }), { kind: "exact-report", report: firstReport });
     assert.deepEqual(await owner.history({ id: `report/${value.turn.sequence}` }), { kind: "unknown-history", id: `report/${value.turn.sequence}` });
     const composed = await Akumas.of(value.world).history({ akuma: value.allocated.id, id });
     assert.equal(composed.kind, "akuma-report");
@@ -253,7 +257,7 @@ test("answer keeps its exact Turn through later failure, cancellation and report
     await endTurn(value.allocated.paths, { turnSequence: canceled.sequence, completedAt: AT, outcome: { kind: "canceled" } });
     const next = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
     const report = await recordReport(value.allocated.paths, { text: "later report", at: AT });
-    assert.equal(report.kind, "recorded");
+    assert.ok(report.kind === "recorded");
     const answer = await facet.history({ selector, item: "answer" });
     assert.deepEqual(answer, { kind: "akuma-answer", akumaId: selector,
       historyId: `turn/${value.turn.sequence}`, answer: "old\n  exact answer\n" });
@@ -263,7 +267,8 @@ test("answer keeps its exact Turn through later failure, cancellation and report
     assert.equal(exact.outcome.answer, answer.answer);
     const latest = await facet.history({ selector, limit: 1 });
     assert.ok(latest.kind === "akuma");
-    assert.equal(latest.events[0]?.kind, "report");
+    assert.equal(latest.events[0]?.id, report.report.sequence);
+    assert.match(latest.events[0]?.text ?? "", /report\/\d+\n +later report/u);
     const raw = await runCli(["history", selector, "--answer"], { cwd: root });
     assert.equal(raw.exit, 0, raw.stderr);
     assert.equal(raw.stdout, answer.answer);
@@ -348,7 +353,7 @@ test("reports use the existing retention sequence and do not acquire a second hi
     const oldSequence = Number(old.reportId.slice("report/".length));
     const history = await akuma.history({ since: oldSequence, limit: 2 });
     assert.equal(history.historyLost, true);
-    assert.ok(history.rows.every(row => row.sequence > oldSequence));
+    assert.ok(history.rows.every(row => row.id > oldSequence));
     assert.equal((await readHeart(value.allocated.paths)).latestBody?.end, undefined);
   } finally { value.holder.release(); }
 });
@@ -382,8 +387,8 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
     const turn = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT, initiator: "Alice" });
     const recorded = await akuma.report("exact\nreport", {});
     if (recorded.kind !== "recorded") assert.fail("report refused");
-    const report = (await akuma.history()).rows.find(row => row.kind === "report");
-    assert.ok(report?.kind === "report");
+    const report = await Akumas.of(world).history({ akuma: akuma.id, id: recorded.reportId });
+    assert.ok(report.kind === "akuma-report");
     assert.equal(recorded.reportId, `report/${report.sequence}`);
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8").trim()), {
       kind: "akuma.reported", akumaId: value.allocated.id, bodySequence: value.body.sequence,
@@ -391,7 +396,7 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
       at: report.at, audience: ["Alice"],
     });
     assert.ok(diagnostics.some(message => message.includes("notification deliberately failed")));
-    assert.deepEqual((await akuma.history()).rows.filter(row => row.kind === "report"), [report]);
+    assert.equal(report.text, "exact\nreport");
     await endTurn(value.allocated.paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
     await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
     const unattributed = await akuma.report("without recipient", {});
@@ -419,7 +424,10 @@ test("an unreadable audience stays diagnostic without discarding native status o
     const report = await akuma.report("recorded without audience");
     assert.equal(report.kind, "recorded");
     assert.ok(diagnostics.some((message) => /audience unavailable.*no such table/u.test(message)));
-    assert.ok((await akuma.history()).rows.some((row) => row.kind === "report" && row.text === "recorded without audience"));
+    const retained = await Akumas.of(value.world).history({ akuma: akuma.id, id: report.reportId });
+    assert.equal(retained.kind, "akuma-report");
+    assert.equal(retained.text, "recorded without audience");
+    assert.ok((await akuma.history()).rows.some(({ id }) => id === retained.sequence));
   } finally {
     value.holder.release();
   }
@@ -451,9 +459,9 @@ test("CLI report adapts explicit immutable execution and takes stdin", async (co
     assert.equal(result.exit, 0);
     assert.equal(result.value.kind, "recorded");
     if (result.value.kind !== "recorded") assert.fail("report refused");
-    const reports = (await Akuma.select(value.world, value.allocated.id).history()).rows.filter(row => row.kind === "report");
-    assert.equal(reports[0]?.text, "report from stdin\n");
-    assert.deepEqual(result.value, { kind: "recorded", reportId: `report/${reports[0]!.sequence}` });
+    const report = await Akumas.of(value.world).history({ akuma: value.allocated.id, id: result.value.reportId });
+    assert.ok(report.kind === "akuma-report");
+    assert.equal(report.text, "report from stdin\n");
     const missingActor = await runCli(["report", "cannot guess"], { cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: "pi:host" } });
     assert.equal(missingActor.exit, 64);
     assert.match(missingActor.stderr, /requires explicit KEIYAKU_ACTOR_ID/u);
@@ -464,6 +472,6 @@ test("CLI report adapts explicit immutable execution and takes stdin", async (co
     const text = await runCli(["report", "resumed"], { cwd: root, environment });
     assert.equal(text.exit, 0);
     assert.match(text.stdout.trimEnd(), new RegExp(`^recorded ${value.allocated.id} report/\\d+$`));
-    assert.equal((await akuma.history()).rows.filter(row => row.kind === "report").length, 2);
+    assert.equal((await akuma.history()).rows.filter(row => row.text.trimStart().startsWith("report/")).length, 2);
   } finally { value.holder.release(); }
 });

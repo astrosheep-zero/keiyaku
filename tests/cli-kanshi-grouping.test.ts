@@ -172,7 +172,7 @@ test("World reports pending input by native coordinates when current work suppli
     ...worker("00000001"),
     life: "running",
     pending: 2,
-    work: { kind: "open", pending: [{ id: 13, tellId: "tell/first" }, { id: 21, tellId: "tell/second" }] },
+    work: { kind: "open", pending: [{ id: 13 }, { id: 21 }] },
   };
   const text = renderKanshiText(report([row]));
   once(text, "pending input");

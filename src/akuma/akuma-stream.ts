@@ -4,10 +4,11 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 import { OBSERVATION_POLL_MS, type OutcomeObserver } from "./akuma-observe.js";
 import { createTimelineReader } from "./heart/index.js";
 import type { AkumaId, AkumaPaths } from "./identity.js";
-import { projectFact, selectHistory, type ActivityHistory, type ActivityRow } from "./projection.js";
+import { projectFact, selectHistory, type activityStreamSnapshotSchema, type ActivityRow } from "./projection.js";
+import type { output } from "zod";
 
 /** The complete bounded latest timeline window one stream emission carries; never a delta. */
-export type AkumaStreamSnapshot = ActivityHistory;
+export type AkumaStreamSnapshot = output<typeof activityStreamSnapshotSchema>;
 
 /** The fixed number of projected rows one window retains. */
 const STREAM_WINDOW = 500;

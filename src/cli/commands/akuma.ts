@@ -10,7 +10,7 @@ import { StatusLine } from "../render/status-line.js";
 import type { AkumaId } from "../../akuma/identity.js";
 import { type CliOutcome, displayContext, writeCliStream, writeJson, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
-import { askRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
+import { askRawAnswer } from "../render/akuma-activity.js";
 import { askFrame, askResultText } from "../render/akuma.js";
 import { aliasSelector, renderVerb } from "../render/verbs.js";
 
@@ -116,8 +116,10 @@ export async function runAkumaHistory(request: VerbRequest<"history">, runtime: 
   if (output === "json") writeJson(result);
   else {
     const raw =
-      historyRawAnswer(result, "item" in input && input.item !== "answer" ? input.item : undefined) !== undefined ||
-      ("item" in input && input.item === "answer" && result.kind === "akuma-answer");
+      result.kind === "akuma-activity" ||
+      result.kind === "akuma-report" ||
+      result.kind === "akuma-exact" ||
+      result.kind === "akuma-answer";
     emitAnswer(renderVerb("history", input, completion, displayContext()), raw);
   }
   return classifyVerb("history", input, completion);

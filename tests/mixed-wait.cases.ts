@@ -6,12 +6,13 @@ import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { Akuma, Akumas, Keis, Keiyaku, Repo, World, type InvocationWaitResult } from "../src/index.js";
 import { appendActivity, beginTurn, endTurn, finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { GIT_REF, readRef } from "../src/git/read-observation.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { createKeiHandle } from "../src/library/kei.js";
-import { modelOutputSchemas } from "../src/library/model-tools.js";
+import { modelJsonSchema, modelOutputSchemas } from "../src/library/model-tools.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { withScopeAbortSignal } from "../src/protocol/operations.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -55,15 +56,37 @@ test("mixed any wakes from either native owner; all retains its original Contrac
   const selectors = [f.bound.contractId, f.worker.allocated.id];
   await withContractWaitBarrier(f.world, async barrier => {
     const facet = f.facet(barrier.gitPath);
-    const first = facet.wait({ selectors, timeout: "10s" });
-    await barrier.reads();
-    await f.amend();
-    const changed = await first;
-    assert.equal(changed.reason, "completed");
-    assert.ok(changed.members[0]?.kind === "contract");
-    assert.equal(changed.members[0].observation.changed, true);
-    assert.equal(changed.members[0].observation.summary?.title, "Library verbs");
-    assert.equal(changed.members[0].observation.summary?.phase, "bound");
+    const paths = f.worker.allocated.paths;
+    const turn = await beginTurn(paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
+    const sequence = await appendActivity(paths, { turnSequence: turn.sequence, at: AT, event: { type: "assistant", text: "working" } });
+    const tail = (await Akuma.select(f.world, f.worker.allocated.id).status()).recent;
+    const witnessed = deferred<void>();
+    const prepare = DatabaseSync.prototype.prepare;
+    const mark = t.mock.method(DatabaseSync.prototype, "prepare", function(this: DatabaseSync, sql: string) {
+      // A paced post-baseline probe proves the first coherent Akuma observation returned.
+      if (sql.includes("FROM reports WHERE sequence > ? ORDER BY sequence DESC LIMIT 1")) witnessed.resolve();
+      return prepare.call(this, sql);
+    });
+    try {
+      const first = facet.wait({ selectors, timeout: "10s" });
+      await Promise.race([
+        Promise.all([barrier.reads(), witnessed.promise]),
+        first.then(() => assert.fail("mixed wait stopped before both native observations")),
+      ]);
+      await f.amend();
+      const changed = await first;
+      assert.equal(changed.reason, "completed");
+      assert.ok(changed.members[0]?.kind === "contract");
+      assert.equal(changed.members[0].observation.changed, true);
+      assert.equal(changed.members[0].observation.summary?.title, "Library verbs");
+      assert.equal(changed.members[0].observation.summary?.phase, "bound");
+      const worker = changed.members[1];
+      assert.ok(worker?.kind === "akuma" && worker.observation.kind === "observed");
+      assert.equal(worker.observation.life, "running");
+      assert.equal(worker.observation.events?.at(-1)?.id, sequence);
+      assert.deepEqual(worker.observation.events, tail);
+    } finally { mark.mock.restore(); }
+    await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
 
     const deadline = await withContractWaitEpochs(f.world, async ({ gitPath, observed }) => {
       const controller = new AbortController();
@@ -163,7 +186,8 @@ test("mixed all returns new selected progress without completing or replaying it
   const unrelated = await bornBody(f.world, "abcd0002", AT);
   t.after(() => unrelated.holder.release());
   await beginTurn(unrelated.allocated.paths, { bodySequence: unrelated.body.sequence, startedAt: AT });
-  await beginTurn(f.worker.allocated.paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
+  const paths = f.worker.allocated.paths;
+  const turn = await beginTurn(paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
   assert.equal((await worker.report("old report")).kind, "recorded");
   const input = { selectors: [f.bound.contractId, worker.id], completion: "all" as const };
   let baseline = deferred<void>();
@@ -190,17 +214,39 @@ test("mixed all returns new selected progress without completing or replaying it
     });
     await started(pending);
     await barrier.reads();
-    const recorded = await worker.report("a new milestone");
+    const sequences = [];
+    for (const text of ["later first", "later second"])
+      sequences.push(await appendActivity(paths, { turnSequence: turn.sequence, at: AT, event: { type: "assistant", text } }));
+    const head = "a new milestone\n  details ";
+    const recorded = await worker.report(head + "🙂".repeat(400));
     assert.ok(recorded.kind === "recorded");
     const { exit, value } = await pending;
     assert.equal(exit, 0);
     assert.ok(value.reason === "reported");
-    assert.deepEqual(value.report, { akumaId: worker.id, reportId: recorded.reportId, text: "a new milestone" });
     assert.deepEqual(observations(value).map(member => member.id), input.selectors);
     assert.ok(value.members[0]?.kind === "contract" && value.members[0].observation.changed === undefined);
     assert.ok(value.members[1]?.kind === "akuma" && value.members[1].observation.kind === "observed");
     assert.equal(value.members[1].observation.life, "running");
+    assert.deepEqual(value.members[1].report, {
+      report: recorded.reportId,
+      text: `${head}${"🙂".repeat(299 - head.length)}…`,
+    });
+    assert.deepEqual(value.members[1].observation.events?.map(({ id }) => id), [
+      ...sequences, Number(recorded.reportId.slice("report/".length)),
+    ]);
+    assert.deepEqual(value.members[1].observation.events, (await worker.status()).recent);
     assertWireConformance(Keiyaku.verbs.wait.normal, value);
+    const validate = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(modelJsonSchema(modelOutputSchemas.wait))));
+    assert.equal(validate(value).valid, true, "the published schema accepts the non-leading reporter");
+    const { report: _report, ...withoutReport } = value.members[1];
+    for (const invalid of [
+      { ...value, members: [value.members[0], withoutReport] },
+      { ...value, reason: "completed" },
+    ]) {
+      assert.equal(Keiyaku.verbs.wait.output.safeParse(invalid).success, false);
+      assert.equal(Keiyaku.verbs.wait.normal.safeParse(invalid).success, false);
+      assert.equal(validate(invalid).valid, false);
+    }
   });
 
   assert.equal((await f.facet().wait({ ...input, timeout: "600ms" })).reason, "deadline");
@@ -275,7 +321,7 @@ test("unsettled Akumas use cheap paced probes between initial and deadline snaps
     try {
       const result = await f.facet().wait({ selectors, completion: "all", timeout: "1200ms" });
       assert.equal(result.reason, "deadline");
-      assert.equal(snapshots, 1, "only deadline detail decodes the retained frontier; initial and paced reads use life evidence");
+      assert.equal(snapshots, 2, "only the initial and deadline witnesses decode the retained frontier");
       assert.ok(lifeReads > snapshots + 2, "intervening rounds still probe native completion");
       assert.ok(lifeReads <= 8, "cheap probes retain native pacing instead of running every Contract poll");
       const worker = result.members.find(member => member.kind === "akuma");
@@ -332,10 +378,10 @@ test("deadline wait returns three actual events and settled wait keeps the compl
   assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
   assert.equal(member.observation.life, "running");
   assert.equal(member.observation.lastActivityAt, AT);
-  assert.deepEqual(member.observation.events?.map(event => event.sequence), sequences.slice(-3));
-  assert.deepEqual(member.observation.events?.map(event => event.kind === "said" ? event.text : event.kind), ["same", "same", "last"]);
-  assert.equal(Object.hasOwn(member.observation, "provider"), false);
-  assert.equal(Object.hasOwn(member.observation, "changes"), false);
+  assert.deepEqual(member.observation.events?.map(event => event.id), sequences.slice(-3));
+  const status = await Akuma.select(f.world, f.worker.allocated.id).status();
+  assert.deepEqual(member.observation.events, status.recent);
+  assert.match(member.observation.events?.at(-1)?.text ?? "", /▎ \d+\n +last$/u);
   const text = await runCli(argv, { cwd: f.world, environment: f.environment });
   assert.equal(text.exit, 0);
   assert.equal((text.stdout.match(/same/gu) ?? []).length, 2);
@@ -347,6 +393,10 @@ test("deadline wait returns three actual events and settled wait keeps the compl
 
   const answer = `answer begins\n${"full answer ".repeat(1000)}\n  exact answer tail`;
   await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "answered", answer, session: { sessionId: "answer" } } });
+  const betweenTurns = (await f.facet().wait(input)).members[0];
+  assert.ok(betweenTurns?.kind === "akuma" && betweenTurns.observation.kind === "observed");
+  assert.equal(betweenTurns.observation.life, "running");
+  assert.deepEqual(betweenTurns.observation.events, [], "a running Body between Turns has no current-Turn tail");
   await f.finish();
   accepted(await f.bound.kei.abandon());
   const settled = await f.facet().wait(input);

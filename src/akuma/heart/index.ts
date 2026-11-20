@@ -68,6 +68,7 @@ import {
   tellWasUndelivered,
 } from "./tells.js";
 import {
+  ACTIVITY_LIMIT,
   activityFactSlice,
   statusFacts,
   timelineDataVersion,
@@ -117,8 +118,6 @@ export type {
   TurnOutcome,
 } from "./facts.js";
 export type { ResumeCoordinate } from "../coordinate.js";
-
-const ACTIVITY_LIMIT = 5_000;
 
 export async function readInterruptCompletion(
   paths: AkumaPaths,
@@ -248,19 +247,19 @@ export function createStatusFactReader(paths: AkumaPaths) {
   return {
     life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
     wait: (
-      recent: boolean,
       reportAfter: number | null | undefined,
-      needsOutcome: (snapshot: LifeSnapshot) => boolean,
+      detail: (snapshot: LifeSnapshot) => Readonly<{ outcome: boolean; recent: boolean }>,
       signal?: AbortSignal,
     ): Promise<WaitFacts> =>
       reader.read((heart) => {
         const snapshot = lifeSnapshot(heart);
         const reportFrontier = reportAfter === undefined ? undefined : waitReportFrontier(heart, reportAfter);
-        const outcomeRead = reportFrontier?.report !== undefined || needsOutcome(snapshot);
+        const { outcome: needsOutcome, recent } = detail(snapshot);
+        const outcomeRead = reportFrontier?.report !== undefined || needsOutcome;
         const outcome = outcomeRead ? latestTurnEndFact(heart) : undefined;
         let activity: readonly TimelineFact[] | undefined;
         let activityDiagnostic: string | undefined;
-        if (recent) {
+        if (outcomeRead && recent) {
           try {
             activity = statusFacts(heart);
           } catch (error) {

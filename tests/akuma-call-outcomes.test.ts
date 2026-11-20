@@ -88,17 +88,14 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const originalFork = claudeProvider.fork;
   Reflect.set(claudeProvider, "fork", () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "forked-session" } })));
   t.after(() => Reflect.set(claudeProvider, "fork", originalFork));
-  const history = await api.history({ akuma: parent.akumaId });
-  assert.equal(history.kind, "akuma");
-  if (history.kind !== "akuma") assert.fail("expected history");
-  const turn = history.events.find(row => row.kind === "outcome");
-  assert.ok(turn);
-  const child = await api.fork({ akuma: parent.akumaId, at: `turn/${turn.turnSequence}`, repo });
+  const latest = await api.history({ akuma: parent.akumaId, last: true });
+  assert.ok(latest.kind === "akuma-answer");
+  const child = await api.fork({ akuma: parent.akumaId, at: latest.historyId, repo });
   assert.ok(child.kind === "failed", "fork association must stop after birth");
   assert.equal(child.failure.stage, "dispatch");
   assert.equal((await readSoul(pathsForAkumaId(world, child.childAkumaId)))?.id, child.childAkumaId);
   assertWireRoundTrip(forkResultSchema, child);
-  assert.equal(classifyVerb("fork", { akuma: parent.akumaId, at: `turn/${turn.turnSequence}` }, { kind: "returned", value: child }), "failed");
+  assert.equal(classifyVerb("fork", { akuma: parent.akumaId, at: latest.historyId }, { kind: "returned", value: child }), "failed");
 
   const forkFailure = new Error("launcher failed after fork Soul");
   let forkedChild: typeof child.childAkumaId | undefined;
@@ -114,7 +111,7 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
     }
     throw forkFailure;
   });
-  await assert.rejects(failedFork.fork({ akuma: parent.akumaId, at: `turn/${turn.turnSequence}` }), (error: unknown) => {
+  await assert.rejects(failedFork.fork({ akuma: parent.akumaId, at: latest.historyId }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.cause, forkFailure);
     assert.ok(forkedChild && error.message.includes(forkedChild));

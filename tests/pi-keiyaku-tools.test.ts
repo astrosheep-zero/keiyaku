@@ -304,16 +304,17 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.ok(schema);
       const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(wake.structuredContent);
       assert.equal(validation.valid, true, validation.errorMessage);
-      const { reason, report } = wake.structuredContent as {
-        reason: string; report: { akumaId: string; reportId: string; text: string; clipped?: true };
-      };
+      const { reason, members: [member] } = Keiyaku.verbs.wait.normal.parse(wake.structuredContent);
       assert.equal(reason, "reported");
-      assert.equal(report.akumaId, id);
-      assert.equal(report.reportId, recorded.reportId);
-      assert.equal(report.clipped, true);
-      assert.ok(milestone.startsWith(report.text) && report.text.length < milestone.length);
+      assert.ok(member);
+      assert.equal(member.kind, "akuma");
+      assert.ok(member.report);
+      assert.equal(member.observation.id, id);
+      assert.equal(member.report.report, recorded.reportId);
+      assert.match(member.report.text, /…$/u);
+      assert.ok(milestone.startsWith(member.report.text.slice(0, -1)) && member.report.text.length < milestone.length);
       assert.ok(text(wake).includes(recorded.reportId));
-      assert.match(text(wake), /worker reached the checkpoint/u);
+      assert.match(text(wake), /worker reached the checkpoint[\s\S]*…/u);
       assert.ok(processExists(pid));
       await native.run(`text(await tools.keiyaku_history(${JSON.stringify({ selector: id, item: recorded.reportId })}));`);
       assert.equal(text(resultFor(native.results, "keiyaku_history")), milestone);

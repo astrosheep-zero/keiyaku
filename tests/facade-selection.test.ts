@@ -753,7 +753,7 @@ test("a native wait probes lifecycle without decoding retention while each read 
   const first = await reader.read();
   const second = await reader.read();
   assert.equal(first.status.work.kind, "open");
-  assert.equal(first.rows.filter((row) => row.kind === "thought").length, 6, "the direct read retains every row");
+  assert.equal(first.rows.filter((row) => row.text.trimStart().startsWith("think ")).length, 6, "the direct read retains every row");
   assert.notStrictEqual(first.status, second.status, "each observation derives fresh current work");
   assert.notStrictEqual(first.rows, second.rows, "each observation decodes its own retained rows");
   assert.deepEqual(first.status.work, second.status.work);

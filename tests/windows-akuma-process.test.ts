@@ -233,18 +233,14 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
       ["request"],
     );
     assert.equal(status.life, "asleep", JSON.stringify(status));
-    assert.equal(status.outcome?.kind, "answered");
-    const history = await handle.history();
-    const outcomeRow = history.rows.find((row) => row.kind === "outcome");
-    const outcome = outcomeRow?.outcome;
-    assert.equal(outcome?.kind, "answered");
-    if (outcome?.kind === "answered" && outcomeRow !== undefined) {
-      assert.equal(outcome.answer, "fixture answer");
-      const historyId = `turn/${outcomeRow.turnSequence}`;
-      const exact = await Akumas.of(worldRoot).history({ akuma: handle.id, id: historyId });
-      assert.equal(exact.kind, "akuma-exact");
-      if (exact.kind === "akuma-exact") assert.deepEqual(exact.outcome, outcome);
-    }
+    assert.ok(status.outcome?.kind === "answered");
+    assert.equal(status.outcome.answer, "fixture answer");
+    const exact = await Akumas.of(worldRoot).history({ akuma: handle.id, id: status.outcome.historyId });
+    assert.ok(exact.kind === "akuma-exact");
+    assert.deepEqual(exact.outcome, { kind: "answered", answer: status.outcome.answer });
+    const page = await handle.history();
+    assert.equal(page.rows.at(-1)?.id, exact.sequence);
+    assert.ok(page.rows.at(-1)?.text.includes(status.outcome.historyId));
     operationFailed = false;
   } finally {
     try {

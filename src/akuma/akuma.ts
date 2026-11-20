@@ -18,7 +18,7 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import { activityRowSchema } from "./projection.js";
+import { timelineItemSchema } from "./projection.js";
 import { currentWorkSchema, reportedFileChangeSchema } from "./status-projection.js";
 import { boundedMap } from "./read-pool.js";
 
@@ -71,7 +71,7 @@ export const akumaStatusSchema = z
     surveillants: surveillanceAudienceSchema.exactOptional(),
     lastActivityAt: z.string().exactOptional(),
     work: currentWorkSchema,
-    recent: z.array(activityRowSchema).max(3).readonly().exactOptional(),
+    recent: z.array(timelineItemSchema).max(3).readonly().exactOptional(),
     changes: z.array(reportedFileChangeSchema).nonempty().readonly().exactOptional(),
     moreChanges: z.literal(true).exactOptional(),
     outsideChanges: z.number().int().positive().exactOptional(),

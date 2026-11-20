@@ -783,16 +783,26 @@ test("SDK report records the executing actor and renders its attribution", async
   const input = { text: "MCP milestone\n  exact text\n" };
   const result = await client.callTool({ name: "report", arguments: input });
   assert.equal(result.isError, false);
-  const history = await Akuma.select(world, born.allocated.id).history();
-  const report = history.rows.find((row) => row.kind === "report");
-  assert.ok(report?.kind === "report");
+  const id = born.allocated.id;
+  const history = await Akuma.select(world, id).history();
+  const item = history.rows.at(-1)!;
+  const report = await Akumas.of(world).history({ akuma: id, id: `report/${item.id}` });
+  assert.ok(report.kind === "akuma-report");
   assert.equal(report.text, input.text);
+  const status = await client.callTool({ name: "status", arguments: { selector: id } });
+  const native = await Akumas.of(world).status({ akuma: id });
+  assert.deepEqual(status.structuredContent, native);
+  assert.deepEqual(native.recent, history.rows);
+  const cliStatus = await cliJson(["-C", root, "status", id], {
+    environment: { HOME: root, USERPROFILE: root, KEIYAKU_HOME: root },
+  });
+  assert.deepEqual(cliStatus.value, status.structuredContent);
   assert.equal(report.bodySequence, born.body.sequence);
   assert.equal(report.turnSequence, turn.sequence);
-  for (const [id, expected] of [[`report/${report.sequence}`, input.text], [String(report.sequence), `report: ${input.text}`]] as const) {
-    const exact = await client.callTool({ name: "history", arguments: { selector: born.allocated.id, item: id } });
+  for (const [ref, expected] of [[`report/${report.sequence}`, input.text], [String(report.sequence), `report: ${input.text}`]] as const) {
+    const exact = await client.callTool({ name: "history", arguments: { selector: id, item: ref } });
     assert.deepEqual(exact.content, [{ type: "text", text: expected }]);
-    const cli = await runCli(["-C", root, "history", born.allocated.id, "--id", id], {
+    const cli = await runCli(["-C", root, "history", id, "--id", ref], {
       environment: { HOME: root, USERPROFILE: root, KEIYAKU_HOME: root },
     });
     assert.equal(cli.exit, 0, cli.stderr);

@@ -240,8 +240,10 @@ console.log(JSON.stringify({
     const reportSequence = (reportId: string) => Number(reportId.slice("report/".length));
     assert.ok(reportSequence(resumed.current.reportId) > reportSequence(first.current.reportId));
     assert.equal(resumed.current.kind, "recorded");
-    assert.deepEqual((await handle.history()).rows.filter(row => row.kind === "report").map(row => row.text),
-      ["first report", "wake report"]);
+    for await (const window of handle.stream()) {
+      assert.deepEqual(window.rows.filter(row => row.kind === "report").map(row => row.text), ["first report", "wake report"]);
+      break;
+    }
     const runtime = () => readFileSync(join(world, "runtime.jsonl"), "utf8").trim().split("\n")
       .map(line => JSON.parse(line) as { prompt: string });
     for (const { prompt: instructions } of runtime()) {

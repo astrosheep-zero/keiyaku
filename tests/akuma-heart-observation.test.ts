@@ -113,9 +113,10 @@ test("live Ask shares its exact witness and retires the retained Heart reader", 
     const outcome = { kind: "failed", diagnostic: "test settlement" } as const;
     const result = await owner.tellOutcome("asked", {
       timeoutMs: 3000,
-      observe: async ({ status, rows }) => {
+      observe: async ({ status }) => {
         assert.equal(status.work.turn?.sequence, turnSequence, "notification may run after the snapshot, not split it");
-        if (rows.every((row) => row.kind !== "outcome")) await endTurn(paths, { turnSequence, outcome, completedAt: AT });
+        if (status.work.outcome === undefined) await endTurn(paths, { turnSequence, outcome, completedAt: AT });
+        else assert.equal(status.work.outcome.historyId, exact);
       },
     });
     assert.deepEqual(result, { reason: "completed", outcome, completedAt: AT });

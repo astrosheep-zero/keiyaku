@@ -817,6 +817,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     { source: "akuma/read-pool.ts", allow: [] },
+    { source: "akuma/timeline-text.ts", allow: [types("akuma/projection.ts"), any("text-preview.ts")] },
     { source: "akuma/projection.ts", allow: [any("akuma/heart/**"), runtime("history.ts", ["selectHistoryPage"])] },
     {
       source: "akuma/**",
@@ -836,6 +837,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       deny: [any("library/**"), any("akuma/detached-body.ts")],
     },
     { source: "history.ts", allow: [] },
+    { source: "text-preview.ts", allow: [] },
     { source: "runtime/proc/**", allow: [any("runtime/proc/**")] },
     {
       source: "verification/**",
@@ -886,6 +888,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/index.ts"),
         types("akuma/akuma-selection-execution.ts", ["AskObserver", "AskProgress"]),
         types("akuma/akuma-observe.ts", ["LiveStatusObservation"]),
+        types("akuma/projection.ts", ["TimelineItem"]),
         types("akuma/call-initial-tell.ts", ["TellResult", "TellWake"]),
         types("identity/selector.ts", ["AkumaAlias"]),
         types("library/address.ts", ["AkumaAddressRefusal", "AkumaSetAddressInput"]),
@@ -965,6 +968,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("core/facts/types.ts", ["targetName", "contractId"]),
         any("akuma/**"),
         any("cli/**"),
+        any("text-preview.ts"),
         types("protocol/execution-observation.ts"),
         types("protocol/read/status.ts"),
         any("coordination/**"),

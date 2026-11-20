@@ -66,6 +66,8 @@ export function waitReportFrontier(database: DatabaseSync, after: number | null)
   return row === undefined ? undefined : { sequence: row.sequence, report: decodeReportRow(row) };
 }
 
+export const ACTIVITY_LIMIT = 5_000;
+
 export function pruneActivityFacts(database: DatabaseSync, limit: number, protectionReleased = false): void {
   const highest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as {
     value: number;

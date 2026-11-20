@@ -12,7 +12,7 @@ import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/e
 import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
-import { historySchema, tellSchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { historySchema, tellSchema, type History } from "../plugins/paseo/plugin/server/keiyaku.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { tellPresentation } from "../plugins/paseo/plugin/server/message.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
@@ -43,27 +43,28 @@ const nodeRequire = createRequire(import.meta.url);
  * The public package's own admission, read directly. Comparing it with what the
  * transport returns makes the boundary transparent to the producer's own values.
  */
-async function producer(): Promise<{ select(world: string, akuId: string): {
-  history(options: Readonly<{ limit: number }>): Promise<History>;
-  status(): Promise<unknown>;
-} }> {
-  const sdk = await import(PUBLIC_ENTRY) as unknown as {
-    Akuma: { select: (world: string, akuId: string) => {
-      history(options: Readonly<{ limit: number }>): Promise<History>; status(): Promise<unknown> } };
-  };
-  return { select: (world, akuId) => sdk.Akuma.select(world, akuId) };
+type ProducerHandle = Pick<ReturnType<typeof import("../src/index.js").Akuma.select>, "stream" | "status">;
+type Producer = { select(world: string, akuId: string): ProducerHandle };
+
+async function producer(): Promise<Producer> {
+  const sdk = await import(PUBLIC_ENTRY) as { Akuma: Producer };
+  return sdk.Akuma;
 }
-/** One retained row exactly as the producer admits it. */
-async function producerRow(root: string, akuId: string, sequence: number): Promise<Row | undefined> {
-  const rows = (await (await producer()).select(root, akuId).history({ limit: 200 })).rows;
-  return rows.find((row) => row.sequence === sequence);
+
+async function producerWindow(root: string, akuId: string) {
+  const iterator = (await producer()).select(root, akuId).stream()[Symbol.asyncIterator]();
+  try {
+    const result = await iterator.next();
+    if (result.done) assert.fail("the installed producer must emit an initial window");
+    return result.value;
+  } finally {
+    await iterator.return?.();
+  }
 }
 /** The model configuration the public status itself admits, if any. */
 async function producerModel(root: string, akuId: string): Promise<Readonly<{ provider?: string; model?: string; caller: unknown }>> {
-  const fields = await (await producer()).select(root, akuId).status() as Record<string, unknown>;
-  return { ...(typeof fields.provider === "string" ? { provider: fields.provider } : {}),
-    ...(typeof fields.model === "string" ? { model: fields.model } : {}),
-    caller: (fields.birth as { caller: unknown }).caller };
+  const { provider, model, birth } = await (await producer()).select(root, akuId).status();
+  return { ...(provider === undefined ? {} : { provider }), ...(model === undefined ? {} : { model }), caller: birth.caller };
 }
 
 /** The host-supplied module surface Paseo's evaluator provides to a server bundle. */
@@ -145,7 +146,8 @@ test("the in-process transport serves the real public package's own stream, stat
   assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
   const report = rows.find((row) => row.kind === "report");
   assert.ok(report?.kind === "report");
-  assert.deepEqual(report, await producerRow(root, value.allocated.id, report.sequence));
+  const native = await producerWindow(root, value.allocated.id);
+  assert.deepEqual(report, native.rows.find((row) => row.sequence === report.sequence));
   assert.equal(report.bodySequence, body.sequence);
   assert.equal(report.turnSequence, started.sequence);
   const events: ProviderEvent[] = [];
@@ -156,7 +158,7 @@ test("the in-process transport serves the real public package's own stream, stat
     event.item.id === `keiyaku:report/${report.sequence}` && event.item.message === "Progress report: working").length, 1);
   const tool = rows.find((row) => row.kind === "tool" && row.name === "bash" && row.phase === "completed");
   assert.ok(tool?.kind === "tool");
-  assert.deepEqual(tool, await producerRow(root, value.allocated.id, tool.sequence),
+  assert.deepEqual(tool, native.rows.find((row) => row.sequence === tool.sequence),
     "the transport boundary is transparent to the producer's own record, identity included");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
   assert.deepEqual(tool.result, { status: "ok", message: "hello", exitCode: 0, output: "hello" },
@@ -227,7 +229,7 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
     result: { content: [{ type: "text", text: "3 passing\n" }] } });
 
   const root = await realpath(value.root);
-  const history = historySchema.parse(await (await producer()).select(root, value.allocated.id).history({ limit: 200 }));
+  const history = historySchema.parse(await producerWindow(root, value.allocated.id));
   const events: ProviderEvent[] = [];
   const mirror = createMirror("session", (event) => { ProviderEventSchema.parse(event); events.push(event); });
   mirror.publish(history);

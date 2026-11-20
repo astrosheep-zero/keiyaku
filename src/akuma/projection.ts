@@ -164,9 +164,8 @@ export const toolRowSchema = z
   })
   .refine((row) => (row.phase === "completed") === (row.result !== undefined), "only completed tools have results")
   .readonly();
-export const activityRowSchema = z.union([
+export const exactActivityRowSchema = z.union([
   permissionRowSchema,
-  turnRowSchema,
   callRowSchema,
   reportRowSchema,
   surveillanceFactSchema,
@@ -175,18 +174,22 @@ export const activityRowSchema = z.union([
   textRowSchema("note"),
   tellRowSchema,
   toolRowSchema,
-  outcomeRowSchema,
 ]);
-export const activityHistorySchema = z
-  .strictObject({
-    rows: z.array(activityRowSchema).readonly(),
-    omitted: z.number(),
-    hasEarlier: z.boolean(),
-    hasLater: z.boolean(),
-    historyLost: z.boolean(),
-    lowestRetained: z.number().nullable(),
-    highest: z.number().nullable(),
-  })
+export const activityRowSchema = z.union([turnRowSchema, ...exactActivityRowSchema.options, outcomeRowSchema]);
+export const timelineItemSchema = z.strictObject({ id: countSchema, text: z.string() }).readonly();
+const historyWindowSchema = z.strictObject({
+  omitted: z.number(),
+  hasEarlier: z.boolean(),
+  hasLater: z.boolean(),
+  historyLost: z.boolean(),
+  lowestRetained: z.number().nullable(),
+  highest: z.number().nullable(),
+});
+export const activityHistorySchema = historyWindowSchema
+  .extend({ rows: z.array(timelineItemSchema).readonly() })
+  .readonly();
+export const activityStreamSnapshotSchema = historyWindowSchema
+  .extend({ rows: z.array(activityRowSchema).readonly() })
   .readonly();
 export type TurnStartRow = z.output<typeof turnRowSchema>;
 export type ReportRow = z.output<typeof reportFactSchema>;
@@ -194,12 +197,14 @@ export type PermissionRow = z.output<typeof permissionRowSchema>;
 export type OutcomeRow = z.output<typeof outcomeRowSchema>;
 export type ToolRow = z.output<typeof toolRowSchema>;
 export type ActivityRow = z.output<typeof activityRowSchema>;
+export type ExactActivityRow = z.output<typeof exactActivityRowSchema>;
+export type TimelineItem = z.output<typeof timelineItemSchema>;
 export type ActivityHistory = z.output<typeof activityHistorySchema>;
 export type { TellRow } from "./heart/facts.js";
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
   | Readonly<{ kind: "exact-report"; report: ReportRow }>
-  | Readonly<{ kind: "exact-activity"; row: ActivityRow }>
+  | Readonly<{ kind: "exact-activity"; row: ExactActivityRow }>
   | Readonly<{ kind: "unknown-history"; id: string }>;
 export type HistoryCursor = Readonly<{ before?: number; since?: number; limit: number }>;
 
@@ -327,10 +332,10 @@ export function projectFact(fact: TimelineFact): ActivityRow {
   }
 }
 
-export function selectHistory(
-  timeline: Readonly<{ rows: readonly ActivityRow[]; lowestRetained: number | null; highest: number | null }>,
+export function selectHistory<Row extends Readonly<{ sequence: number }>>(
+  timeline: Readonly<{ rows: readonly Row[]; lowestRetained: number | null; highest: number | null }>,
   cursor: HistoryCursor,
-): ActivityHistory {
+): Omit<ActivityHistory, "rows"> & Readonly<{ rows: readonly Row[] }> {
   const { rows, omitted } = selectHistoryPage(timeline.rows, (row) => row.sequence, cursor);
   const historyLost =
     cursor.since !== undefined

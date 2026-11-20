@@ -138,9 +138,11 @@ terminal widths and state lifecycle, delivery, and native gate verdicts in words
 They add no aggregate alarm or age-based tone judgment.
 Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their
 Debt-facing presentation. Contract, Git, and Akuma renderers receive their
-facts from their respective public results. Activity summaries retain the
-concrete work observed rather than substituting a broad category; a tool row
-names the actual tool observed with a bounded argument preview, and a partial
+facts from their respective public results. Recent Akuma activity uses the
+owner's shared row wording. Renderers present supplied snapshot text without
+reconstructing activity or applying a second aperture; exact presentation shares
+the neutral wording without imposing the snapshot bound. A tool row names the
+actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Rendering does not interpret foreign command or
 parameter dialects: observed arguments use the shared bounded preview while
 copyable paths stay whole. Native tool rows preserve the work preview and expose
@@ -335,8 +337,8 @@ remain distinct beside thin journal summary facts. Akuma summaries retain native
 life, pending input, known unsupported resume and unreadable diagnostics; stopped
 life takes precedence over an older answer. An exact-turn outcome is labeled
 and its answer text remains complete, including an older settled answer rather
-than implying new work. Running deadline members render their bounded native
-recent events and any local activity unavailability, never a full status panel.
+than implying new work. Running members render the compact activity witnessed
+by the native observation and any local unavailability, never a full status panel.
 Unobserved peers remain unknown, and running peers remain running.
 Single-target aliases supplement identity. Summary text is bounded, never identity
 or the full outcome payload.

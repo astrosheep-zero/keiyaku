@@ -3,7 +3,8 @@ import test from "node:test";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import { AkumaKillError } from "../src/akuma/akuma-errors.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
-import { type ActivityHistory, type ActivityRow, type OutcomeRow } from "../src/akuma/projection.js";
+import type { ActivityRow, OutcomeRow } from "../src/akuma/projection.js";
+import { compactTimelineItem } from "../src/akuma/timeline-text.js";
 import {
   DEFAULT_CONTEXT,
   historyText,
@@ -51,7 +52,6 @@ function statusOf(
     id,
     life,
     work: projectCurrentWork(rows),
-    ...(rows.length === 0 ? {} : { recent: rows.slice(-3) }),
     ...extra,
   });
 }
@@ -129,7 +129,7 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
     {
       kind: "akuma",
       akumaId: parseAkumaId("aku/worker/abcd1234").id,
-      events,
+      events: events.map(compactTimelineItem),
       omitted: 2,
       lowestRetainedSequence: 1,
       highestSequence: 8,
@@ -144,14 +144,14 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
 });
 
 test("paged history exposes copyable report and Turn coordinates with indented payloads", () => {
-  const events: ActivityHistory["rows"] = [
+  const events: readonly ActivityRow[] = [
     { kind: "report", sequence: 123456789, bodySequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "progress\n  detail" },
     { ...answeredOutcome(10, "answer\n  nested"), turnSequence: 123456789 },
     { ...answeredOutcome(11, ""), turnSequence: 2 },
     { kind: "outcome", sequence: 12, turnSequence: 3, at: AKUMA_ACTIVITY_AT, outcome: { kind: "failed", diagnostic: "failed\n  cause" } },
     { kind: "outcome", sequence: 13, turnSequence: 4, at: AKUMA_ACTIVITY_AT, outcome: { kind: "canceled" } },
   ];
-  const page = { kind: "akuma" as const, akumaId: SPECIMEN_ID, events };
+  const page = { kind: "akuma" as const, akumaId: SPECIMEN_ID, events: events.map(compactTimelineItem) };
   const value = { kind: "returned" as const, value: page };
   const query = { selector: SPECIMEN_ID };
   const narrow = renderVerb("history", query, value, { columns: 10, color: false });
@@ -178,7 +178,7 @@ test("history renders the full exact report without confusing it with an outcome
 
 test("history keeps long call and Tell inputs to one bounded input line", () => {
   const text = "Final minimal correction ".repeat(12);
-  const rows: ActivityHistory["rows"] = [
+  const rows: readonly ActivityRow[] = [
     { kind: "call", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text },
     {
       kind: "tell",
@@ -194,7 +194,7 @@ test("history keeps long call and Tell inputs to one bounded input line", () => 
     {
       kind: "akuma",
       akumaId: parseAkumaId("aku/elite/b9977141").id,
-      events: rows,
+      events: rows.map(compactTimelineItem),
       lowestRetainedSequence: 1,
       highestSequence: 2,
     },
@@ -203,7 +203,7 @@ test("history keeps long call and Tell inputs to one bounded input line", () => 
   assert.deepEqual(lines.slice(1), [
     "▸ 1",
     `  ${text.slice(0, 160)}…`,
-    "⧗ tell/long-input · 2",
+    "⧗ 2",
     `  ${text.slice(0, 160)}…`,
   ]);
 });
@@ -222,7 +222,7 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
   const status = statusOf("aku/worker/abcd1234", "asleep", rows);
   const text = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.match(text, /pending input 1/u);
-  assert.deepEqual(observation(status).work.pending, [{ id: 1, tellId: "tell/pending" }]);
+  assert.deepEqual(observation(status).work.pending, [{ id: 1 }]);
   assert.match(text, /⧗ pending tell$/u);
 });
 
@@ -501,7 +501,7 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
       changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
     }),
   ];
-  const lines = historyText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {});
+  const lines = historyText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events: events.map(compactTimelineItem) }, {});
   assert.match(lines, /path  src\/unknown\.ts\n  detail  ~/u);
   assert.match(lines, /path  src\/known\.ts\n  detail  \+2 -1/u);
   assert.doesNotMatch(lines, /\+\? -\?/u);
