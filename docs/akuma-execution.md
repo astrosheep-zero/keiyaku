@@ -20,16 +20,14 @@ retire only provider custody it directly owns and exit.
 Birth establishes Soul without supplying provider input. A Body starts a new
 Turn only from eligible admitted Tells and binds those Tells before provider
 submission. Without eligible input it settles idle without starting a provider.
-A Turn freezes its first Tell's submitting initiator for outcome addressing.
-Later coalesced inputs and live steering do not replace the Turn's
-single owner. A Turn's audience includes that opening identity and the
-initiators of every Tell bound to it, without duplicates. Live steering and
-launch routing decide how input enters the Turn, never who hears its outcome.
-A subsequent Turn takes its own opening input's identity, including explicit
-absence; it never inherits the birth caller or the Body environment.
+A Turn freezes its first Tell's submitting initiator. Later coalesced inputs
+and live steering retain their own Tell bindings without replacing that opening
+attribution. A subsequent Turn takes its own opening input's identity, including
+explicit absence; it never inherits the birth caller or the Body environment.
 This attribution does not affect execution. Host integrations submit opaque
 Owners directly; generic execution retains them unchanged, independently of
-descriptive caller lineage or producing environment.
+descriptive caller lineage or producing environment. [Heart](akuma-heart.md)
+judges the notification audience.
 
 An open Turn's wait retains observation work in bounded amount rather than in
 proportion to elapsed control observations. Waiting on provider narration, Tell

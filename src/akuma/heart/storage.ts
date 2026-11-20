@@ -40,6 +40,7 @@ import {
 import { insertTellFact } from "./tells.js";
 import { pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
+import { insertSurveillanceFact } from "./surveillance.js";
 
 const ACTIVITY_LIMIT = 5_000;
 const SQLITE_CANTOPEN = 14;
@@ -120,7 +121,7 @@ async function beginTransaction(
   path: string,
   mode: "read" | "write",
   signal?: AbortSignal,
-): Promise<boolean> {
+): Promise<ReturnType<typeof checkHeartSchema>> {
   return await acquire(() => {
     try {
       database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
@@ -217,7 +218,7 @@ export async function withHeartTransaction<T>(
   signal?.throwIfAborted();
   using reader = await openExistingDatabase(paths.heart, 0, "ro");
   // Pin the predecessor's WAL through a possible rollback; current writers close normally.
-  if (!(await acquire(() => checkHeartSchema(reader, paths.heart, true), signal))) reader.close();
+  if ((await acquire(() => checkHeartSchema(reader, paths.heart, true), signal)) === undefined) reader.close();
   signal?.throwIfAborted();
   using database = await openExistingDatabase(paths.heart, 0);
   const upgrade = await beginTransaction(database, paths.heart, "write", signal);
@@ -232,12 +233,16 @@ function rollbackTransaction(database: DatabaseSync): void {
   }
 }
 
-function finishTransaction<T>(database: DatabaseSync, body: (database: DatabaseSync) => T, upgrade = false): T {
+function finishTransaction<T>(
+  database: DatabaseSync,
+  body: (database: DatabaseSync) => T,
+  upgrade?: ReturnType<typeof checkHeartSchema>,
+): T {
   try {
     let changes: ReturnType<DatabaseSync["prepare"]> | undefined;
-    if (upgrade) {
+    if (upgrade !== undefined) {
       database.exec("PRAGMA cache_spill=OFF");
-      upgradeHeartSchema(database);
+      upgradeHeartSchema(database, upgrade);
       changes = database.prepare("SELECT total_changes() AS count");
       changes.setReadBigInts(true);
     }
@@ -303,12 +308,14 @@ export class HeldAkumaLeash {
     paths: AkumaPaths,
     soul: Soul,
     session?: Omit<SessionFact, "sequence">,
+    owner?: string,
   ): Promise<"born" | "already-born" | "sealed"> {
     if (sealExists(this.database)) return "sealed";
     return await withHeartTransaction(paths, (heart) => {
       if (soulFact(heart) !== null) return "already-born";
       insertSoulFact(heart, soul);
       if (session !== undefined) insertSessionFact(heart, session);
+      if (typeof owner === "string" && owner !== "") insertSurveillanceFact(heart, owner, false, soul.createdAt);
       return "born";
     });
   }
@@ -351,14 +358,11 @@ export class HeldAkumaLeash {
     return { sequence, leashTakenAt: input.leashTakenAt };
   }
 
-  async recordBodyHung(
-    paths: AkumaPaths,
-    input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
-  ): Promise<void> {
+  async recordBodyHung(paths: AkumaPaths, input: Readonly<{ sequence: number; diagnostic: string; at: string }>) {
     if (this.closed || this.bodySequence !== input.sequence) {
       throw new Error(`Akuma Body ${input.sequence} is not owned by this leash`);
     }
-    await withHeartTransaction(paths, (heart) => markBodyHung(heart, input));
+    return await withHeartTransaction(paths, (heart) => markBodyHung(heart, input));
   }
 
   async settleStop(

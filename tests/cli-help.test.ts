@@ -46,6 +46,8 @@ test("command family and leaf help expose executable usage and flags", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("spawn"), /\[--workdir <path>\]/u);
+  assert.match(renderAkumaHelp("surveil"), /usage  keiyaku surveil <aku\/\.\.\.\|@name>/u);
+  assert.match(renderAkumaHelp("unsurveil"), /usage  keiyaku unsurveil <aku\/\.\.\.\|@name>/u);
   const verifyHelp = renderContractHelp("verify");
   assert.match(verifyHelp, /usage  keiyaku verify/u);
   assert.match(verifyHelp, /--index <n>/u);

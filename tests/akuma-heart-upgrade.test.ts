@@ -14,11 +14,13 @@ import {
   appendActivity,
   cancelBodyTurns,
   HeldAkumaLeash,
+  activitySlice,
   readHeart,
   readTell,
   readTellAction,
   readTurn,
   recordReport,
+  recordSurveillance,
   recordTellReceipt,
 } from "../src/akuma/heart/index.js";
 import { HeartNeedsUpgradeError, LEASH_SCHEMA } from "../src/akuma/heart/schema.js";
@@ -39,7 +41,7 @@ const needsUpgrade = {
 
 // This is deliberately the old DDL, including both CHECK constraints, not a
 // current Heart relabeled as old or a migration generated from current source.
-async function legacyFixture(version: 29 | 30 | 31, wal: boolean, prepare?: (database: DatabaseSync) => void) {
+async function legacyFixture(version: 29 | 30 | 31 | 32, wal: boolean, prepare?: (database: DatabaseSync) => void) {
   const owner = await soulFixture("kei-old-heart-");
   const { id, paths } = await allocateAkumaDirectory({
     worldRoot: owner.root,
@@ -62,7 +64,7 @@ async function legacyFixture(version: 29 | 30 | 31, wal: boolean, prepare?: (dat
       AND answer_json IS NULL AND diagnostic IS NULL)
     OR (outcome IS NULL`,
         );
-    if (version === 31)
+    if (version >= 31)
       schema =
         schema.replace("'tell', 'turn-end'", "'tell', 'turn-end', 'report'") +
         `
@@ -113,7 +115,7 @@ async function legacyFixture(version: 29 | 30 | 31, wal: boolean, prepare?: (dat
     database.prepare("INSERT INTO tell_receipts VALUES (1, 'fence', NULL, 1, 'old-fence', 'accepted', ?)").run(at);
     database.prepare("INSERT INTO tell_dispositions VALUES (1, ?, NULL)").run(at);
     database.exec("INSERT INTO tell_disposition_members VALUES (1, 'pending')");
-    if (version === 31) {
+    if (version >= 31) {
       database.exec(
         `INSERT INTO timeline VALUES (12, 'report'), (13, 'tell'), (14, 'tell'), (15, 'tell'), (16, 'tell');`,
       );
@@ -150,14 +152,29 @@ async function legacyFixture(version: 29 | 30 | 31, wal: boolean, prepare?: (dat
         )
         .run(id, at);
     }
+    if (version === 32) {
+      // The current predecessor shipped this terminal evidence table, and new
+      // v32 Hearts no longer created the legacy receipt table.
+      database.exec(`
+        CREATE TABLE tell_terminal_receipts (
+          tell_id TEXT NOT NULL REFERENCES tells(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          received_at TEXT NOT NULL,
+          undelivered INTEGER NOT NULL CHECK (undelivered = 0 OR (undelivered = 1 AND kind = 'undelivered')),
+          PRIMARY KEY (tell_id, kind)
+        ) STRICT;
+        DROP TABLE tell_receipts;
+      `);
+      database.prepare("INSERT INTO tell_terminal_receipts VALUES ('told', 'launch', ?, 0)").run(at);
+    }
     database
       .prepare("INSERT INTO control VALUES ('stop', '{\"bodySequence\":2}', ?), ('pause', ?, ?)")
-      .run(at, JSON.stringify({ bodySequence: 2, frontierTellId: version === 31 ? "bound-only" : "pending" }), at);
+      .run(at, JSON.stringify({ bodySequence: 2, frontierTellId: version >= 31 ? "bound-only" : "pending" }), at);
     database.prepare("INSERT INTO kills VALUES (1, 1, 'killed', ?)").run(at);
     if (version === 30) database.exec("UPDATE turns SET outcome = 'canceled', diagnostic = NULL WHERE sequence = 6");
     prepare?.(database);
     database.exec(`UPDATE sqlite_sequence SET seq = 9000 WHERE name = 'timeline';
-      UPDATE activity_retention SET checked_sequence = ${version === 31 ? 16 : 3}; COMMIT`);
+      UPDATE activity_retention SET checked_sequence = ${version === 32 ? 9000 : version === 31 ? 16 : 3}; COMMIT`);
     assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     const leash = new DatabaseSync(paths.leash);
     try {
@@ -196,7 +213,7 @@ for (const [version, wal] of [[29, false], [29, true], [30, false], [30, true]] 
       const refused = (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.ok(error.message.includes(paths.heart));
-        assert.match(error.message, new RegExp(`schema version must be 32; found ${version}`, "u"));
+        assert.match(error.message, new RegExp(`schema version must be 33; found ${version}`, "u"));
         assert.match(
           error.message,
           /No converter.*Stop all writers via their owning build before copying the entire custody directory/u,
@@ -229,8 +246,8 @@ function retainedHistory(path: string, predecessorOnly = false) {
     const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name").all();
     return {
       version: db.prepare("SELECT version FROM akuma_schema").get()?.version,
-      tables: tables.filter(({ name }) => !predecessorOnly || (name !== "akuma_schema" && name !== "tell_terminal_receipts"))
-        .map(({ name, sql }) => ({ sql, rows: db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all() })),
+      tables: tables.filter(({ name }) => !predecessorOnly || !["akuma_schema", "tell_terminal_receipts", "surveillance"].includes(String(name)))
+        .map(({ name, sql }) => ({ name, sql: predecessorOnly && name === "timeline" ? undefined : sql, rows: db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all().map((row) => ({ ...row })) })),
     };
   } finally {
     db.close();
@@ -252,8 +269,8 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
     assert.deepEqual(identity.value.self, { kind: "akuma", akumaId: id, world: root });
     assert.ok(typeof identity.value.initiator === "object");
     assert.equal(identity.value.initiator.kind, "unavailable");
-    assert.match(identity.value.initiator.diagnostic, /schema version must be 32; found 31/u);
-    assert.match(identity.value.profileUnavailable ?? "", /schema version must be 32; found 31/u);
+    assert.match(identity.value.initiator.diagnostic, /schema version must be 33; found 31/u);
+    assert.match(identity.value.profileUnavailable ?? "", /schema version must be 33; found 31/u);
     assert.deepEqual(custodyBytes(paths), original);
 
     await recordTellReceipt(paths, { evidence: "exact", tellId: "also-mapped", kind: "accepted", receivedAt: later });
@@ -273,7 +290,7 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
       (await readHeart(paths)).pending.map(({ id }) => id),
       ["pending", "bound-only"],
     );
-    assert.deepEqual(retainedHistory(paths.heart, true), { ...before, version: 32 });
+    assert.deepEqual(retainedHistory(paths.heart, true), { ...before, version: 33 });
     await withReadOnlyHeart(paths, (db) => {
       const rows = db.prepare("SELECT * FROM tell_terminal_receipts ORDER BY tell_id, kind").all();
       assert.deepEqual(
@@ -371,7 +388,7 @@ test("addressed Tell, Ask and Kill reach their first real admission on v31", asy
           (await readHeart(paths)).pending.some((tell) => tell.id === receipt.tellId && tell.body === input.body),
         );
       }
-      assert.equal(retainedHistory(paths.heart).version, 32);
+      assert.equal(retainedHistory(paths.heart).version, 33);
     } finally {
       holder.release();
       close();
@@ -463,7 +480,7 @@ test("contending v31 writes convert once; canceled acquisition changes nothing",
     blocker.exec("ROLLBACK");
     const committed = await opening;
     assert.deepEqual(committed.sort(), [9001, 9002]);
-    assert.equal(retainedHistory(paths.heart).version, 32);
+    assert.equal(retainedHistory(paths.heart).version, 33);
   } finally {
     blocker.close();
     close();
@@ -485,7 +502,7 @@ test("a failed v31 upgrade commit rolls back the normalized evidence and version
     injection.mock.restore();
     assert.deepEqual(retainedHistory(paths.heart), original);
     assert.equal(await write(), 9001);
-    assert.equal(retainedHistory(paths.heart).version, 32);
+    assert.equal(retainedHistory(paths.heart).version, 33);
   } finally {
     injection.mock.restore();
     close();
@@ -509,7 +526,7 @@ test("a v31 writer exiting before commit publishes neither its mutation nor the 
       import { appendActivity } from ${JSON.stringify(heart.href)};
       const exec = DatabaseSync.prototype.exec;
       DatabaseSync.prototype.exec = function (sql) {
-        if (sql === "COMMIT" && this.prepare("SELECT version FROM akuma_schema").get().version === 32 &&
+        if (sql === "COMMIT" && this.prepare("SELECT version FROM akuma_schema").get().version === 33 &&
             this.prepare("SELECT 1 FROM activity WHERE sequence = 9001").get()) process.exit(73);
         return exec.call(this, sql);
       };
@@ -529,7 +546,7 @@ test("a v31 writer exiting before commit publishes neither its mutation nor the 
   }
 });
 
-test("a broken retained v31 relationship aborts conversion without publishing v32", async () => {
+test("a broken retained v31 relationship aborts conversion without publishing v33", async () => {
   const { paths, close } = await legacyFixture(31, false);
   try {
     const corrupt = new DatabaseSync(paths.heart);
@@ -545,6 +562,55 @@ test("a broken retained v31 relationship aborts conversion without publishing v3
     );
     assert.deepEqual(retainedHistory(paths.heart), before);
   } finally {
+    close();
+  }
+});
+
+test("v32 read, refusal and no-op preserve WAL; a real admission upgrades the same referenced timeline", async (t) => {
+  const { paths, id, close } = await legacyFixture(32, true);
+  const fresh = await soulFixture("kei-v33-fresh-");
+  try {
+    const original = custodyBytes(paths);
+    const before = retainedHistory(paths.heart);
+    assert.ok(original.get("heart.db-wal")!.length > 0);
+    const v32 = { constructor: HeartNeedsUpgradeError, message: /found 32: .*Upgrade requires a Heart write/u };
+    await assert.rejects(activitySlice(paths), v32);
+    await assert.rejects(recordTellReceipt(paths, {
+      evidence: "fence", turnSequence: 1, fence: "unknown", kind: "accepted", receivedAt: at,
+    }), /no delivery mapping/u);
+    assert.equal(await recordSurveillance(paths, id, "Alice", true), "unchanged");
+    assert.deepEqual(custodyBytes(paths), original);
+    await assert.rejects(readHeart(paths), v32);
+    t.mock.timers.enable({ apis: ["Date"], now: Date.parse(later) });
+    assert.equal(await recordSurveillance(paths, id, "opaque:surveillant", false), "recorded");
+    const after = retainedHistory(paths.heart);
+    assert.equal(after.version, 33);
+    assert.deepEqual(after.tables.find(({ name }) => name === "surveillance")?.rows, [
+      { sequence: 9001, owner: "opaque:surveillant", binding_frontier: null, at: later },
+    ]);
+    for (const table of before.tables) {
+      const actual = after.tables.find(({ name }) => name === table.name)!;
+      if (table.name === "akuma_schema") continue;
+      if (table.name === "sqlite_sequence") {
+        assert.deepEqual(actual.rows, table.rows.map((row) => row.name === "timeline" ? { ...row, seq: 9001 } : row));
+      } else if (table.name === "timeline") {
+        assert.deepEqual(actual.rows, [...table.rows, { sequence: 9001, kind: "surveillance" }]);
+      } else {
+        assert.deepEqual(actual, table);
+      }
+    }
+    const format = (db: DatabaseSync) => db.prepare(`SELECT name, sql FROM sqlite_schema
+      WHERE name IN ('timeline', 'surveillance', 'surveillance_by_owner') ORDER BY name`)
+      .all().map(({ sql }) => String(sql).replace(/\s+/gu, ""));
+    assert.deepEqual(await withReadOnlyHeart(paths, format), await withReadOnlyHeart(fresh.allocated.paths, format));
+    await withHeartTransaction(paths, (db) => {
+      assert.equal(db.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
+      assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+      assert.throws(() => db.exec("INSERT INTO timeline(kind) VALUES ('unknown')"), /CHECK constraint/u);
+      assert.throws(() => db.prepare("INSERT INTO surveillance VALUES (99999, 'orphan', NULL, ?)").run(at), /FOREIGN KEY constraint/u);
+    });
+  } finally {
+    fresh.close();
     close();
   }
 });

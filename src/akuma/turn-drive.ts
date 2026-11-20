@@ -4,7 +4,6 @@ import {
   beginTurn,
   bindTellsToTurn,
   BodyControlledError,
-  breakBody,
   drainPendingTells,
   endTurn,
   heartExists,
@@ -14,6 +13,7 @@ import {
   recordTellDeliveries,
   recordTellReceipt,
   type BodyControlSnapshot,
+  type ObservedTurnEnd,
   type ResumeCoordinate,
   type Soul,
   type TellFact,
@@ -98,7 +98,7 @@ export type DriveTurnInput = Readonly<{
   world: import("../world.js").WorldRoot;
   executionAssociation?: ExecutionAssociationReader;
   turnStarted: Readonly<{ emit(turnSequence: number): Promise<void> }>;
-  turnOutcome: Readonly<{ emit(turnSequence: number, caller: AbortSignal): Promise<void> }>;
+  turnOutcome: Readonly<{ emit(terminal: ObservedTurnEnd, caller: AbortSignal): Promise<void> }>;
   now(): string;
 }>;
 
@@ -211,7 +211,7 @@ async function retireProviderCustody(
       } catch {
         /* Undisposed provider custody still owns the leash. */
       }
-      await breakBody(input.paths, { sequence: input.bodySequence, end: "broke-off", at: input.now() });
+      await input.supervisor.breakOff(input.now(), "Body broke-off with open bound Turns");
     }
     return false;
   }
@@ -491,8 +491,8 @@ export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult>
   let ending: TurnDriveResult = { kind: "stopped" };
   const commit = async (outcome: TerminalOutcome): Promise<void> => {
     admissionAttempted = true;
-    await endTurn(input.paths, { turnSequence: startingTurn!, outcome, completedAt: input.now() });
-    await input.turnOutcome.emit(startingTurn!, supervisor.signal);
+    const terminal = await endTurn(input.paths, { turnSequence: startingTurn!, outcome, completedAt: input.now() });
+    await input.turnOutcome.emit(terminal, supervisor.signal);
     ending = outcome.kind === "answered" ? { kind: "continue" } : { kind: "failed", diagnostic: outcome.diagnostic };
   };
   try {

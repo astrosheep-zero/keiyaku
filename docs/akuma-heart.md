@@ -66,9 +66,9 @@ retained timeline fact: it preserves its exact text, time, and Body and Turn
 correlation without ending execution or becoming input or provider narration.
 Admission selects the latest open, non-hung Body and its latest open Turn in
 one transaction; missing or closed execution refuses without recording.
-The opening Turn initiator is observed in that same
-admission, and its absence does not refuse a report. Reports share ordinary
-timeline ordering, retention, and loss semantics, with no second inbox or cursor.
+The audience of that exact Turn is observed in the same admission. Missing
+or unavailable audience never refuses a report. Reports share ordinary timeline
+ordering, retention, and loss semantics, with no second inbox or cursor.
 Where a native adapter admitted a bounded preview of a
 generic tool's structured invocation arguments, Heart retains and projects that
 narration with the same bound, and older name-only activity decoding and
@@ -175,11 +175,32 @@ This is opaque integration attribution, with no participant lookup or historical
 identity rewriting. Reusing the same Tell identity cannot replace that attribution. Turn admission
 retains the opening input's initiator independently of later Tell retention,
 Body succession, or the process producing its outcome. Binding a Tell to a Turn
-adds its attributed initiator to that Turn's participant audience without
-replacing the opening ownership attribution. An observer may read the
-latest admitted Turn of one exact Body after that Body's terminal fact is durable;
-no Turn, or a latest Turn without participants, yields no audience and never
-falls back to an earlier Turn or runtime context.
+supplies exact membership evidence without replacing that opening attribution.
+
+Heart owns one open surveillance audience. An attributed birth records its
+invoking delivery Owner as standing in the same transaction as Soul. Older and
+unattributed births contribute no standing by inference. The exact opaque
+Owner may explicitly gain standing or withdraw itself from standing and the
+memberships it already holds on open Turns. These changes retain their admission
+time in the ordered Heart history without counting as execution activity; a
+request without an effect changes no facts. Withdrawal does not rewrite input,
+opening attribution, bindings, or outcomes. It uses native admission order for
+each membership witness and retains enough evidence through compaction to keep
+withdrawal effective. An old binding replay or unbound pending input is not
+already-present membership; a genuinely later binding can join again.
+Compaction also preserves active standing and the binding evidence needed by
+open Turns.
+
+Audience is the deduplicated union of current standing and eligible opening and
+binding membership of the exact correlated Turn. An outcome captures membership
+through that Turn's terminal transition. An abnormal Body end captures its
+audience in the write that establishes it, using only the latest admitted Turn
+of that exact Body if still open. Known absence of such a Turn allows standing
+alone; unreadable evidence is diagnostic and does not undo settlement. Later
+withdrawal or cleanup cannot change the captured audience. Observation never
+substitutes a later Turn or derives an Owner from lineage, a provider session,
+or the producing environment. Withdrawal cannot recall delivery already emitted
+or accepted.
 
 Heart normalizes terminal evidence to the exact Tell at admission. A native
 fence names only the Tells mapped to that fence in that Turn; missing mapping

@@ -201,6 +201,12 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
   return result.kind === "recorded" ? `recorded${actor} ${result.reportId}` : `refused report · ${result.reason}`;
 }
 
+function renderSurveil(input: VerbInput<"surveil">, result: VerbOutput<"surveil">): string {
+  const state =
+    result.kind === "unchanged" ? "surveillance unchanged" : input.off === true ? "unsurveilled" : "surveilled";
+  return `${state} ${safeText(result.id)}`;
+}
+
 function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">): string {
   if (result.kind === "present") return result.guidance;
   if (result.kind === "missing") return missing("show", input.selector);
@@ -282,6 +288,8 @@ export function renderVerb<K extends VerbName>(
       return renderHistory(input as VerbInput<"history">, value as VerbOutput<"history">);
     case "report":
       return renderReport(value as VerbOutput<"report">, context);
+    case "surveil":
+      return renderSurveil(input as VerbInput<"surveil">, value as VerbOutput<"surveil">);
     default:
       return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>);
   }

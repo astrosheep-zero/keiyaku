@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { akumaIdFromDirectoryName, parsePublicHistoryId, type AkumaPaths } from "../identity.js";
 import { decodeRuntimeModel, withoutModel } from "../provider-recipe.js";
 import type {
+  AbnormalBodyEnd,
   BodyEnd,
   BodyFact,
   ForkPoint,
@@ -16,6 +17,7 @@ import type {
   TellFact,
   TellReceiptInput,
   TurnEndFact,
+  ObservedTurnEnd,
   TurnFact,
   TurnOutcome,
   TurnStartFact,
@@ -64,7 +66,6 @@ import {
   tellIdsForFence,
   tellTerminalWriter,
   tellWasUndelivered,
-  turnParticipants,
 } from "./tells.js";
 import {
   activityFactSlice,
@@ -86,6 +87,7 @@ import {
 } from "./storage.js";
 import { setSoulModel, soulFact } from "./soul.js";
 import { AkumaBusyError } from "./facts.js";
+import { changeSurveillanceFact, observeSurveillance, surveillanceAudience } from "./surveillance.js";
 export {
   HeartAbsentError,
   HeldAkumaLeash,
@@ -98,6 +100,7 @@ export {
 export { AkumaBusyError, BodyControlledError, life, lifeAt, projectTell } from "./facts.js";
 export { drainPendingTells } from "./tells.js";
 export type {
+  AbnormalBodyEnd,
   AkumaLife,
   AkumaOrigin,
   BodyEnd,
@@ -106,6 +109,7 @@ export type {
   PauseFact,
   HeartSnapshot,
   KillEvidence,
+  ObservedTurnEnd,
   SessionFact,
   Soul,
   TellFact,
@@ -280,8 +284,15 @@ export function createStatusFactReader(paths: AkumaPaths) {
         }
       }, signal),
     clear: reader.clear,
-    read: (signal?: AbortSignal) =>
-      reader.read((heart) => ({ ...lifeSnapshot(heart), timeline: statusFacts(heart) }), signal),
+    read: (signal?: AbortSignal, includeSurveillance = false) =>
+      reader.read((heart) => {
+        const snapshot = lifeSnapshot(heart);
+        const { latestBody } = snapshot;
+        const surveillants = includeSurveillance
+          ? observeSurveillance(() => surveillanceAudience(heart, latestBody && { bodySequence: latestBody.sequence }))
+          : undefined;
+        return { ...snapshot, timeline: statusFacts(heart), ...(surveillants === undefined ? {} : { surveillants }) };
+      }, signal),
   };
 }
 
@@ -432,6 +443,30 @@ export async function recordTell(
   );
 }
 
+export async function recordSurveillance(
+  paths: AkumaPaths,
+  id: Soul["id"],
+  owner: string,
+  off: boolean,
+  signal?: AbortSignal,
+): Promise<"recorded" | "unchanged"> {
+  try {
+    return await withHeartTransaction(
+      paths,
+      (heart) => {
+        if (soulAt(heart, id) === null) throw new HeartUnbornError(id);
+        if (!changeSurveillanceFact(heart, owner, off)) return "unchanged";
+        pruneActivityFacts(heart, ACTIVITY_LIMIT);
+        return "recorded";
+      },
+      signal,
+    );
+  } catch (error) {
+    if (isHeartAbsent(error)) throw new HeartUnbornError(id);
+    throw error;
+  }
+}
+
 export async function recordReport(
   paths: AkumaPaths,
   input: Readonly<{ text: string; at: string }>,
@@ -453,12 +488,9 @@ export async function recordReport(
         )
           return { kind: "refused", reason: "not-executing" };
         const report = insertReportFact(heart, { ...input, bodySequence: body.sequence, turnSequence: turn.sequence });
-        pruneActivityFacts(heart, ACTIVITY_LIMIT);
-        return {
-          kind: "recorded",
-          report,
-          ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
-        };
+        const audience = observeSurveillance(() => surveillanceAudience(heart, turn.sequence));
+        if (audience.kind === "known") pruneActivityFacts(heart, ACTIVITY_LIMIT);
+        return { kind: "recorded", report, audience };
       },
       signal,
     );
@@ -586,15 +618,15 @@ export async function requestStop(
 export async function breakBody(
   paths: AkumaPaths,
   input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>,
-): Promise<void> {
-  await withHeartTransaction(paths, (heart) => endBodyFact(heart, input));
+): Promise<AbnormalBodyEnd | undefined> {
+  return await withHeartTransaction(paths, (heart) => endBodyFact(heart, input));
 }
 
 /** The owning Body calls this only after proving its provider custody retired. */
 export async function cancelBodyTurns(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; at: string }>,
-): Promise<Readonly<{ canceled: readonly number[] }>> {
+): Promise<readonly ObservedTurnEnd[]> {
   return await withHeartTransaction(paths, (heart) => {
     const body = latestBodyFact(heart);
     if (
@@ -603,17 +635,12 @@ export async function cancelBodyTurns(
       (body.end !== undefined && body.end !== "put-down")
     )
       throw new Error(`Akuma Body ${input.bodySequence} cannot settle controlled cancellation`);
-    const sequences = openTurnsForBody(heart, input.bodySequence);
-    for (const turnSequence of sequences)
-      insertTurnEndFact(heart, {
-        kind: "turn-end",
-        turnSequence,
-        outcome: { kind: "canceled" },
-        completedAt: input.at,
-      });
+    const canceled = openTurnsForBody(heart, input.bodySequence).map((turnSequence) =>
+      admitTurnEnd(heart, { turnSequence, outcome: { kind: "canceled" }, completedAt: input.at }),
+    );
     endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-    if (sequences.length > 0) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
-    return { canceled: sequences };
+    pruneAfterTurnEnds(heart, canceled);
+    return canceled;
   });
 }
 
@@ -652,19 +679,17 @@ export async function readOpenBoundTurns(paths: AkumaPaths, bodySequence: number
 export async function failOpenBoundTurns(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; diagnostic: string; completedAt: string }>,
-): Promise<readonly number[]> {
+): Promise<readonly ObservedTurnEnd[]> {
   return await withHeartTransaction(paths, (heart) => {
-    const sequences = openBoundTurns(heart, input.bodySequence);
-    for (const turnSequence of sequences) {
-      insertTurnEndFact(heart, {
-        kind: "turn-end",
+    const failed = openBoundTurns(heart, input.bodySequence).map((turnSequence) =>
+      admitTurnEnd(heart, {
         turnSequence,
         outcome: { kind: "failed", diagnostic: input.diagnostic },
         completedAt: input.completedAt,
-      });
-    }
-    if (sequences.length > 0) pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
-    return sequences;
+      }),
+    );
+    pruneAfterTurnEnds(heart, failed);
+    return failed;
   });
 }
 
@@ -672,22 +697,29 @@ export async function readTurn(paths: AkumaPaths, sequence: number): Promise<Tur
   return await withReadOnlyHeart(paths, (heart) => turnFact(heart, sequence));
 }
 
-export async function readTurnParticipants(paths: AkumaPaths, sequence: number): Promise<readonly string[]> {
-  return await withReadOnlyHeart(paths, (heart) => turnParticipants(heart, sequence));
-}
-
 export async function readLatestTurnForBody(paths: AkumaPaths, bodySequence: number): Promise<TurnFact | null> {
   return await withReadOnlyHeart(paths, (heart) => latestTurnFactForBody(heart, bodySequence));
 }
 
-export async function endTurn(
-  paths: AkumaPaths,
-  input: Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>,
-): Promise<TurnEndFact> {
-  return await withHeartTransaction(paths, (heart) => {
-    const fact = insertTurnEndFact(heart, { kind: "turn-end", ...input });
+type TurnEndInput = Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>;
+
+function admitTurnEnd(heart: DatabaseSync, input: TurnEndInput): ObservedTurnEnd {
+  const audience = observeSurveillance(() => surveillanceAudience(heart, input.turnSequence));
+  return { ...insertTurnEndFact(heart, { kind: "turn-end", ...input }), audience };
+}
+
+function pruneAfterTurnEnds(heart: DatabaseSync, terminals: readonly ObservedTurnEnd[]): void {
+  // Maintenance also consults surveillance. Do not let unreadable optional
+  // audience evidence re-enter the native admission as a maintenance failure.
+  if (terminals.length > 0 && terminals.every(({ audience }) => audience.kind === "known"))
     pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
-    return fact;
+}
+
+export async function endTurn(paths: AkumaPaths, input: TurnEndInput): Promise<ObservedTurnEnd> {
+  return await withHeartTransaction(paths, (heart) => {
+    const terminal = admitTurnEnd(heart, input);
+    pruneAfterTurnEnds(heart, [terminal]);
+    return terminal;
   });
 }
 

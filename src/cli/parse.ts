@@ -147,7 +147,8 @@ export type ParsedCommand =
   | ParsedWhoamiCommand;
 
 export function commandName(command: ParsedCommand) {
-  return "name" in command ? command.name : command.command;
+  if (!("name" in command)) return command.command;
+  return command.name === "surveil" && command.input.off === true ? "unsurveil" : command.name;
 }
 
 type CliHelpCoordinate =
@@ -220,6 +221,7 @@ export function commandRepoPolicy(
       };
     case "settings":
     case "nuke":
+    case "surveil":
       return { use: "none", acceptsExplicit: false };
   }
 }

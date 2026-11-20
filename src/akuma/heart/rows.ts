@@ -3,6 +3,7 @@ import { providerOptionsSchema, withoutModel } from "../provider-recipe.js";
 import { resumeCoordinateSchema } from "../coordinate.js";
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  AbnormalBodyEnd,
   BodyEnd,
   BodyFact,
   CallFact,
@@ -22,6 +23,7 @@ import { HeartAuthorityCorruptionError, reportFactSchema } from "./facts.js";
 import type { ProviderOptions } from "../provider-recipe.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
 import { agentEventSchema, type AgentEvent } from "./activity-schema.js";
+import { observeSurveillance, surveillanceAudience } from "./surveillance.js";
 
 export type SealRow = Readonly<{ evidence: string; at: string }>;
 
@@ -404,16 +406,20 @@ export function insertKillFact(database: DatabaseSync, bodySequence: number, at:
 export function endBodyFact(
   database: DatabaseSync,
   input: Readonly<{ sequence: number; end: BodyEnd; at: string }>,
-): void {
-  database
-    .prepare("UPDATE bodies SET end = ?, ended_at = ? WHERE sequence = ? AND end IS NULL")
-    .run(input.end, input.at, input.sequence);
+): AbnormalBodyEnd | undefined {
+  const { sequence: bodySequence, end, at } = input;
+  const row = database
+    .prepare("UPDATE bodies SET end = ?, ended_at = ? WHERE sequence = ? AND end IS NULL RETURNING hung_at")
+    .get(end, at, bodySequence);
+  if (end !== "broke-off" || row?.hung_at !== null) return undefined;
+  const audience = observeSurveillance(() => surveillanceAudience(database, { bodySequence }));
+  return { bodySequence, end, at, audience };
 }
 
 export function markBodyHung(
   database: DatabaseSync,
   input: Readonly<{ sequence: number; diagnostic: string; at: string }>,
-): void {
+): AbnormalBodyEnd {
   const result = database
     .prepare(
       `UPDATE bodies SET hung_diagnostic = ?, hung_at = ?
@@ -421,6 +427,9 @@ export function markBodyHung(
     )
     .run(input.diagnostic, input.at, input.sequence);
   if (result.changes !== 1) throw new Error(`Akuma Body ${input.sequence} cannot record hung custody`);
+  const { sequence: bodySequence, at, diagnostic } = input;
+  const audience = observeSurveillance(() => surveillanceAudience(database, { bodySequence }));
+  return { bodySequence, end: "hung", at, diagnostic, audience };
 }
 
 export function insertTurnStartFact(
@@ -465,55 +474,33 @@ export function terminalTurnForTell(database: DatabaseSync, tellId: string): Tur
   return row === undefined ? null : turnFact(database, Number(row.sequence));
 }
 
-export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFact, "sequence">): TurnEndFact {
+export function insertTurnEndFact(
+  database: DatabaseSync,
+  input: Omit<TurnEndFact, "sequence">,
+): TurnEndFact & Readonly<{ bodySequence: number }> {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-end')").run().lastInsertRowid);
-  const result =
-    input.outcome.kind === "answered"
-      ? database
-          .prepare(
-            `UPDATE turns SET end_sequence = ?, outcome = 'answered', history_id = ?,
-        session_json = ?, answer = ?, answer_json = ?, completed_at = ? WHERE sequence = ? AND end_sequence IS NULL`,
-          )
-          .run(
-            sequence,
-            input.outcome.historyId ?? null,
-            encodeResumeCoordinate(input.outcome.session),
-            input.outcome.answer,
-            input.outcome.answerJson ?? null,
-            input.completedAt,
-            input.turnSequence,
-          )
-      : input.outcome.kind === "invalid-output"
-        ? database
-            .prepare(
-              `UPDATE turns SET end_sequence = ?, outcome = 'invalid-output', history_id = ?,
-          session_json = ?, answer = ?, diagnostic = ?, completed_at = ?
-          WHERE sequence = ? AND end_sequence IS NULL`,
-            )
-            .run(
-              sequence,
-              input.outcome.historyId ?? null,
-              input.outcome.session === undefined ? null : encodeResumeCoordinate(input.outcome.session),
-              input.outcome.answer,
-              input.outcome.diagnostic,
-              input.completedAt,
-              input.turnSequence,
-            )
-        : input.outcome.kind === "canceled"
-          ? database
-              .prepare(
-                `UPDATE turns SET end_sequence = ?, outcome = 'canceled', completed_at = ?
-                WHERE sequence = ? AND end_sequence IS NULL`,
-              )
-              .run(sequence, input.completedAt, input.turnSequence)
-          : database
-              .prepare(
-                `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
-          WHERE sequence = ? AND end_sequence IS NULL`,
-              )
-              .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
-  if (result.changes !== 1) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
-  return { ...input, kind: "turn-end", sequence };
+  const { outcome } = input;
+  const hasAnswer = outcome.kind === "answered" || outcome.kind === "invalid-output";
+  const session = hasAnswer ? outcome.session : undefined;
+  const result = database
+    .prepare(
+      `UPDATE turns SET end_sequence = ?, outcome = ?, history_id = ?, session_json = ?,
+      answer = ?, answer_json = ?, diagnostic = ?, completed_at = ?
+      WHERE sequence = ? AND end_sequence IS NULL AND outcome IS NULL RETURNING body_sequence`,
+    )
+    .get(
+      sequence,
+      outcome.kind,
+      hasAnswer ? (outcome.historyId ?? null) : null,
+      session === undefined ? null : encodeResumeCoordinate(session),
+      hasAnswer ? outcome.answer : null,
+      outcome.kind === "answered" ? (outcome.answerJson ?? null) : null,
+      outcome.kind === "failed" || outcome.kind === "invalid-output" ? outcome.diagnostic : null,
+      input.completedAt,
+      input.turnSequence,
+    );
+  if (result === undefined) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
+  return { ...input, kind: "turn-end", sequence, bodySequence: Number(result.body_sequence) };
 }
 
 export function finishBodyFact(database: DatabaseSync, input: Readonly<{ sequence: number; at: string }>): void {

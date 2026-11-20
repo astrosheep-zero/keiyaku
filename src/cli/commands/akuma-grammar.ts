@@ -1,9 +1,9 @@
 import { CliUsageError, commandGuide, usageLine, type CliUsageGuide } from "../usage.js";
 import { scanArgs, type ScanFlagKind, type ScanSpec } from "../scan.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
-import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
+import { parseAkumaAlias, parseAkumaGlob, parseReadableAkumaAlias, type AkumaAlias } from "../../identity/selector.js";
 import { canonicalDecimalSchema } from "../../history.js";
-import { parseExactHistorySelector } from "../../akuma/identity.js";
+import { parseAkumaId, parseExactHistorySelector } from "../../akuma/identity.js";
 
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 
@@ -34,7 +34,7 @@ const AKUMA_COMMAND_SPECS = {
     stdin: true,
     flags: { json: "boolean" },
     usage: "report (<text> | -) [--json]",
-    purpose: "Report progress to your caller and keep working.",
+    purpose: "Report progress to the current surveillance audience and keep working.",
     details:
       "Give <text> as one argument, or - to read stdin. Works only from inside a running Akuma. It does not end your turn or replace your final answer.",
   },
@@ -129,6 +129,20 @@ const AKUMA_COMMAND_SPECS = {
       "--at takes a retained answered turn id (turn/<n>); find it in paged keiyaku history <aku/...|@name>. Fork also requires a retained provider fork point.",
       "A fork inherits bare; --bare additionally omits only the child's Keiyaku runtime instructions.",
     ].join("\n"),
+  },
+  surveil: {
+    arity: 1,
+    stdin: false,
+    flags: { json: "boolean" },
+    usage: "surveil <aku/...|@name> [--json]",
+    purpose: "Watch one born Akuma as the invoking delivery owner.",
+  },
+  unsurveil: {
+    arity: 1,
+    stdin: false,
+    flags: { json: "boolean" },
+    usage: "unsurveil <aku/...|@name> [--json]",
+    purpose: "Withdraw yourself from standing surveillance and current work.",
   },
   kill: {
     arity: 1,
@@ -278,6 +292,15 @@ function parseAddressed(
     return parseHistory(selector, flags, output, fail);
   }
   const akuma = rawSelectors[0]!;
+  if (action === "surveil" || action === "unsurveil") {
+    try {
+      if (akuma.startsWith("@")) parseReadableAkumaAlias(akuma);
+      else parseAkumaId(akuma);
+    } catch {
+      fail(`${action} accepts one complete aku/... or @name selector`);
+    }
+    return { name: "surveil", input: { akuma, ...(action === "unsurveil" ? { off: true } : {}) }, output };
+  }
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
   return { name: action, input: { akuma, at, ...(flags.bare === true ? { bare: true } : {}) }, output };
 }

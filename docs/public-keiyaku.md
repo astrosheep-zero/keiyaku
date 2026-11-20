@@ -119,7 +119,11 @@ Notification attribution is independent of actor selection. An explicit
 nonblank environment redirect wins, followed by the supplied host Owner, then
 the existing environment-only recipient selection. An actor never substitutes
 its own identity for that recipient. Without supplied identity, environment
-fallback behavior is unchanged.
+fallback behavior is unchanged. This same opaque Owner supplies optional
+standing at birth, optional attribution on new input, and the required identity
+for changing one's own surveillance of one born Akuma. Surveillance never
+accepts another recipient as business input or expands a World or subject set.
+Its inverse is the same native operation, not a second described verb.
 
 Without supplied identity, ambiguous native harness caller declarations are
 refused rather than guessed. The diagnostic names every conflicting environment

@@ -135,7 +135,6 @@ function bodyEndExpression(signal: PluginSignalMap["akuma.body-ended"], label: s
   const footer = [
     label === signal.akumaId ? undefined : `\`${signal.akumaId}\``,
     `\`body/${signal.bodySequence}\``,
-    signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
     signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
     "ignore if you have already seen this.",
   ]
@@ -194,7 +193,7 @@ const plugin: KeiyakuPlugin = {
           kind: "presentation", origin: "Keiyaku", author: label, ref, ...presentation,
         };
         const results = await Promise.allSettled(
-          [...new Set(recipients)].map(async (recipient) => {
+          recipients.map(async (recipient) => {
             cancellation?.throwIfAborted();
             const result = await postAndDispatch(
               ledger,
@@ -333,7 +332,6 @@ const plugin: KeiyakuPlugin = {
           await retireDeliveryOwner(world, signal.akumaId, location, cancellation);
         },
         async "akuma.reported"(signal, cancellation) {
-          if (signal.initiator === undefined) return;
           await sendNotice(
             signal.akumaId,
             "report",
@@ -343,7 +341,7 @@ const plugin: KeiyakuPlugin = {
               label: "update", body: signal.text,
               at: Date.parse(signal.at),
             }),
-            [signal.initiator],
+            signal.audience,
             cancellation,
           );
         },
@@ -372,7 +370,7 @@ const plugin: KeiyakuPlugin = {
               signal.turnSequence,
               (label) => ({ text: turnOutcomeBody(signal, label), label: signal.outcome.kind === "answered" ? "done" : signal.outcome.kind, body: turnOutcomeResult(signal),
                 ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }),
-              signal.participants,
+              signal.audience,
               cancellation,
               (recipient) => {
                 if (signal.outcome.kind !== "answered") state.terminalRecipients.add(recipient);
@@ -390,7 +388,7 @@ const plugin: KeiyakuPlugin = {
                 signal.bodySequence,
                 (label) => ({ text: bodyEndExpression(signal, label), label: signal.end, body: signal.diagnostic ?? "",
                   ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }),
-                signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)),
+                signal.audience?.filter((recipient) => !state.terminalRecipients.has(recipient)),
                 cancellation,
               );
             } finally {

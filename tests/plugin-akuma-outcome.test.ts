@@ -68,7 +68,7 @@ function recordingPlugin(world: WorldRoot, fail = false) {
 }
 
 test(
-  "Body outcomes freeze opening and steered Owners independently of producing environment",
+  "Terminal audiences use opening and steered input independently of the producing environment",
   { timeout: 15_000 },
   async (t) => {
     const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-tell-ids-"), "0b500017");
@@ -217,12 +217,11 @@ test(
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(outcomes.length, 3);
-    assert.equal(outcomes[0].initiator, opening);
-    assert.deepEqual(outcomes[0].participants, [opening, steering]);
-    assert.equal(outcomes[1].participants, undefined);
+    assert.deepEqual(outcomes[0].audience, [opening, steering].sort());
+    assert.deepEqual(outcomes[1].audience, []);
     assert.equal(outcomes[0].akumaId, source.allocated.id);
     assert.equal(outcomes[1].akumaId, empty.allocated.id);
-    assert.deepEqual(outcomes[2].participants, [opening]);
+    assert.deepEqual(outcomes[2].audience, [opening]);
     assert.deepEqual(outcomes[2].outcome, { kind: "canceled" });
     assert.equal((await readTell(source.allocated.paths, "live-one"))?.binding?.turnSequence, outcomes[0].turnSequence);
     assert.equal((await readTell(source.allocated.paths, "live-two"))?.binding?.turnSequence, outcomes[0].turnSequence);
@@ -476,7 +475,7 @@ test("all-wait observes final snapshot outcomes once per operation", { timeout: 
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
 });
 
-async function squareObserver(t: TestContext, world: WorldRoot) {
+async function squareObserver(t: TestContext, world: WorldRoot, additional: readonly ReturnType<typeof harnessOwner>[] = []) {
   const variables = [
     "CLAUDE_CODE_SESSION_ID",
     "CODEX_THREAD_ID",
@@ -497,7 +496,7 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   const owner = harnessOwner({ channel: "pi", session: "requester-session" });
   const other = harnessOwner({ channel: "pi", session: "other-session" });
   const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
-  for (const recipient of [owner, other])
+  for (const recipient of [owner, other, ...additional])
     assert.ok(await ledger.attach({ owner: recipient, expectedGeneration: null, routes: [] }));
   t.after(async () => {
     await ledger.close();
@@ -524,13 +523,19 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   };
 }
 
-test("CLI native Owners survive coalesced Tell admission into direct Body ledger delivery", async (t) => {
+test("coalesced Tell and standing Owners receive reports and outcomes through one revocable Square audience", { timeout: 15_000 }, async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-cli-ledger-"));
   const target = await bornBody(world, "0b500023", AT);
   t.after(() => target.holder.release());
-  const observed = await squareObserver(t, world);
+  const standingOnly = harnessOwner({ channel: "pi", session: "standing-only" });
+  const observed = await squareObserver(t, world, [standingOnly]);
   process.env.PI_SESSION_ID = "producing-body";
   process.env.KEIYAKU_INITIATOR = "producing-body-owner";
+  const id = target.allocated.id;
+  for (const owner of [observed.owner, standingOnly]) {
+    const added = await cliJson(["-C", world, "surveil", id], { environment: { KEIYAKU_INITIATOR: owner } });
+    assert.equal(added.exit, 0, added.stderr);
+  }
   const receipts = [];
   for (const [session, owner] of [
     ["requester-session", observed.owner],
@@ -558,22 +563,67 @@ test("CLI native Owners survive coalesced Tell admission into direct Body ledger
     receipts.push(result.value.tell.tellId);
   }
   target.holder.release();
-  await driveAkumaBody(
-    { paths: target.allocated.paths },
-    answering("coalesced result"),
-    { now: () => AT },
-  );
-  for (const owner of [observed.owner, observed.other]) {
-    const cards = await observed.cards(owner);
-    assert.equal(cards.length, 1);
-    assert.ok(cards[0]!.text.includes("coalesced result"));
-    assert.equal(cards[0]!.owner, owner);
+  const ready = deferred<void>();
+  const release = deferred<void>();
+  const body = driveAkumaBody({ paths: target.allocated.paths }, fixtureAdapter((input) =>
+    createProviderAttempt(input.signal, async (custody) => {
+      const stop = async () => { release.resolve(); };
+      custody.own({ closed: release.promise, abort: stop, forceDispose: stop });
+      return {
+        admission: { fence: "launch" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "audience-session" } };
+            ready.resolve();
+            await release.promise;
+          },
+        },
+        completion: release.promise.then(() => ({ kind: "answered" as const, answer: "coalesced result" })),
+      };
+    }),
+  ), { now: () => AT });
+  try {
+    await Promise.race([ready.promise, body.then(() => assert.fail("Body stopped before the report"))]);
+    const akuma = Akuma.select(world, id);
+    assert.equal((await akuma.report("before withdrawal")).kind, "recorded");
+    for (const owner of [observed.owner, observed.other, standingOnly]) {
+      const cards = await observed.cards(owner);
+      assert.equal(cards.length, 1);
+      assert.match(cards[0]!.text, /before withdrawal/u);
+    }
+    const off = await cliJson(["-C", world, "unsurveil", id], { environment: { KEIYAKU_INITIATOR: observed.other } });
+    assert.deepEqual(off.value, { id, kind: "recorded" });
+    assert.equal((await akuma.report("after withdrawal")).kind, "recorded");
+  } finally {
+    release.resolve();
+    await body;
   }
-  const turns = await Promise.all(
-    receipts.map(async (id) => (await readTell(target.allocated.paths, id))?.binding?.turnSequence),
-  );
+  for (const owner of [observed.owner, standingOnly]) {
+    const cards = await observed.cards(owner);
+    assert.equal(cards.length, 3);
+    assert.ok(cards.some((card) => card.text.includes("after withdrawal")));
+    assert.ok(cards.some((card) => card.text.includes("coalesced result")));
+  }
+  assert.equal((await observed.cards(observed.other)).length, 1);
+  const turns = await Promise.all(receipts.map(async (tellId) => (await readTell(target.allocated.paths, tellId))?.binding?.turnSequence));
   assert.ok(turns[0] !== undefined);
-  assert.equal(turns[0], turns[1], "both submitted Owners belong to the same frozen Turn audience");
+  assert.equal(turns[0], turns[1], "withdrawal does not change the original binding");
+  const retained = await cliJson(["-C", world, "history", id, "--answer"], { environment: { KEIYAKU_INITIATOR: observed.other } });
+  assert.deepEqual(retained.value, { kind: "akuma-answer", akumaId: id, historyId: `turn/${turns[0]}`, answer: "coalesced result" });
+
+  const { paths } = target.allocated;
+  await recordTell(paths, { kind: "tell", id: "queued-after-withdrawal", body: "try to resume", initiator: observed.other, recordedAt: AT });
+  await driveAkumaBody({ paths }, fixtureAdapter(() => assert.fail("resume-less adapter started a new provider")), { now: () => AT });
+  const ended = (await readHeart(paths)).latestBody;
+  assert.equal(ended?.end, "broke-off");
+  assert.equal((await readTell(paths, "queued-after-withdrawal"))?.state, "pending");
+  for (const owner of [observed.owner, standingOnly]) {
+    const cards = await observed.cards(owner);
+    assert.equal(cards.length, 4);
+    const abnormal = cards.find((card) => card.text.includes(`body/${ended!.sequence}`));
+    assert.match(abnormal?.text ?? "", /interrupted\nbroke-off/u);
+  }
+  assert.equal((await observed.cards(observed.other)).length, 1, "no recipient fallback from a queued or earlier Turn");
 });
 
 for (const route of ["wait", "idle"] as const) {
@@ -595,7 +645,7 @@ for (const route of ["wait", "idle"] as const) {
       akumaId: target.allocated.id,
       bodySequence: target.body.sequence,
       turnSequence: turn.sequence,
-      participants: [observed.owner, observed.other],
+      audience: [observed.owner, observed.other],
       outcome: { kind: "answered" as const, text: "known answer" },
     };
     await observed.plugin.signals?.["akuma.turn-outcome"]?.(signal);
@@ -620,7 +670,7 @@ test("a deadline without an established outcome releases deferral without consum
     akumaId: target.allocated.id,
     bodySequence: target.body.sequence,
     turnSequence: turn.sequence,
-    participants: [observed.owner],
+    audience: [observed.owner],
     outcome: { kind: "answered", text: "after deadline" },
   });
   assert.equal((await observed.cards()).length, 1);

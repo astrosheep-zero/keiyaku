@@ -46,7 +46,6 @@ import {
   readSoul,
   readTell,
   readTurn,
-  readTurnParticipants,
   recordTell,
   recordTellDeliveries,
   type TimelineFact,
@@ -1774,7 +1773,6 @@ test("ordinary Tell wakes a successor for a barrier-free untidy Akuma", async (c
       deliveries: [delivery],
     });
     assert.deepEqual(await readTurn(paths, oldTurn.sequence), oldTurn);
-    assert.deepEqual(await readTurnParticipants(paths, oldTurn.sequence), [initiator]);
     assert.equal(latestKill, null);
   } finally {
     await settleFixtureBodies(bodies);

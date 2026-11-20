@@ -36,6 +36,7 @@ import {
   readTurn,
   readLatestTurnForBody,
   recordSession,
+  recordSurveillance,
   recordTell as heartRecordTell,
   requestStop,
 } from "../src/akuma/heart/index.js";
@@ -95,6 +96,7 @@ function configureTurnOutcomePlugins(root: string): void {
       "    return { signals: {",
       '      "akuma.turn-outcome": (signal, participation) => { globalThis.__keiyakuTurnSignalRecorder?.push(signal); return globalThis.__keiyakuTurnOutcomePluginRecorder?.observe(signal, participation); },',
       '      "akuma.turn-started": (signal) => { globalThis.__keiyakuTurnSignalRecorder?.push(signal); return globalThis.__keiyakuHangingStartedHandler ? new Promise(() => {}) : undefined; },',
+      '      "akuma.body-ended": (signal) => { globalThis.__keiyakuTurnSignalRecorder?.push(signal); },',
       "    } };",
       "  },",
       "};",
@@ -558,11 +560,7 @@ test("outcome plugins observe each committed Turn once and finish before the nex
     const sequences = await committedTurnSequences(allocated.paths);
     const expectedSubmissions = groups.map((group) => group.map(({ id, body }) => ({ id, text: body })));
     assert.deepEqual(starts.map((start) => start.launchTells), expectedSubmissions);
-    const audiences = [
-      { initiator: "Alice", participants: ["Alice"] },
-      { initiator: "Bob", participants: ["Bob", "Carol"] },
-      { participants: ["Dana"] },
-    ];
+    const audiences = [["Alice", "Submitter"], ["Bob", "Carol", "Submitter"], ["Dana", "Submitter"]];
     assert.deepEqual(
       recorder.observations.map(({ signal }) => signal),
       audiences.map((audience, index) => ({
@@ -573,7 +571,7 @@ test("outcome plugins observe each committed Turn once and finish before the nex
         at,
         outcome: { kind: "answered", text: "done" },
         contractId: "kei/example",
-        ...audience,
+        audience,
       })),
     );
     assert.deepEqual(
@@ -616,6 +614,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
           bodySequence: 2,
           turnSequence: (await committedTurnSequences(allocated.paths))[0],
           at: "2026-08-08T00:00:00.000Z",
+          audience: [],
           outcome: { kind: "failed", reason: "provider failed" },
         },
         outcomes: [{ kind: "failed", diagnostic: "provider failed" }],
@@ -676,12 +675,11 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
     const sequences = await committedTurnSequences(allocated.paths);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
-    await eventually(() => signals.length === 4);
-    assert.deepEqual(signals, [
+    assert.deepEqual(signals.filter((signal) => signal.kind !== "akuma.body-ended"), [
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[0], initiator: "Alice" },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[0], at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[0], at: "2026-08-08T00:00:00.000Z", audience: ["Alice"], outcome: { kind: "answered", text: "one" } },
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[1] },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[1], at: "2026-08-08T00:00:00.000Z", outcome: { kind: "failed", reason: "provider failed" } }
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 2, turnSequence: sequences[1], at: "2026-08-08T00:00:00.000Z", audience: [], outcome: { kind: "failed", reason: "provider failed" } }
     ]);
     /* The first Turn's started handler hung and the second Turn's threw; both Turns still began and ended. */
     await eventually(() => readFileSync(allocated.paths.log, "utf8").includes("timed out after 5000ms") && readFileSync(allocated.paths.log, "utf8").includes("started observer failure"), 15_000);
@@ -692,7 +690,7 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
   }
 });
 
-test("body-ended plugins attribute only the exact Body's latest admitted Turn", async () => {
+test("normal Body-end mirrors without an audience; abnormal no-Turn end uses only standing", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-plugin-body-end-");
   try {
     const allocated = await allocatedHeart(root, "claude", "b0d1e2f3");
@@ -706,7 +704,7 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
     bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder = recorder;
 
     await driveWithTell(
-      claudeBodyLaunch(allocated, root),
+      claudeBodyLaunch(allocated, root, { birthInitiator: "Standing" }),
       { body: "first", initiator: "Alice" },
       adapter({
         starts: [],
@@ -715,46 +713,12 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
-    await recordTell(allocated.paths, {
-      id: "second", body: "second", initiator: "Bob", recordedAt: "2026-08-08T00:00:00.200Z",
-    });
-    await recordTell(allocated.paths, {
-      id: "body-end-teller",
-      body: "extra input",
-      initiator: "Carol",
-      recordedAt: "2026-08-08T00:00:00.500Z",
-    });
-    await driveAkumaBody(
-      { paths: allocated.paths },
-      adapter({
-        starts: [],
-        events: [{ type: "session", coordinate: { sessionId: "body-two" } }],
-        result: { kind: "answered", answer: "two", historyId: "history-two" },
-      }),
-      { now: () => "2026-08-08T00:00:01.000Z" },
-    );
-    await recordTell(allocated.paths, { id: "third", body: "third", recordedAt: "2026-08-08T00:00:01.200Z" });
-    await recordTell(allocated.paths, {
-      id: "body-end-ownerless-teller",
-      body: "third input",
-      initiator: "Dana",
-      recordedAt: "2026-08-08T00:00:01.500Z",
-    });
-    await driveAkumaBody(
-      { paths: allocated.paths },
-      adapter({
-        starts: [],
-        events: [{ type: "session", coordinate: { sessionId: "body-three" } }],
-        result: { kind: "answered", answer: "three", historyId: "history-three" },
-      }),
-      { now: () => "2026-08-08T00:00:02.000Z" },
-    );
 
     // The pending Tell cannot supply attribution to a Body that never admits a Turn.
     // The recipe requires resume, which this adapter does not support.
     await driveWithTell(
       { paths: allocated.paths },
-      { body: "fourth", initiator: "Carol" },
+      { body: "queued", initiator: "Carol" },
       {
         admitOptions: (options) => ({ kind: "admitted", options }),
         start() {
@@ -766,10 +730,8 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
 
     assert.deepEqual(recorder.signals, [
       { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", at: "2026-08-08T00:00:00.000Z" },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", at: "2026-08-08T00:00:01.000Z", initiator: "Bob", participants: ["Bob", "Carol"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "exited", at: "2026-08-08T00:00:02.000Z", participants: ["Dana"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 5, end: "broke-off", at: "2026-08-08T00:00:03.000Z" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", at: "2026-08-08T00:00:00.000Z" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "broke-off", at: "2026-08-08T00:00:03.000Z", audience: ["Standing"] },
     ]);
   } finally {
     delete bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder;
@@ -847,10 +809,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     releaseEvents();
     await body;
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
-    assert.deepEqual(recorder.observations.map(({ signal }) => signal.kind === "akuma.turn-outcome" ? {
-      initiator: signal.initiator,
-      participants: signal.participants,
-    } : null), [{ initiator: "Alice", participants: ["Alice", "Carol", "Bob"] }]);
+    assert.deepEqual(recorder.observations.map(({ signal }) => signal.kind === "akuma.turn-outcome" ? signal.audience : null), [["Alice", "Bob", "Carol"]]);
   } finally {
     releaseReceipt();
     releaseEvents();
@@ -1374,7 +1333,10 @@ test("kill publishes cancellation only after provider closure and emits that com
     assert.equal(recorder.observations.length, 1);
     const signal = recorder.observations[0]?.signal;
     assert.equal(signal?.kind, "akuma.turn-outcome");
-    if (signal?.kind === "akuma.turn-outcome") assert.deepEqual(signal.outcome, { kind: "canceled" });
+    if (signal?.kind === "akuma.turn-outcome") {
+      assert.deepEqual(signal.outcome, { kind: "canceled" });
+      assert.deepEqual(signal.audience, ["Alice"]);
+    }
     assert.deepEqual(recorder.observations[0]?.outcomes, [{ kind: "canceled" }]);
     const status = await Akuma.select(await World.at(root), allocated.id).status();
     assert.equal(status.work.kind, "idle");
@@ -1733,14 +1695,39 @@ test("pause aborts the current drive and records the body as put down", async ()
   }
 });
 
-test("forced disposal failure records hung and broke-off before the Body returns", async () => {
+test("hung cleanup settles and releases the leash before its ordered terminal notifications", async (t) => {
   const root = bodyTestDirectory("keiyaku-akuma-hung-");
+  const { promise: held, resolve: releaseHook } = promiseBarrier<void>();
+  const { promise: observing, resolve: markObserving } = promiseBarrier<void>();
+  let body: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee06");
+    configureTurnOutcomePlugins(root);
+    const signals = installTurnSignalRecorder();
+    installTurnOutcomeRecorder(allocated.paths, async () => {
+      markObserving();
+      await held;
+    });
+    const recordHung = HeldAkumaLeash.prototype.recordBodyHung;
+    let interposed: {
+      body: Awaited<ReturnType<typeof readHeart>>["latestBody"];
+      turn: Awaited<ReturnType<typeof readLatestTurnForBody>>;
+      withdrawal: Awaited<ReturnType<typeof recordSurveillance>>;
+    } | undefined;
+    t.mock.method(HeldAkumaLeash.prototype, "recordBodyHung", async function (this: HeldAkumaLeash, ...args: Parameters<typeof recordHung>) {
+      const receipt = await recordHung.apply(this, args);
+      const [paths, { sequence }] = args;
+      interposed = {
+        body: (await readHeart(paths)).latestBody,
+        turn: await readLatestTurnForBody(paths, sequence),
+        withdrawal: await recordSurveillance(paths, allocated.id, "Standing", true),
+      };
+      return receipt;
+    });
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
-    const body = driveWithTell(
-      claudeBodyLaunch(allocated, root),
-      "work",
+    body = driveWithTell(
+      claudeBodyLaunch(allocated, root, { birthInitiator: "Standing" }),
+      { body: "work", initiator: "Alice" },
       scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
           const session = {
             admission: { fence: "hung-fixture-turn" },
@@ -1767,15 +1754,34 @@ test("forced disposal failure records hung and broke-off before the Body returns
     await started;
     const current = (await readHeart(allocated.paths)).latestBody!;
     await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:01.000Z");
-    await body;
+    await expectBodySettles(observing, "hung cleanup did not attempt the failure outcome");
     const heart = await readHeart(allocated.paths);
-    assert.deepEqual(heart.latestBody?.hung, {
-      diagnostic: "forced disposal failed",
-      at: "2026-08-08T00:00:00.000Z",
-    });
+    const at = "2026-08-08T00:00:00.000Z";
+    assert.deepEqual(heart.latestBody?.hung, { diagnostic: "forced disposal failed", at });
     assert.equal(heart.latestBody?.end, "broke-off");
     assert.equal(await probeLeash(allocated.paths), "free");
+    const [turnSequence] = await committedTurnSequences(allocated.paths);
+    assert.equal(interposed?.withdrawal, "recorded");
+    assert.deepEqual(interposed?.body?.hung, heart.latestBody?.hung);
+    assert.equal(interposed?.body?.end, undefined, "withdrawal precedes the later broke-off write");
+    assert.ok(interposed?.turn && interposed.turn.sequence === turnSequence && interposed.turn.end === undefined);
+    const terminalSignals = () => signals.filter((signal) => "bodySequence" in signal && signal.bodySequence === current.sequence);
+    assert.deepEqual(terminalSignals(), [{
+      kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: current.sequence, turnSequence, at,
+      audience: ["Alice"], outcome: { kind: "failed", reason: "forced disposal failed" },
+    }]);
+    releaseHook();
+    assert.equal(await body, "hung");
+    assert.equal(terminalSignals().length, 2);
+    assert.deepEqual(terminalSignals()[1], {
+      kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: current.sequence, end: "hung", at,
+      diagnostic: "forced disposal failed", audience: ["Alice", "Standing"],
+    });
   } finally {
+    releaseHook();
+    await body?.catch(() => undefined);
+    delete turnSignalPluginGlobal.__keiyakuTurnSignalRecorder;
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });

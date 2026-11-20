@@ -116,8 +116,32 @@ export const reportFactSchema = z
 export type ReportFact = z.infer<typeof reportFactSchema>;
 export const reportFactWireSchema = reportFactSchema.readonly();
 
+export const surveillanceFactSchema = z
+  .strictObject({
+    kind: z.literal("surveillance"),
+    sequence: z.number().int().positive().safe(),
+    owner: z.string(),
+    off: z.boolean(),
+    at: z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected surveillance timestamp"),
+  })
+  .readonly();
+
+export type SurveillanceFact = z.output<typeof surveillanceFactSchema>;
+export const surveillanceAudienceSchema = z.union([
+  z.strictObject({ kind: z.literal("known"), owners: z.array(z.string()).readonly() }).readonly(),
+  z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly(),
+]);
+export type SurveillanceAudience = z.output<typeof surveillanceAudienceSchema>;
+export type AbnormalBodyEnd = Readonly<{
+  bodySequence: number;
+  at: string;
+  audience: SurveillanceAudience;
+}> &
+  (Readonly<{ end: "hung"; diagnostic: string }> | Readonly<{ end: "broke-off"; diagnostic?: never }>);
+export type ObservedTurnEnd = TurnEndFact & Readonly<{ bodySequence: number; audience: SurveillanceAudience }>;
+
 export type ReportAdmission =
-  | Readonly<{ kind: "recorded"; report: ReportFact; initiator?: string }>
+  | Readonly<{ kind: "recorded"; report: ReportFact; audience: SurveillanceAudience }>
   | Readonly<{ kind: "refused"; reason: "not-born" | "not-executing" }>;
 
 export type CallFact = Readonly<{

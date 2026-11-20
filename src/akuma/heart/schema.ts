@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HeartAuthorityCorruptionError } from "./facts.js";
 
-const HEART_SCHEMA_VERSION = 32n;
+const HEART_SCHEMA_VERSION = 33n;
 const LEASH_SCHEMA_VERSION = 4;
 
 export class UnsupportedHeartSchemaError extends Error {}
@@ -15,14 +15,22 @@ function heartSchemaVersion(database: DatabaseSync): bigint | undefined {
   return typeof version === "bigint" ? version : undefined;
 }
 
-export function checkHeartSchema(database: DatabaseSync, path: string, allowUpgrade = false): boolean {
+type HeartPredecessor = 31n | 32n;
+
+export function checkHeartSchema(
+  database: DatabaseSync,
+  path: string,
+  allowUpgrade = false,
+): HeartPredecessor | undefined {
   const version = heartSchemaVersion(database);
-  if (version === HEART_SCHEMA_VERSION) return false;
-  if (allowUpgrade && version === 31n) return true;
+  if (version === HEART_SCHEMA_VERSION) return undefined;
   if (version === undefined || version < 1n)
     throw new HeartAuthorityCorruptionError(`Akuma heart schema version is corrupt: ${path}`);
   const diagnostic = `Akuma heart schema version must be ${HEART_SCHEMA_VERSION}; found ${version}: ${path}`;
-  if (version === 31n) throw new HeartNeedsUpgradeError(`${diagnostic}. Upgrade requires a Heart write.`);
+  if (version === 31n || version === 32n) {
+    if (allowUpgrade) return version;
+    throw new HeartNeedsUpgradeError(`${diagnostic}. Upgrade requires a Heart write.`);
+  }
   if (version !== 29n && version !== 30n) throw new UnsupportedHeartSchemaError(diagnostic);
   throw new UnsupportedHistoricalHeartError(
     `${diagnostic}. No converter in this build. Stop all writers via their owning build before copying the entire ` +
@@ -53,9 +61,25 @@ const TERMINAL_TELL_TABLE = `tell_terminal_receipts (
   PRIMARY KEY (tell_id, kind)
 ) STRICT;`;
 
+// ADD COLUMN requires a valid default while the old kind is copied. All fact
+// writers supply their kind explicitly, and both current-format paths share the constraint.
+const TIMELINE_KIND = `kind TEXT NOT NULL DEFAULT 'turn-start'
+  CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end', 'report', 'surveillance'))`;
+
+const SURVEILLANCE_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS surveillance (
+    sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
+    owner TEXT NOT NULL CHECK (owner <> ''),
+    binding_frontier INTEGER CHECK (binding_frontier >= 0),
+    at TEXT NOT NULL
+  ) STRICT;
+  CREATE INDEX IF NOT EXISTS surveillance_by_owner ON surveillance(owner, sequence);
+`;
+
 /** A writer has rechecked the exact predecessor in its transaction. */
-export function upgradeHeartSchema(database: DatabaseSync): void {
-  database.exec(`
+export function upgradeHeartSchema(database: DatabaseSync, predecessor: HeartPredecessor): void {
+  if (predecessor === 31n)
+    database.exec(`
     CREATE TABLE ${TERMINAL_TELL_TABLE}
     INSERT INTO tell_terminal_receipts (tell_id, kind, received_at, undelivered)
     SELECT tell_id, kind, MIN(received_at), MAX(undelivered) FROM (
@@ -67,6 +91,15 @@ export function upgradeHeartSchema(database: DatabaseSync): void {
       SELECT tell_id, COALESCE(receipt, route), delivered_at, 0 FROM tell_deliveries
         WHERE route = 'launch' OR receipt = 'unavailable'
     ) GROUP BY tell_id, kind;
+  `);
+  // The referenced table and its sequence never move. A DROP TABLE rebuild
+  // would cascade through the execution ledger even with deferred FK checks.
+  database.exec(`
+    ALTER TABLE timeline RENAME COLUMN kind TO legacy_kind;
+    ALTER TABLE timeline ADD COLUMN ${TIMELINE_KIND};
+    UPDATE timeline SET kind = legacy_kind;
+    ALTER TABLE timeline DROP COLUMN legacy_kind;
+    ${SURVEILLANCE_SCHEMA}
   `);
   if (database.prepare("PRAGMA foreign_key_check").get() !== undefined)
     throw new Error("Akuma Heart upgrade found broken foreign key relationships");
@@ -138,8 +171,9 @@ export const HEART_SCHEMA = `
   ${TURN_SCHEMA}
   CREATE TABLE IF NOT EXISTS timeline (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end', 'report'))
+    ${TIMELINE_KIND}
   ) STRICT;
+  ${SURVEILLANCE_SCHEMA}
   ${REPORT_SCHEMA}
   CREATE TABLE IF NOT EXISTS activity_retention (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

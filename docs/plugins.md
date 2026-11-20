@@ -111,15 +111,15 @@ Generic Akuma core persists and forwards attribution unchanged and never
 reconstructs a parent Owner from a producing Body's environment. Caller lineage
 remains separate descriptive attribution.
 
-Turn outcomes address the distinct frozen Owners carried by that Turn. Its
-opening initiator owns the Turn, while coalesced and steered inputs add their
-explicit initiators to its audience. Reports address only their exact opening
-Turn initiator. Abnormal Body endings use only the latest admitted Turn of that
-exact Body. No earlier Turn, birth caller, or ambient identity supplies a missing
-audience. Birth remains silent. Full readable notice content remains model-facing
-text, with generic presentation facts for receivers. Each recipient owns an
-independent card under the stable Akuma/event identity; repeat posting is
-idempotent. Reports, Turn outcomes, and Body endings have distinct identities.
+Reports, terminal Turn outcomes and applicable abnormal Body endings all address
+one captured [Heart](akuma-heart.md) audience. Square uses its existing directed
+delivery, including its existing Paseo route; the separate optional Paseo
+observer only mirrors execution and never substitutes a push if Square is absent.
+An unavailable audience contributes no guessed recipient. Birth remains silent.
+Full readable notice content remains model-facing text, with generic presentation
+facts for receivers. Each recipient owns an independent card under the stable
+Akuma/event identity; repeat posting is idempotent. Reports, Turn outcomes, and
+Body endings have distinct identities.
 
 Aliases are observer presentation, never identity, routing, or execution
 authority. Observers prefer all current bindings without inventing a primary
@@ -277,11 +277,10 @@ stays unchanged for this coordinated replacement.
 
 A committed explicit progress report emits `akuma.reported` once after its Heart
 admission. The signal carries that exact report's identity, content, time, and
-Akuma, Body, and Turn correlation, plus only the opening Turn initiator observed
-with admission. Attribution is optional signal metadata, never required report
-input. A missing initiator neither refuses the report nor supplies a fallback
-recipient. Delivery remains one bounded diagnostic-only attempt: no rollback,
-replay queue, receipt guarantee, or change to completion and outcome observation.
+Akuma, Body, and Turn correlation, and the Heart audience observed with admission.
+Its unavailability is diagnostic; it neither refuses the report nor supplies a
+fallback recipient. Delivery remains one bounded attempt: no rollback, replay
+queue, receipt guarantee, or change to completion and outcome observation.
 Report custody belongs to Akuma, not to an observer plugin.
 
 A started Turn emits `akuma.turn-started` after its start and Tell bindings are
@@ -291,16 +290,18 @@ committed start it emits nothing. The Body awaits one bounded delivery on this
 critical path.
 
 Every committed terminal Turn emits `akuma.turn-outcome` after durability,
-including later-Tell Turns. It carries Akuma/Turn identity, the answered, failed,
-or canceled outcome, and optional owner and audience. Cancellation carries no
+including later-Tell Turns. It carries the exact committed outcome and the
+Heart audience captured at the terminal transition. Cancellation carries no
 answer or failure reason. A native outcome's producing Body awaits its one
 bounded attempt before proceeding to another Turn. Body control cancellation
 ends the attempt immediately and cancels handler participation; the dropped
 participation is diagnostic only. This does not cancel plugin activation or
 other notifications, recall accepted external delivery, or create a duty to
 join noncooperative hook work. It changes neither the committed outcome nor
-the independent proof needed for provider retirement. Signals expose no
-provider or continuation custody; plugins neither participate in providers,
+the independent proof needed for provider retirement. Newly committed outcomes
+from terminal cleanup are attempted in commit order before Body-end delivery,
+without holding failure settlement or leash release for those attempts. Signals
+expose no provider or continuation custody; plugins neither participate in providers,
 lifecycle verbs, inputs, or Settlement, nor make birth reversible, add pre-Body
 listeners, or create rollback or cross-process continuations.
 
@@ -341,11 +342,6 @@ Every Body that reaches a durable terminal state emits `akuma.body-ended` after
 that Body fact is durable. The signal identifies the Akuma and Body sequence
 and carries the terminal reason, including hung custody. It observes that Body
 only; a successor may already be running when the signal is delivered, and the
-signal does not redefine it as an Akuma-wide idle notification. When a Body-end
-observer needs to name the latest admitted input, it may use only the owner and
-participants of the latest admitted Turn belonging to that exact Body. A missing
-Turn or one with no participants remains unaddressed; an earlier Turn,
-process environment, and launch context are not fallback owners. Square's
-interruption notice is best-effort and suppresses already-notified failed or
-canceled Turn recipients individually within one process activation, without a
-durable receipt or replay guarantee.
+signal does not redefine it as an Akuma-wide idle notification. An abnormal end
+carries only its exact Heart audience, with no fallback. Normal completion still
+notifies the mirror without a directed card.

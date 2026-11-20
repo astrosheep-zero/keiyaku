@@ -61,14 +61,14 @@ async function fixture(t: TestContext, artifact = true) {
     assert.ok(session);
     return await ledger.pending(owner, { generation: session.generation });
   };
-  const turn = async (id: string, sequence: number, participants: readonly string[] = [alice]) => {
+  const turn = async (id: string, sequence: number, audience: readonly string[] = [alice]) => {
     await plugin.signals!["akuma.turn-outcome"]!({
       kind: "akuma.turn-outcome",
       akumaId: id,
       bodySequence: 1,
       turnSequence: sequence,
       at: "2026-11-09T00:00:00Z",
-      participants,
+      audience,
       outcome: { kind: "answered", text: `answer ${id} ${sequence}` },
     });
   };
@@ -109,16 +109,16 @@ test("Square loads the public composition only for an addressed notice, using No
       origin: { kind: 'direct' }, caller: { kind: 'unknown' } });
     const outcome = { kind: 'akuma.turn-outcome', akumaId: 'aku/worker/1234abcd', bodySequence: 1,
       turnSequence: 1, outcome: { kind: 'answered', text: 'done' } };
-    await instance.signals['akuma.turn-outcome']({ ...outcome, participants: [] });
+    await instance.signals['akuma.turn-outcome']({ ...outcome, audience: [] });
     assert.equal(rootLoads, 0, 'activation, birth and unaddressed notices must not load the public root');
-    await instance.signals['akuma.turn-outcome']({ ...outcome, participants: [${JSON.stringify(f.alice)}] });
-    await instance.signals['akuma.turn-outcome']({ ...outcome, turnSequence: 2, participants: [${JSON.stringify(f.alice)}] });
+    await instance.signals['akuma.turn-outcome']({ ...outcome, audience: [${JSON.stringify(f.alice)}] });
+    await instance.signals['akuma.turn-outcome']({ ...outcome, turnSequence: 2, audience: [${JSON.stringify(f.alice)}] });
     assert.equal(rootLoads, 1, 'addressed notices load the actual public entry once through Node');
   `], { encoding: "utf8" });
   assert.equal((await f.cards()).length, 2);
 });
 
-test("direct cards preserve exact full content, frozen Owners and generic presentation without artifacts", async (t) => {
+test("direct cards preserve exact full content and the captured audience without artifacts", async (t) => {
   const f = await fixture(t, false);
   await f.plugin.signals!["akuma.born"]?.({
     kind: "akuma.born",
@@ -148,8 +148,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
       bodySequence: 1,
       turnSequence,
       at: "2026-11-09T00:00:00Z",
-      participants: [f.alice, f.bob, f.alice],
-      initiator: f.bob,
+      audience: [f.alice, f.bob],
       ...(turnSequence === 2 ? {} : { contractId: "kei/example" }),
       outcome,
     });
@@ -198,11 +197,11 @@ test("alias-first card snapshots keep identity keys and do not follow later alia
   const bind = (name: string, akumaId = id) => moveAlias({ world: f.root, alias: parseAkumaAlias(`@${name}`), akumaId });
   await bind("reviewer");
   await f.plugin.signals!["akuma.reported"]!({ kind: "akuma.reported", akumaId: id, bodySequence: 1,
-    turnSequence: 1, reportSequence: 1, text: "progress", at: "2026-11-09T00:00:00Z", initiator: f.alice });
+    turnSequence: 1, reportSequence: 1, text: "progress", at: "2026-11-09T00:00:00Z", audience: [f.alice] });
   await bind("audit");
   await f.turn(id, 1, [f.alice, f.bob]);
   await f.plugin.signals!["akuma.body-ended"]!({ kind: "akuma.body-ended", akumaId: id, bodySequence: 1,
-    end: "broke-off", diagnostic: "provider disappeared", at: "2026-11-09T00:00:00Z", participants: [f.alice] });
+    end: "broke-off", diagnostic: "provider disappeared", at: "2026-11-09T00:00:00Z", audience: [f.alice] });
   const before = await f.cards();
   assert.deepEqual(before.map(card => card.key), [key(id, "report/1"), key(id, "turn/1"), key(id, "body/1")]);
   const presentations = [{ label: "update", body: "progress" }, { label: "done", body: `answer ${id} 1` }, { label: "broke-off", body: "provider disappeared" }];
@@ -257,7 +256,7 @@ test("early and late exact suppression survive producer restart and remain Owner
     akumaId: "aku/early/1234abcd",
     bodySequence: 1,
     turnSequence: 1,
-    participants: [f.alice, f.bob],
+    audience: [f.alice, f.bob],
     outcome: { kind: "answered", text: "exact" },
   });
   assert.equal((await f.cards()).length, 0);
@@ -272,7 +271,7 @@ test("early and late exact suppression survive producer restart and remain Owner
     reportSequence: 1,
     text: report,
     at: "2026-11-04T00:00:00Z",
-    initiator: f.alice,
+    audience: [f.alice],
   });
   const reportCard = (await f.cards()).find((card) => deliveryKeyEqual(card.key, key("aku/early/1234abcd", "report/1")));
   assert.ok(reportCard);
@@ -320,7 +319,7 @@ test("overlapping prefix scopes release independently; exact observation survive
       reportSequence: 1,
       text: "progress",
       at: "2026-11-04T00:00:00Z",
-      initiator: f.alice,
+      audience: [f.alice],
     });
     assert.deepEqual(
       (await f.cards()).map((card) => card.key),
@@ -384,7 +383,7 @@ for (const route of ["notice", "wait deferral", "exact observation"] as const) {
           }, controller.signal)
         : f.plugin.signals!["akuma.turn-outcome"]!({
             kind: "akuma.turn-outcome", akumaId: id, bodySequence: 1, turnSequence: 1,
-            participants: [f.alice], outcome: { kind: "answered", text: "done" },
+            audience: [f.alice], outcome: { kind: "answered", text: "done" },
           }, controller.signal);
     const reason = new Error("ledger open canceled");
     const pending = assert.rejects(Promise.resolve(operation), (error) => error === reason);
@@ -546,7 +545,7 @@ test("Body dedup tracks committed recipients independently and reports retain ex
         akumaId: "aku/body/1234abcd",
         bodySequence: 1,
         turnSequence: 1,
-        participants: [f.alice, f.bob],
+        audience: [f.alice, f.bob],
         outcome: { kind: "failed", reason: "failed" },
       }),
     ),
@@ -558,7 +557,7 @@ test("Body dedup tracks committed recipients independently and reports retain ex
     akumaId: "aku/body/1234abcd",
     bodySequence: 1,
     end: "hung",
-    participants: [f.alice, f.bob],
+    audience: [f.alice, f.bob],
   });
   assert.deepEqual(
     (await f.cards()).map((card) => card.key),
@@ -579,7 +578,7 @@ test("Body dedup tracks committed recipients independently and reports retain ex
     reportSequence: 1,
     text: "report",
     at: "2026-11-04T00:00:00Z",
-    initiator: f.bob,
+    audience: [f.bob],
   });
   assert.equal((await f.cards(f.bob)).length, 2);
   assert.equal((await f.cards()).length, 1);
@@ -604,7 +603,7 @@ test("Claude child markers preserve explicit native identity but not child-only 
     akumaId: "aku/native/1234abcd",
     bodySequence: 1,
     turnSequence: 1,
-    participants: [native],
+    audience: [native],
     outcome: { kind: "answered", text: "observed" },
   });
   assert.deepEqual(await f.cards(native), []);
@@ -812,7 +811,7 @@ test("unknown handoff retains producer connection until late accepted settlement
     akumaId: "aku/late/1234abcd",
     bodySequence: 1,
     turnSequence: 1,
-    participants: [f.alice],
+    audience: [f.alice],
     outcome: { kind: "answered" as const, text: "late result" },
   };
   await plugin.signals!["akuma.turn-outcome"]!(signal);

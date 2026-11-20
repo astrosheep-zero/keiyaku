@@ -1,10 +1,18 @@
 import { abortableDelay } from "./abort.js";
 import { isDeepStrictEqual } from "node:util";
-import { createBodyHeartReader, type BodyControlSnapshot, type HeldAkumaLeash } from "./heart/index.js";
+import {
+  breakBody,
+  createBodyHeartReader,
+  type AbnormalBodyEnd,
+  type BodyControlSnapshot,
+  type HeldAkumaLeash,
+} from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 
 const BODY_CONTROL_OBSERVATION_MS = 100;
 export const CONTROL_RESPONSE_MS = 1_000;
+
+type AbnormalBodySettlement = Readonly<{ end: AbnormalBodyEnd; cleanupDiagnostic: string | undefined }>;
 
 export class BodySupervisor {
   readonly signal: AbortSignal;
@@ -15,6 +23,7 @@ export class BodySupervisor {
   private failure?: { error: unknown };
   private observation: BodyControlSnapshot;
   private stopping?: "control" | "heart-gone" | "launch";
+  private settlement?: AbnormalBodySettlement;
   private readonly cancelLaunch = (): void => this.cancel("launch");
 
   private constructor(
@@ -57,7 +66,13 @@ export class BodySupervisor {
   }
 
   async recordHung(diagnostic: string, at: string): Promise<void> {
-    await this.body.leash.recordBodyHung(this.body.paths, { sequence: this.body.sequence, diagnostic, at });
+    const end = await this.body.leash.recordBodyHung(this.body.paths, { sequence: this.body.sequence, diagnostic, at });
+    this.settlement = { end, cleanupDiagnostic: diagnostic };
+  }
+
+  async breakOff(at: string, cleanupDiagnostic?: string): Promise<void> {
+    const end = await breakBody(this.body.paths, { sequence: this.body.sequence, end: "broke-off", at });
+    if (end !== undefined) this.settlement = { end, cleanupDiagnostic };
   }
 
   async refresh(): Promise<BodyControlSnapshot> {
@@ -90,7 +105,7 @@ export class BodySupervisor {
     this.waiter = undefined;
   }
 
-  async close(): Promise<void> {
+  async close(): Promise<AbnormalBodySettlement | undefined> {
     this.finished.abort();
     this.launchSignal?.removeEventListener("abort", this.cancelLaunch);
     try {
@@ -99,6 +114,7 @@ export class BodySupervisor {
       this.reader.clear();
       this.waiter = undefined;
     }
+    return this.settlement;
   }
 
   private failObservation(error: unknown): void {

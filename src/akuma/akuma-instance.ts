@@ -169,7 +169,16 @@ class AkumaHandle {
     const signal = signalOption(options.signal);
     const result = await this.owner().report({ text, at: new Date().toISOString() }, signal);
     if (result.kind !== "recorded") return result;
-    const { report, initiator } = result;
+    const { report, audience } = result;
+    if (audience.kind === "unavailable") {
+      try {
+        void Promise.resolve(
+          this.reportDiagnostic(`Akuma ${this.id} report audience unavailable: ${audience.diagnostic}`),
+        ).catch(() => {});
+      } catch {
+        // Optional diagnostics cannot change an admitted report.
+      }
+    }
     await emitPluginSignal(
       { world: this.root, reportDiagnostic: this.reportDiagnostic },
       {
@@ -180,7 +189,7 @@ class AkumaHandle {
         reportSequence: report.sequence,
         text: report.text,
         at: report.at,
-        ...(initiator === undefined ? {} : { initiator }),
+        ...(audience.kind === "known" ? { audience: audience.owners } : {}),
       },
     );
     return { kind: "recorded", reportId: `report/${report.sequence}` };

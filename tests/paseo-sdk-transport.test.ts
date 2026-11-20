@@ -113,7 +113,7 @@ test("the in-process transport serves the real public package's own stream, stat
   const release = () => { if (!released) { released = true; leash.release(); } };
   t.after(() => { release(); value.close(); });
   await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  await leash.birth(value.allocated.paths, value.soul);
+  await leash.birth(value.allocated.paths, value.soul, undefined, "opaque:birth-owner");
   const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
   const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
@@ -138,6 +138,9 @@ test("the in-process transport serves the real public package's own stream, stat
   const frame = await stream.next();
   assert.ok(!frame.done, "the transport serves the real package's own bounded window");
   const rows = frame.value.rows;
+  assert.deepEqual(rows[0], {
+    kind: "adapter-diagnostic", recordKind: "surveillance", sequence: started.sequence - 1, at: value.soul.createdAt,
+  }, "the decoder isolates the native surveillance row at its original sequence and time");
   const turn = rows.find((row) => row.kind === "turn" && row.sequence === started.sequence);
   assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
   const report = rows.find((row) => row.kind === "report");

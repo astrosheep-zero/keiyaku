@@ -273,6 +273,11 @@ export async function killAkuma(input: AkumaKillInput & Readonly<{ path: WorldRo
   });
 }
 
+export async function surveilAkuma(path: WorldRoot, akuma: string, owner: string, off: boolean, signal?: AbortSignal) {
+  const addressed = await addressAkuma({ path, akuma }, true);
+  return await new AkumaOwner(addressed.id, addressed.path).surveil(owner, off, signal);
+}
+
 export async function tellAkuma(
   input: AkumaTellInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,

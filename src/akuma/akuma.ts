@@ -3,7 +3,7 @@ import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller }
 import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { projectBoundedList, lifecycleSelection, type LifecycleSelection } from "../bounded-list.js";
-import { akumaLifecycle } from "./heart/facts.js";
+import { akumaLifecycle, surveillanceAudienceSchema } from "./heart/facts.js";
 import type { WorldRoot } from "../world.js";
 import { readBornLife, rosterListRow } from "./akuma-observe.js";
 export { readAkumaWork } from "./akuma-observe.js";
@@ -68,6 +68,7 @@ export const akumaStatusSchema = z
     cwd: z.string().exactOptional(),
     provider: z.string().exactOptional(),
     model: z.string().exactOptional(),
+    surveillants: surveillanceAudienceSchema.exactOptional(),
     lastActivityAt: z.string().exactOptional(),
     work: currentWorkSchema,
     recent: z.array(activityRowSchema).max(3).readonly().exactOptional(),

@@ -130,6 +130,37 @@ test("MCP ls composes one object with the shared applicability checks", () => {
     assert.equal(schema.safeParse(invalid).success, false, JSON.stringify(invalid));
 });
 
+test("CLI and the one MCP surveillance tool change the same opaque Owner on one idle Akuma", async (t) => {
+  const root = await World.at(temporaryDirectory(t, "mcp-surveil-"));
+  const born = await bornLineageAkuma({ root, akumaName: "worker", draw: "1234abcd", createdAt: new Date().toISOString() });
+  const alias = parseAkumaAlias("@lane");
+  await moveAlias({ world: root, alias, akumaId: born.id });
+  const environment = { KEIYAKU_INITIATOR: "opaque:external/owner" };
+  const { client, tools } = await mcpFixture(t, { cwd: root, environment, version: "test" });
+  const tool = tools.find(({ name }) => name === "surveil");
+  assert.deepEqual(Object.keys(tool?.inputSchema.properties ?? {}).sort(), ["akuma", "cwd", "off"]);
+  assert.equal(tools.some(({ name }) => name === "unsurveil"), false);
+  const refused = await runCli(["-C", root, "surveil", born.id], { environment: {} });
+  assert.equal(refused.exit, 64, refused.stderr);
+  const cli = await cliJson(["-C", root, "surveil", alias], { environment });
+  assert.equal(cli.exit, 0, cli.stderr);
+  assert.deepEqual(cli.value, { id: born.id, kind: "recorded" });
+  const status = await runCli(["-C", root, "status", alias], { environment });
+  assert.equal(status.exit, 0, status.stderr);
+  assert.match(status.stdout, /surveillants\n +opaque:external\/owner/u);
+  const response = await client.callTool({ name: "surveil", arguments: { akuma: born.id, off: true } });
+  assert.deepEqual(response.structuredContent, { id: born.id, kind: "recorded" });
+  const empty = await client.callTool({ name: "status", arguments: { selector: born.id } });
+  const observation = Keiyaku.verbs.status.normal.parse(empty.structuredContent);
+  assert.equal(observation.kind, "akuma");
+  assert.deepEqual(observation.surveillants, { kind: "known", owners: [] });
+  const repeated = await cliJson(["-C", root, "unsurveil", alias], { environment });
+  assert.deepEqual(repeated.value, { id: born.id, kind: "unchanged" });
+  const history = await runCli(["-C", root, "history", born.id, "--id", "2"], { environment });
+  assert.equal(history.exit, 0, history.stderr);
+  assert.equal(history.stdout, "unsurveilled opaque:external/owner");
+});
+
 test("MCP region composes one optional object with the shared contradiction check", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.region.input);
   for (const valid of [{}, { contract: "kei/example" }, { paths: ["src/**"] }])
@@ -346,7 +377,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   );
   const schemaTools = new Set([
     "bind", "wait", "status", "ls",
-    "verify", "spawn", "fork", "debt_add", "ask",
+    "verify", "spawn", "fork", "debt_add", "ask", "surveil",
   ]);
   const publishedProperties = (name: string): readonly string[] =>
     Object.keys((tools.find((tool) => tool.name === name)!.inputSchema.properties ?? {}) as Record<string, unknown>).sort();

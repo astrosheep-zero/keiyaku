@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { bornLineageAkuma, soulFixture } from "./support/akuma-fixtures.js";
 import { akumaId } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
@@ -605,6 +605,17 @@ test("native execution attach, SDK creation and identity retries share the regis
   const before = t.mock.fn<PluginServerContext["before"]>(() => () => {});
   const handlers = new Map<string, (input: unknown) => unknown>();
   let providerId = "";
+  // Real PATH discovery must read the Heart with the same build that wrote it.
+  const cli = await realpath(resolve("build/src/cli/index.js"));
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  await symlink(cli, join(bin, "keiyaku"));
+  const previousPath = process.env.PATH;
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  process.env.PATH = previousPath ? `${bin}${delimiter}${previousPath}` : bin;
   const cleanup = contribute({
     registerProvider(provider) { providerId = provider.id; },
     handle(contract, handler) { handlers.set(contract.name, (input) => handler(contract.input.parse(input), { paseo })); },

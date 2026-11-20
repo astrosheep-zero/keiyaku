@@ -190,7 +190,8 @@ function currentAction(row: ActivityRow): CurrentWork["summary"] {
 
 function belongsToTurn(row: ActivityRow, sequence: number | undefined): boolean {
   if (row.kind === "tell") return row.deliveries.some((delivery) => delivery.turnSequence === sequence);
-  return (row.kind === "turn" ? row.sequence : row.turnSequence) === sequence;
+  if (row.kind === "turn") return row.sequence === sequence;
+  return "turnSequence" in row && row.turnSequence === sequence;
 }
 
 /** Turn membership follows retained coordinates, including delivered Tells. */

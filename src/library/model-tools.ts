@@ -10,6 +10,7 @@ export const modelOutputSchemas = {
   ask: verbs.ask.normal,
   wait: verbs.wait.normal,
   status: verbs.status.normal,
+  surveil: verbs.surveil.normal,
   ls: verbs.ls.normal,
   "debt.add": verbs["debt.add"].normal,
 } as const;
@@ -18,7 +19,7 @@ export function hasOutputSchema(name: string): name is keyof typeof modelOutputS
   return Object.hasOwn(modelOutputSchemas, name);
 }
 
-const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report"]);
+const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report", "surveil"]);
 const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
 const coordinates = {

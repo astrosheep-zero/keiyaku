@@ -40,6 +40,17 @@ test("root listings select active by default, settled or all for lifecycle catal
   assert.throws(() => command(["ls", "debt", "--closed"]), CliUsageError);
 });
 
+test("surveil and unsurveil map exact Akuma selection to one invocation operation", () => {
+  assert.deepEqual(command(["surveil", "aku/worker/1234abcd", "--json"]), {
+    name: "surveil", input: { akuma: "aku/worker/1234abcd" }, output: "json",
+  });
+  assert.deepEqual(command(["unsurveil", "@worker"]), {
+    name: "surveil", input: { akuma: "@worker", off: true }, output: "text",
+  });
+  assert.throws(() => command(["surveil", "aku/worker/*"]), /one complete/u);
+  assert.throws(() => command(["unsurveil", "@one", "@two"]), /accepts one/u);
+});
+
 test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.deepEqual(parseArgv(["nuke"]), {
     command: { name: "nuke", input: {}, output: "text" },

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CallFact, ReportFact, TellFact, TurnEndFact, TurnStartFact } from "./facts.js";
+import type { CallFact, ReportFact, SurveillanceFact, TellFact, TurnEndFact, TurnStartFact } from "./facts.js";
+import { surveillanceFactsAt } from "./surveillance.js";
 import {
   decodeReportRow,
   decodeActivityRow,
@@ -13,7 +14,14 @@ import {
 } from "./rows.js";
 import { decodeTellBatch, tellBatchAtSequences, tellStateSql } from "./tells.js";
 
-export type TimelineFact = TurnStartFact | CallFact | ReportFact | ActivityFact | TellFact | TurnEndFact;
+export type TimelineFact =
+  | TurnStartFact
+  | CallFact
+  | ReportFact
+  | ActivityFact
+  | TellFact
+  | TurnEndFact
+  | SurveillanceFact;
 export type ActivityFactSlice = Readonly<{
   rows: readonly TimelineFact[];
   lowestRetained: number | null;
@@ -75,16 +83,22 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
     .prepare(`SELECT sequence FROM timeline ORDER BY sequence DESC LIMIT 1 OFFSET ?`)
     .get(limit - 1) as { sequence: number } | undefined;
   if (cutoff === undefined) return;
-  // A pending Tell, or a Tell still referenced by a historical disposition
-  // member row, keeps its own evidence and delivered Turns for storage
-  // integrity. No disposition decision or resolution state is consulted.
+  // Pending and open-bound input keep their exact delivery and audience proof.
+  // Historical disposition members retain storage integrity only; no decision
+  // or resolution state is consulted.
   database
     .prepare(
-      `WITH protected_tells(sequence) AS (
+      `WITH open_turns AS (
+      SELECT sequence, initiator FROM turns WHERE end_sequence IS NULL
+    ), open_bindings AS (
+      SELECT b.sequence, i.sequence AS tell, i.initiator
+      FROM open_turns t JOIN tell_bindings b ON b.turn_sequence = t.sequence JOIN tells i ON i.id = b.tell_id
+    ), protected_tells(sequence) AS (
       SELECT sequence FROM tells WHERE ${tellStateSql} = 'pending'
       UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id
+      UNION SELECT tell FROM open_bindings
     ), protected_turns(sequence) AS (
-      SELECT sequence FROM turns WHERE end_sequence IS NULL
+      SELECT sequence FROM open_turns
       UNION SELECT turn_sequence FROM calls WHERE sequence >= ?
       UNION SELECT turn_sequence FROM activity WHERE sequence >= ?
       UNION SELECT turn_sequence FROM reports WHERE sequence >= ?
@@ -92,14 +106,24 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
       UNION SELECT d.turn_sequence FROM tell_deliveries d
         JOIN tells ON tells.id = d.tell_id
         WHERE tells.sequence IN (SELECT sequence FROM protected_tells)
+    ), openers AS (
+      SELECT initiator AS owner, MIN(sequence) AS first_turn FROM open_turns GROUP BY initiator
+    ), binders AS (
+      SELECT initiator AS owner, MIN(sequence) AS first_binding FROM open_bindings GROUP BY initiator
     ), protected(sequence) AS (
       SELECT sequence FROM protected_turns
       UNION SELECT MAX(sequence) FROM activity
-        WHERE turn_sequence IN (SELECT sequence FROM turns WHERE end_sequence IS NULL)
+        WHERE turn_sequence IN (SELECT sequence FROM open_turns)
         AND json_extract(event_json, '$.type') = 'permission' GROUP BY turn_sequence
       UNION SELECT sequence FROM calls WHERE turn_sequence IN (SELECT sequence FROM protected_turns)
       UNION SELECT end_sequence FROM turns WHERE sequence IN (SELECT sequence FROM protected_turns) AND end_sequence IS NOT NULL
       UNION SELECT sequence FROM protected_tells
+      UNION SELECT s.sequence FROM surveillance s WHERE s.binding_frontier IS NULL
+        AND s.sequence = (SELECT MAX(sequence) FROM surveillance WHERE owner = s.owner)
+      UNION SELECT MAX(s.sequence) FROM surveillance s
+        LEFT JOIN openers o USING(owner) LEFT JOIN binders b USING(owner)
+        WHERE s.binding_frontier IS NOT NULL AND (o.first_turn < s.sequence OR b.first_binding <= s.binding_frontier)
+        GROUP BY s.owner
     )
     DELETE FROM timeline WHERE sequence < ? AND sequence NOT IN protected`,
     )
@@ -108,7 +132,7 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
 
 type TimelineRow = Readonly<{
   sequence: number;
-  kind: "turn-start" | "call" | "report" | "activity" | "tell" | "turn-end";
+  kind: TimelineFact["kind"];
 }>;
 
 type TimelineBatch = Readonly<{
@@ -117,6 +141,7 @@ type TimelineBatch = Readonly<{
   calls: readonly CallRow[];
   reports: readonly ReportRow[];
   activity: readonly ActivityRow[];
+  surveillance: readonly SurveillanceFact[];
   tells: ReturnType<typeof tellBatchAtSequences>;
 }>;
 
@@ -153,7 +178,10 @@ function readTimelineBatch(database: DatabaseSync, rows: readonly TimelineRow[])
     database,
     rows.filter((row) => row.kind === "tell").map((row) => row.sequence),
   );
-  return { rows, turns, calls, reports, activity, tells };
+  const surveillance = rows.some((row) => row.kind === "surveillance")
+    ? surveillanceFactsAt(database, sequences("surveillance"))
+    : [];
+  return { rows, turns, calls, reports, activity, surveillance, tells };
 }
 
 export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact[] {
@@ -165,6 +193,7 @@ export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact
   }
   for (const row of batch.calls) facts.set(row.sequence, decodeCallRow(row));
   for (const row of batch.reports) facts.set(row.sequence, decodeReportRow(row));
+  for (const fact of batch.surveillance) facts.set(fact.sequence, fact);
   for (const row of batch.activity) facts.set(row.sequence, decodeActivityRow(row));
   for (const fact of decodeTellBatch(batch.tells)) facts.set(fact.sequence, fact);
   return batch.rows.map((row) => {

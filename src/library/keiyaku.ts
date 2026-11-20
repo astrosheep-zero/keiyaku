@@ -22,6 +22,7 @@ import { observeNamedAddress, resolveNamedAddress } from "./address.js";
 import { waitInvocation } from "./keiyaku-wait.js";
 import type { AskObserver } from "../akuma/akuma-selection-execution.js";
 import { deliveryOwner } from "./keiyaku-attribution.js";
+import { surveilAkuma } from "./selection.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { Settings } from "../settings.js";
@@ -271,6 +272,13 @@ export class Keiyaku {
               }),
         },
       ),
+    surveil: async ({ akuma, off }, controls) => {
+      const owner = deliveryOwner(this.#input.environment, this.#input.identity?.owner);
+      if (owner === undefined) throw new KeiyakuUsageError("surveillance requires an attributable invocation owner");
+      const at = await this.#coordinates("none");
+      if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
+      return await surveilAkuma(at.world, akuma, owner, off === true, controls.signal);
+    },
     kill: async (input, controls) => {
       const { at, akumas } = await this.#akumas();
       return await akumas.kill({
@@ -439,6 +447,7 @@ export class Keiyaku {
   fork = this.#verb("fork");
   tell = this.#verb("tell");
   ask = this.#verb("ask");
+  surveil = this.#verb("surveil");
   kill = this.#verb("kill");
   wait = this.#verb("wait");
   history = this.#verb("history");

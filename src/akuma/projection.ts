@@ -10,7 +10,14 @@ import {
   type ToolResult,
 } from "./heart/activity-schema.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
-import { projectTell, reportFactSchema, reportFactWireSchema, type TellDelivery, type TellRow } from "./heart/facts.js";
+import {
+  projectTell,
+  reportFactSchema,
+  reportFactWireSchema,
+  surveillanceFactSchema,
+  type TellDelivery,
+  type TellRow,
+} from "./heart/facts.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const countSchema = z.number().int().nonnegative();
@@ -162,6 +169,7 @@ export const activityRowSchema = z.union([
   turnRowSchema,
   callRowSchema,
   reportRowSchema,
+  surveillanceFactSchema,
   textRowSchema("said"),
   textRowSchema("thought"),
   textRowSchema("note"),
@@ -268,6 +276,7 @@ export function projectFact(fact: TimelineFact): ActivityRow {
     case "call":
       return { kind: "call", sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, text: fact.body };
     case "report":
+    case "surveillance":
       return fact;
     case "tell": {
       const tell = projectTell(fact);

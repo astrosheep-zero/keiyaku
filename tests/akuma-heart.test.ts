@@ -35,9 +35,9 @@ import {
   readForkPoint,
   readLatestTurnForBody,
   readTell,
-  readTurnParticipants,
   recordCurrentModel,
   recordSession,
+  recordSurveillance,
   recordTell as heartRecordTell,
   recordTellDeliveries,
   recordTellReceipt,
@@ -47,6 +47,9 @@ import {
 } from "../src/akuma/heart/index.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
+import { withHeartTransaction, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
+import { surveillanceAudience } from "../src/akuma/heart/surveillance.js";
+import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
 import { errorCategory, KeiyakuError } from "../src/errors.js";
 import { isolateUserHome } from "./support/user-home.js";
 
@@ -112,6 +115,114 @@ test("Tell attribution is durable and part of stable input identity", async () =
       heartRecordTell(value.allocated.paths, { ...tell, initiator: "Alice" }),
       /reused different input/u,
     );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("attributed standing commits with Soul and never comes from frozen caller or a birth replay", async () => {
+  const value = await fixture();
+  const { id, paths } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await withHeartTransaction(paths, (db) => db.exec(`CREATE TRIGGER refuse_standing BEFORE INSERT ON surveillance
+      BEGIN SELECT RAISE(ABORT, 'standing denied'); END`));
+    await assert.rejects(leash.birth(paths, value.soul, undefined, "opaque:birth/owner"), /standing denied/u);
+    assert.equal((await readHeart(paths)).soul, null);
+    assert.deepEqual((await activitySlice(paths)).rows, []);
+    await withHeartTransaction(paths, (db) => db.exec("DROP TRIGGER refuse_standing"));
+    assert.equal(await leash.birth(paths, value.soul, undefined, "opaque:birth/owner"), "born");
+    assert.equal(await leash.birth(paths, value.soul, undefined, "opaque:not-the-birth"), "already-born");
+    assert.deepEqual(await withReadOnlyHeart(paths, (db) => surveillanceAudience(db, null)), ["opaque:birth/owner"]);
+    assert.deepEqual((await activitySlice(paths)).rows, [
+      { kind: "surveillance", sequence: 1, owner: "opaque:birth/owner", off: false, at: value.soul.createdAt },
+    ]);
+    assert.deepEqual((await readHeart(paths)).soul, { ...value.soul, id });
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("self-withdrawal is idempotent across open Turns and survives compaction without excluding a later binding", async () => {
+  const value = await fixture();
+  const { id, paths } = value.allocated;
+  const owner = "opaque:alpha";
+  const other = "opaque:beta";
+  const { createdAt: at } = value.soul;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  const owners = (turn: number | null) => withReadOnlyHeart(paths, (db) => surveillanceAudience(db, turn));
+  const toggle = (off: boolean) => recordSurveillance(paths, id, owner, off);
+  try {
+    await leash.birth(paths, { ...value.soul, caller: { kind: "external", integration: "square", id: owner } });
+    assert.deepEqual(await owners(null), []);
+    assert.equal(await toggle(false), "recorded");
+    assert.equal(await recordSurveillance(paths, id, other, false), "recorded");
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const first = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: owner });
+    const second = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    for (const tellId of ["old", "pending-before-off"]) {
+      await recordTell(paths, { id: tellId, body: tellId, initiator: owner, recordedAt: at });
+    }
+    const bind = (sequence: number, tellId: string) => bindTellsToTurn(paths, {
+      turnSequence: sequence, tellIds: [tellId], boundAt: at,
+    });
+    await bind(second.sequence, "old");
+    await recordTellDeliveries(paths, [{ tellId: "old", route: "launch", turnSequence: second.sequence, fence: "old", deliveredAt: at }]);
+    await withHeartTransaction(paths, (db) => db.exec("UPDATE sqlite_sequence SET seq=9000 WHERE name='tell_bindings'"));
+    assert.deepEqual(await owners(first.sequence), [owner, other]);
+    assert.deepEqual(await owners(second.sequence), [owner, other]);
+    assert.equal(await toggle(false), "unchanged");
+    assert.equal(await toggle(true), "recorded");
+    const after = await activitySlice(paths);
+    assert.equal(await toggle(true), "unchanged");
+    assert.deepEqual(await activitySlice(paths), after);
+    await withHeartTransaction(paths, (db) => pruneActivityFacts(db, 2, true));
+    await bind(second.sequence, "old");
+    assert.deepEqual(await owners(first.sequence), [other]);
+    assert.deepEqual(await owners(second.sequence), [other]);
+    assert.equal((await readTurn(paths, first.sequence))?.initiator, owner);
+    assert.equal((await readTell(paths, "old"))?.initiator, owner);
+    await bind(second.sequence, "pending-before-off");
+    assert.deepEqual(await owners(first.sequence), [other]);
+    assert.deepEqual(await owners(second.sequence), [owner, other]);
+    assert.deepEqual(await owners(null), [other]);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("terminal audience does not move to a later Turn, and abnormal Body end only uses its own latest open Turn", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul, undefined, "standing");
+    const first = await leash.recordBody(paths, { leashTakenAt: at });
+    await beginTurn(paths, { bodySequence: first.sequence, startedAt: at, initiator: "earlier-still-open" });
+    const latest = await beginTurn(paths, { bodySequence: first.sequence, startedAt: at, initiator: "latest" });
+    const terminal = await endTurn(paths, { turnSequence: latest.sequence, completedAt: at, outcome: { kind: "canceled" } });
+    assert.deepEqual(terminal.audience, { kind: "known", owners: ["latest", "standing"] });
+    const firstEnd = await breakBody(paths, { sequence: first.sequence, end: "broke-off", at });
+    leash.release();
+    const successor = (await HeldAkumaLeash.try(paths))!;
+    try {
+      const second = await successor.recordBody(paths, { leashTakenAt: at });
+      await beginTurn(paths, { bodySequence: second.sequence, startedAt: at, initiator: "successor-open" });
+      const secondEnd = await breakBody(paths, { sequence: second.sequence, end: "broke-off", at });
+      assert.equal(await recordSurveillance(paths, id, "standing", true), "recorded");
+      assert.deepEqual(firstEnd, {
+        bodySequence: first.sequence, end: "broke-off", at, audience: { kind: "known", owners: ["standing"] },
+      });
+      assert.deepEqual(secondEnd?.audience, { kind: "known", owners: ["standing", "successor-open"] });
+      assert.equal(await breakBody(paths, { sequence: second.sequence, end: "broke-off", at }), undefined);
+      assert.deepEqual(terminal.audience, { kind: "known", owners: ["latest", "standing"] }, "withdrawal does not rewrite handed-off evidence");
+    } finally {
+      successor.release();
+    }
   } finally {
     leash.release();
     value.close();
@@ -393,43 +504,6 @@ test("tell admission shares activity order and delivery witnesses fold without m
     assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
     body.release();
   } finally {
-    value.close();
-  }
-});
-
-test("Turn participants follow binding order across live and launch routes without replacing ownership", async () => {
-  const value = await fixture();
-  const paths = value.allocated.paths;
-  const at = value.soul.createdAt;
-  const leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, value.soul);
-    const body = await leash.recordBody(paths, { leashTakenAt: at });
-    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: "Alice" });
-    assert.deepEqual(await readTurnParticipants(paths, turn.sequence), ["Alice"]);
-    assert.deepEqual(await readTurnParticipants(paths, 999), []);
-    for (const [id, initiator] of [
-      ["live", "Bob"],
-      ["anonymous", undefined],
-      ["launch", "Carol"],
-      ["duplicate", "Alice"],
-      ["repeated", "Bob"],
-    ] as const) {
-      await heartRecordTell(paths, { kind: "tell", id, body: id, recordedAt: at, ...(initiator ? { initiator } : {}) });
-      await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: [id], boundAt: at });
-    }
-    await recordTellDeliveries(paths, [
-      { tellId: "live", route: "live", turnSequence: turn.sequence, fence: "live", receipt: "required", deliveredAt: at },
-      { tellId: "launch", route: "launch", turnSequence: turn.sequence, fence: "launch", deliveredAt: at },
-    ]);
-    assert.deepEqual(await readTurnParticipants(paths, turn.sequence), ["Alice", "Bob", "Carol"]);
-    assert.equal((await readTurn(paths, turn.sequence))?.initiator, "Alice");
-    const ownerless = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
-    assert.deepEqual(await readTurnParticipants(paths, ownerless.sequence), []);
-    await bindTellsToTurn(paths, { turnSequence: ownerless.sequence, tellIds: ["live"], boundAt: at });
-    assert.deepEqual(await readTurnParticipants(paths, ownerless.sequence), ["Bob"]);
-  } finally {
-    leash.release();
     value.close();
   }
 });
@@ -992,12 +1066,12 @@ test("kill witnesses a stranded Body and leaves its pending Tell for an ordinary
   }
 });
 
-test("heart schema version 32 and leash schema version 4 hard-refuse unknown authority", async (context) => {
+test("heart schema version 33 and leash schema version 4 hard-refuse unknown authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "30000000" });
   seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
   seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
-  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 32/u);
+  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 33/u);
   await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });
 
@@ -1740,20 +1814,22 @@ test("Body hung custody evidence round trips through Heart", async () => {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
     const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
-    await leash.recordBodyHung(value.allocated.paths, {
+    await withHeartTransaction(value.allocated.paths, (db) => db.exec("DROP TABLE surveillance"));
+    const settled = await leash.recordBodyHung(value.allocated.paths, {
       sequence: body.sequence,
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
+    assert.equal(settled.audience.kind, "unavailable");
     assert.deepEqual((await readHeart(value.allocated.paths)).latestBody?.hung, {
       diagnostic: "provider custody remained live",
       at: "2026-08-08T00:00:01.000Z",
     });
-    await breakBody(value.allocated.paths, {
+    assert.equal(await breakBody(value.allocated.paths, {
       sequence: body.sequence,
       end: "broke-off",
       at: "2026-08-08T00:00:02.000Z",
-    });
+    }), undefined, "broke-off after hung is not another abnormal admission");
     assert.equal(
       life({ leash: "held", body: (await readHeart(value.allocated.paths)).latestBody, kill: null }),
       "hung",

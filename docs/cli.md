@@ -73,6 +73,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | report | Record the invoking Akuma's explicit progress on its current execution; refused when not executing; no recipient selection or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
+| surveil, unsurveil | Change the invocation Owner's surveillance of one born Akuma in the selected World; refuse missing attribution or an invalid selection. | Return native admission without claiming that notifications were delivered. |
 | whoami | Observe the invoking process's own identity and contextual Contract; for an Akuma, also observe its current Turn initiator and birth profile. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
@@ -162,16 +163,12 @@ Spawn and Tell return the owner's action judgment, not merely admission or an
 answer. Kill returns native stop evidence. Wait observes existing work; Ask
 observes its exact structured answer. Deadlines bound observation only.
 
-Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
-the invocation facet and pass it unchanged as optional initiator attribution.
-An explicit nonblank environment redirect wins, followed by the supplied
-invocation Owner; otherwise one unambiguous native host coordinate supplies
-attribution, with the external host fallback used only when no native coordinate
-exists. Ambiguous, absent, or child-only host identity selects nothing and never
-refuses native operation. Selection is synchronous and
-reads no notification artifact or membership. The Body uses frozen input and
-Turn recipients, never its environment to reconstruct the submitting Owner.
-Caller lineage remains independent from notification attribution.
+Spawn, fork, tell, ask, and surveillance use the invocation facet's existing
+opaque delivery attribution. Selection reads no notification artifact or
+membership. Creation and input allow omitted attribution; a surveillance change
+requires that invocation's own Owner and cannot name a substitute. Producers
+never reconstruct an Owner from their environment. Caller lineage remains
+independent from notification attribution.
 
 Direct spawn and fork derive optional declared caller attribution at the invocation facet:
 a complete Akuma-and-World environment pair wins over external integration

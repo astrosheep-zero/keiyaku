@@ -44,7 +44,7 @@ export type PluginSignalMap = Readonly<{
     reportSequence: number;
     text: string;
     at: string;
-    initiator?: string;
+    audience?: readonly string[];
   }>;
   "akuma.turn-started": Readonly<{
     akumaId: string;
@@ -57,8 +57,7 @@ export type PluginSignalMap = Readonly<{
     turnSequence: number;
     /** Durable completion time; older external emitters may omit it. */
     at?: string;
-    initiator?: string;
-    participants?: readonly string[];
+    audience?: readonly string[];
     outcome: PluginOutcome;
     contractId?: string;
   }>;
@@ -68,8 +67,7 @@ export type PluginSignalMap = Readonly<{
     end: PluginBodyEnd;
     /** Durable body-end time; older external emitters may omit it. */
     at?: string;
-    initiator?: string;
-    participants?: readonly string[];
+    audience?: readonly string[];
     diagnostic?: string;
     contractId?: string;
   }>;

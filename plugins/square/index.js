@@ -124,7 +124,6 @@ function bodyEndExpression(signal, label) {
     const footer = [
         label === signal.akumaId ? undefined : `\`${signal.akumaId}\``,
         `\`body/${signal.bodySequence}\``,
-        signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
         signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
         "ignore if you have already seen this.",
     ]
@@ -171,7 +170,7 @@ const plugin = {
                 const details = {
                     kind: "presentation", origin: "Keiyaku", author: label, ref, ...presentation,
                 };
-                const results = await Promise.allSettled([...new Set(recipients)].map(async (recipient) => {
+                const results = await Promise.allSettled(recipients.map(async (recipient) => {
                     cancellation?.throwIfAborted();
                     const result = await postAndDispatch(ledger, {
                         owner: requireOwner(recipient),
@@ -303,13 +302,11 @@ const plugin = {
                     await retireDeliveryOwner(world, signal.akumaId, location, cancellation);
                 },
                 async "akuma.reported"(signal, cancellation) {
-                    if (signal.initiator === undefined)
-                        return;
                     await sendNotice(signal.akumaId, "report", signal.reportSequence, (label) => ({
                         text: `\`${label}\` ▸ update\n${signal.text}\n\n---\n\n${label === signal.akumaId ? "" : `\`${signal.akumaId}\` · `}\`report/${signal.reportSequence}\``,
                         label: "update", body: signal.text,
                         at: Date.parse(signal.at),
-                    }), [signal.initiator], cancellation);
+                    }), signal.audience, cancellation);
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();
@@ -334,7 +331,7 @@ const plugin = {
                 async "akuma.turn-outcome"(signal, cancellation) {
                     await serialize(signal, async (state) => {
                         await sendNotice(signal.akumaId, "turn", signal.turnSequence, (label) => ({ text: turnOutcomeBody(signal, label), label: signal.outcome.kind === "answered" ? "done" : signal.outcome.kind, body: turnOutcomeResult(signal),
-                            ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.participants, cancellation, (recipient) => {
+                            ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.audience, cancellation, (recipient) => {
                             if (signal.outcome.kind !== "answered")
                                 state.terminalRecipients.add(recipient);
                         });
@@ -346,7 +343,7 @@ const plugin = {
                             if (signal.end === "exited" || signal.end === "put-down")
                                 return;
                             await sendNotice(signal.akumaId, "body", signal.bodySequence, (label) => ({ text: bodyEndExpression(signal, label), label: signal.end, body: signal.diagnostic ?? "",
-                                ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)), cancellation);
+                                ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.audience?.filter((recipient) => !state.terminalRecipients.has(recipient)), cancellation);
                         }
                         finally {
                             if (bodyNotifications.get(bodyKey(signal)) === state)

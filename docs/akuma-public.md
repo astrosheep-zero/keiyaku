@@ -22,6 +22,11 @@ An exact retained report is independently readable by its own timeline identity,
 even while its Turn is open. That read observes no Turn outcome; a pruned or
 wrong-kind coordinate remains unknown rather than selecting other evidence.
 
+Addressed status observes the Akuma's current Heart surveillance audience from
+its own frontier. A known empty audience is not unavailable. This is an open
+observation of membership, not a delivery receipt or a lifecycle predicate.
+Wait, the board, and the roster do not enrich their observations with it.
+
 ## One Public Timeline
 
 Status and history derive from one retained Heart timeline in durable sequence

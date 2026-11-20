@@ -31,6 +31,7 @@ import {
   readSoul,
   readTellAction,
   recordReport,
+  recordSurveillance,
   recordTell,
   requestStop,
   type InterruptCompletion,
@@ -42,8 +43,14 @@ import {
   type TurnOutcome,
   type PauseFact,
 } from "./heart/index.js";
-import { parseExactHistorySelector, pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
-import type { ReportAdmission } from "./heart/facts.js";
+import {
+  akumaIdSchema,
+  parseExactHistorySelector,
+  pathsForAkumaId,
+  type AkumaId,
+  type AkumaPaths,
+} from "./identity.js";
+import { HeartUnbornError, type ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectFact, selectExactHistory, selectHistory } from "./projection.js";
 import type { AkumaWaitItem } from "./selection-observation.js";
@@ -67,6 +74,12 @@ export const historyInputSchemas = [
   ...historyPageSchemas,
 ] as const;
 const historyInputSchema = z.union(historyInputSchemas);
+
+export const akumaSurveillanceResultSchema = z
+  .strictObject({ id: akumaIdSchema, kind: z.enum(["recorded", "unchanged"]) })
+  .readonly();
+
+export type AkumaSurveillanceResult = z.output<typeof akumaSurveillanceResultSchema>;
 
 export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
 
@@ -213,6 +226,15 @@ export class AkumaOwner {
     return row === undefined || row.kind === "turn" || row.kind === "outcome"
       ? { kind: "unknown-history", id }
       : { kind: "exact-activity", row };
+  }
+
+  async surveil(owner: string, off: boolean, signal?: AbortSignal): Promise<AkumaSurveillanceResult> {
+    try {
+      return { id: this.id, kind: await recordSurveillance(this.paths, this.id, owner, off, signal) };
+    } catch (error) {
+      if (error instanceof HeartUnbornError) throw new AkumaNotBornError(this.id);
+      throw error;
+    }
   }
 
   async report(input: Readonly<{ text: string; at: string }>, signal?: AbortSignal): Promise<ReportAdmission> {

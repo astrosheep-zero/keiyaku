@@ -1,6 +1,6 @@
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillAdmission } from "../../akuma/akuma-errors.js";
-import type { ActivityRow, PermissionRow } from "../../akuma/projection.js";
+import type { ActivityRow, OutcomeRow, PermissionRow } from "../../akuma/projection.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
 import { permissionText, renderDiffstat, toolRepr, type CurrentWork } from "../../akuma/status-projection.js";
 import type {
@@ -16,6 +16,7 @@ import {
   ageText,
   DEFAULT_CLI_COLUMNS,
   exactIndentedLines,
+  opaqueCoordinate,
   previewLines,
   safeText,
   type TextRenderContext,
@@ -78,6 +79,10 @@ export function actionReceipt(
   return [`${input.mark} ${input.verb} ${identity(input.id, input.alias)}`, ...subordinateLines(input.evidence ?? [])];
 }
 
+function outcomeText(outcome: OutcomeRow["outcome"]): string {
+  return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
+}
+
 function rowText(row: Exclude<ActivityRow, { kind: "tool" }>): string {
   if (
     row.kind === "report" ||
@@ -90,12 +95,7 @@ function rowText(row: Exclude<ActivityRow, { kind: "tool" }>): string {
     return row.text;
   }
   if (row.kind === "permission") return permissionText(row);
-  if (row.kind === "outcome")
-    return row.outcome.kind === "answered"
-      ? row.outcome.answer
-      : row.outcome.kind === "canceled"
-        ? "canceled"
-        : row.outcome.diagnostic;
+  if (row.kind === "outcome") return outcomeText(row.outcome);
   return "";
 }
 
@@ -152,8 +152,13 @@ function approvalLines(requests: PermissionRow["requests"], clipped?: true): rea
   return clipped ? [...lines, "…"] : lines;
 }
 
+function surveillanceText(row: Extract<ActivityRow, { kind: "surveillance" }>): string {
+  return `${row.off ? "unsurveilled" : "surveilled"} ${opaqueCoordinate(row.owner)}`;
+}
+
 function renderRow(row: Exclude<ActivityRow, { kind: "turn" }>): readonly string[] {
   if (row.kind === "tool") return toolLines(row);
+  if (row.kind === "surveillance") return [`  ${row.sequence} ${surveillanceText(row)}`];
   if (row.kind === "permission")
     return [`  approval ${row.sequence}`, ...subordinateLines(approvalLines(row.requests, row.truncated))];
   const lead = (() => {
@@ -247,12 +252,20 @@ export function snapshotText(
       ? []
       : [`${view.life} · last activity ${activityAge === "now" ? activityAge : `${activityAge} ago`}`]),
   ]);
+  const { surveillants } = view;
   return [
     ...head,
     ...currentWorkLines(view.work),
     snapshotConclusion(view),
     ...subordinateLines([
       ...renderReportedChangeLines(view),
+      ...(surveillants === undefined
+        ? []
+        : surveillants.kind === "unavailable"
+          ? diagnosticLines("surveillants", surveillants.diagnostic)
+          : surveillants.owners.length === 0
+            ? ["surveillants none"]
+            : ["surveillants", ...subordinateLines(surveillants.owners.map(opaqueCoordinate))]),
       ...(view.contract?.kind === "failed" ? diagnosticLines("contract association", view.contract.diagnostic) : []),
     ]),
   ].join("\n");
@@ -294,6 +307,7 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
   if (selector?.kind === "activity" && result.kind === "akuma" && result.events.length === 1) {
     const row = result.events[0]!;
     if (row.sequence !== selector.sequence || row.kind === "turn" || row.kind === "outcome") return undefined;
+    if (row.kind === "surveillance") return surveillanceText(row);
     if (row.kind === "tool") {
       const tool = toolRepr(row);
       const prefix = row.phase === "completed" && row.result?.status === "error" ? "error: " : "";
@@ -304,8 +318,7 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
   }
   if (result.kind === "akuma-report") return result.text;
   if (result.kind !== "akuma-exact") return undefined;
-  const outcome = result.outcome;
-  return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
+  return outcomeText(result.outcome);
 }
 
 /**

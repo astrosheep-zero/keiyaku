@@ -16,7 +16,7 @@ import {
   type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
-import type { LeashProbe } from "./heart/facts.js";
+import type { LeashProbe, SurveillanceAudience } from "./heart/facts.js";
 import { projectFact, type ActivityRow } from "./projection.js";
 import { projectCurrentWork, summarizeFrontier, type CurrentWork } from "./status-projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -117,7 +117,7 @@ export type LiveStatusObservation = Readonly<{ status: AkumaStatus; rows: readon
 export type WaitStatusObservation = WaitFacts & Readonly<{ id: AkumaId; life: AkumaStatus["life"] }>;
 
 async function projectLiveStatus(
-  snapshot: Pick<HeartSnapshot, "latestSession" | "lastActivityAt">,
+  snapshot: Pick<HeartSnapshot, "latestSession" | "lastActivityAt"> & Readonly<{ surveillants?: SurveillanceAudience }>,
   soul: Soul,
   currentLife: AkumaStatus["life"],
   timeline: readonly TimelineFact[],
@@ -135,6 +135,7 @@ async function projectLiveStatus(
       cwd: soul.cwd,
       provider: soul.provider.name,
       ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
+      ...(snapshot.surveillants === undefined ? {} : { surveillants: snapshot.surveillants }),
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
       ...summarizeFrontier(rows, soul.cwd),
       ...(snapshot.lastActivityAt === null ? {} : { lastActivityAt: snapshot.lastActivityAt }),
@@ -184,7 +185,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
     },
     async read(signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
-        const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.read(signal));
+        const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.read(signal, true));
         return await projectLiveStatus(snapshot, soul, currentLife, snapshot.timeline);
       } catch (error) {
         reader.clear();

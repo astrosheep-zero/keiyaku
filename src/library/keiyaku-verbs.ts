@@ -8,6 +8,7 @@ import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
 import { amendInputSchema } from "./input.js";
 import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
+import { akumaSurveillanceResultSchema } from "../akuma/akuma-owner.js";
 import { akumaIdSchema } from "../akuma/identity.js";
 import { contractIdSchema } from "../git/identity.js";
 import { akumaNameCatalogSchema } from "../akuma/archetype.js";
@@ -402,6 +403,19 @@ export const verbs = Object.freeze({
     progress: askProgressSchema,
     effect: "write",
   },
+  surveil: {
+    description:
+      "Watch one Akuma's progress reports and outcomes as the invoking identity. Set off to withdraw yourself from standing surveillance and current work. Returns whether surveillance changed.",
+    input: z
+      .strictObject({
+        akuma: z.union([akumaIdSchema, akumaAliasSchema]).describe("One born Akuma (aku/<name>/<hex> or @alias)."),
+        off: optBool.describe("Remove your surveillance rather than add it."),
+      })
+      .readonly(),
+    output: akumaSurveillanceResultSchema,
+    normal: akumaSurveillanceResultSchema,
+    effect: "write",
+  },
   kill: {
     description:
       "Stop an Akuma's current execution and return each selected member's stop evidence. History and admitted orders are retained.",
@@ -489,7 +503,7 @@ export const verbs = Object.freeze({
   },
   report: {
     description:
-      "From inside a running Akuma only, leave a progress note for whoever holds you and keep working. Returns confirmation that the note was recorded, not that it was received.",
+      "From inside a running Akuma only, leave a progress note for the current surveillance audience and keep working. Returns confirmation that the note was recorded, not that it was received.",
     input: z
       .strictObject({
         text: nonblank.describe("Nonblank progress note, in Markdown or plain text, to add to your current turn."),

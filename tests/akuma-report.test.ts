@@ -353,7 +353,7 @@ test("reports use the existing retention sequence and do not acquire a second hi
   } finally { value.holder.release(); }
 });
 
-test("post-commit signal carries exact report and opening ownership; handler failure cannot undo it", async (context) => {
+test("post-commit signal carries the exact report and its observed audience; handler failure cannot undo it", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-report-signal-");
   const world = await World.at(root);
   const value = await bornBody(root, "feed0004", AT);
@@ -388,7 +388,7 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8").trim()), {
       kind: "akuma.reported", akumaId: value.allocated.id, bodySequence: value.body.sequence,
       turnSequence: turn.sequence, reportSequence: report.sequence, text: "exact\nreport",
-      at: report.at, initiator: "Alice",
+      at: report.at, audience: ["Alice"],
     });
     assert.ok(diagnostics.some(message => message.includes("notification deliberately failed")));
     assert.deepEqual((await akuma.history()).rows.filter(row => row.kind === "report"), [report]);
@@ -398,8 +398,31 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
     assert.equal(unattributed.kind, "recorded");
     const signals = readFileSync(trace, "utf8").trim().split("\n").map(line => JSON.parse(line) as Record<string, unknown>);
     assert.equal(signals.length, 2, "one attempt per committed report; reads do not replay");
-    assert.equal(Object.hasOwn(signals[1]!, "initiator"), false, "a new Turn cannot inherit the earlier owner");
+    assert.deepEqual(signals[1]!.audience, [], "a new Turn cannot inherit the earlier owner");
   } finally { value.holder.release(); }
+});
+
+test("an unreadable audience stays diagnostic without discarding native status or the report", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-report-audience-unavailable-");
+  const value = await reportFixture(root, "feed0007", "old-initiator");
+  const diagnostics: string[] = [];
+  const akuma = Akuma.select(value.world, value.allocated.id, {
+    reportDiagnostic(message) {
+      diagnostics.push(message);
+      throw new Error("host diagnostic failure");
+    },
+  });
+  try {
+    await withHeartTransaction(value.allocated.paths, (db) => db.exec("DROP TABLE surveillance"));
+    const status = await akuma.status();
+    assert.equal(status.surveillants?.kind, "unavailable");
+    const report = await akuma.report("recorded without audience");
+    assert.equal(report.kind, "recorded");
+    assert.ok(diagnostics.some((message) => /audience unavailable.*no such table/u.test(message)));
+    assert.ok((await akuma.history()).rows.some((row) => row.kind === "report" && row.text === "recorded without audience"));
+  } finally {
+    value.holder.release();
+  }
 });
 
 test("retained report corruption fails observation instead of becoming a partial or fabricated row", async (context) => {
