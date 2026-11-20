@@ -437,16 +437,9 @@ async function settleCall(
     throw failed(admitted.failure);
   if (receipt !== undefined && parsed.mode === "wait") {
     try {
-      const {
-        akumaId: _id,
-        tellId: _tell,
-        wake: _wake,
-        interrupt: _interrupt,
-        ...observation
-      } = await observeAdmittedTellAkuma({
+      const { observation } = await observeAdmittedTellAkuma({
         ...parsed,
         id: admitted.id,
-        tellId: receipt.admission.tellId,
         receipt,
         onObserve: {
           ...parsed.observe,

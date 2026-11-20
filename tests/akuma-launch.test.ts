@@ -338,7 +338,9 @@ test("detached wake retains native exit, signal, and bounded log evidence", asyn
       const preload = join(cwd, "exit.mjs");
       writeFileSync(
         preload,
-        `if (process.argv.some(arg => /akuma-body\\.[jt]s$/u.test(arg))) { ${scenario.action}; }\n`,
+        `if (process.argv.some(arg => /akuma-body\\.[jt]s$/u.test(arg))) {
+          if (process.cwd() !== ${JSON.stringify(world)} || process.env.KEIYAKU_ACTOR_ID !== ${JSON.stringify(allocated.id)}) process.exit(99);
+          ${scenario.action};\n}\n`,
       );
       process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
       writeFileSync(allocated.paths.log, "prior log\n");
@@ -356,7 +358,6 @@ test("detached wake retains native exit, signal, and bounded log evidence", asyn
         Buffer.from(`[child ${scenario.status}]\n`),
         "the log retains only the child's native exit evidence",
       );
-      assert.match(log.toString(), new RegExp(`\\[child ${scenario.status}\\]\\n$`, "u"));
       assert.deepEqual(
         (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
         [result.tellId],

@@ -11,6 +11,8 @@ import {
   readHeart,
   readSeal,
   type HeartSnapshot,
+  type Soul,
+  type TimelineFact,
   type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
@@ -114,14 +116,51 @@ export async function observeStatusOutcome(status: AkumaStatus, observer?: Outco
 export type LiveStatusObservation = Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>;
 export type WaitStatusObservation = WaitFacts & Readonly<{ id: AkumaId; life: AkumaStatus["life"] }>;
 
+async function projectLiveStatus(
+  snapshot: Pick<HeartSnapshot, "latestSession" | "lastActivityAt">,
+  soul: Soul,
+  currentLife: AkumaStatus["life"],
+  timeline: readonly TimelineFact[],
+): Promise<LiveStatusObservation> {
+  const resumeUnsupported =
+    currentLife === "stranded" &&
+    snapshot.latestSession?.provider === soul.provider.name &&
+    (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
+  const rows = timeline.map(projectFact);
+  return {
+    status: {
+      id: soul.id,
+      birth: projectAkumaBirth(soul),
+      life: currentLife,
+      cwd: soul.cwd,
+      provider: soul.provider.name,
+      ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
+      ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
+      ...summarizeFrontier(rows, soul.cwd),
+      ...(snapshot.lastActivityAt === null ? {} : { lastActivityAt: snapshot.lastActivityAt }),
+    },
+    rows,
+  };
+}
+
 /** Operation-scoped read custody, with no cached fact or presentation fallback. */
 export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
   const reader = createStatusFactReader(paths);
   return {
     clear: reader.clear,
-    async tellOutcome(id: string, signal?: AbortSignal) {
-      const observed = await bornObservation(paths, expected, () => reader.tellOutcome(id, signal));
-      return { ...observed.snapshot, life: observed.currentLife };
+    async tellOutcome(id: string, includeLive: boolean, signal?: AbortSignal) {
+      const observed = await bornObservation(paths, expected, () => reader.tellOutcome(id, includeLive, signal));
+      const { tell, end, live } = observed.snapshot;
+      const exact = { tell, end, life: observed.currentLife };
+      if (live === undefined) return { ...exact, live };
+      return {
+        ...exact,
+        async live() {
+          signal?.throwIfAborted();
+          if ("error" in live) throw live.error;
+          return await projectLiveStatus(observed.snapshot, observed.soul, exact.life, live);
+        },
+      };
     },
     async wait(
       recent: boolean,
@@ -146,25 +185,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
     async read(signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
         const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.read(signal));
-        const resumeUnsupported =
-          currentLife === "stranded" &&
-          snapshot.latestSession?.provider === soul.provider.name &&
-          (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
-        const rows = snapshot.timeline.map(projectFact);
-        return {
-          status: {
-            id: soul.id,
-            birth: projectAkumaBirth(soul),
-            life: currentLife,
-            cwd: soul.cwd,
-            provider: soul.provider.name,
-            ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
-            ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-            ...summarizeFrontier(rows, soul.cwd),
-            ...(snapshot.lastActivityAt === null ? {} : { lastActivityAt: snapshot.lastActivityAt }),
-          },
-          rows,
-        };
+        return await projectLiveStatus(snapshot, soul, currentLife, snapshot.timeline);
       } catch (error) {
         reader.clear();
         throw error;

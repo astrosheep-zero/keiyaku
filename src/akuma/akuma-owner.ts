@@ -29,7 +29,6 @@ import {
   readStopEvidence,
   readLastAnsweredTurn,
   readSoul,
-  readTell,
   readTellAction,
   recordReport,
   recordTell,
@@ -329,12 +328,6 @@ export class AkumaOwner {
       : await recordTell(this.paths, tell, cancellation);
   }
 
-  async admittedReceipt(tellId: string): Promise<TellResult> {
-    const tell = await readTell(this.paths, tellId);
-    if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-    return pendingTellReceipt(tell);
-  }
-
   /** Observe the exact admitted Tell's bound Turn without substituting Akuma-wide idleness. */
   async tellOutcome(
     tellId: string,
@@ -346,18 +339,17 @@ export class AkumaOwner {
     }> = {},
   ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null }>> {
     const reader = createLiveStatusReader(this.paths, this.id);
+    const { observe, signal } = options;
     try {
       const waited = await waitForObservation({
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(signal === undefined ? {} : { signal }),
         observe: async () => {
-          const { tell, end, life } = await reader.tellOutcome(tellId, options.signal);
+          const { tell, end, life, live } = await reader.tellOutcome(tellId, observe !== undefined, signal);
           const progress = executionProgress(life, true, options.wake?.());
           if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
           if (end !== undefined) await this.outcomeObserved?.(this.id, [`turn/${end.turnSequence}`]);
-          if (options.observe !== undefined) {
-            await options.observe(await reader.read(options.signal));
-          }
+          if (live !== undefined) await observe?.(await live());
           return {
             outcome: end?.outcome ?? null,
             completedAt: end?.completedAt ?? null,

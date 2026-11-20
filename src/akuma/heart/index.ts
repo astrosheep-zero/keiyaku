@@ -265,12 +265,19 @@ export function createStatusFactReader(paths: AkumaPaths) {
         }
         return { ...snapshot, reportFrontier, outcomeRead, outcome, activity, activityDiagnostic };
       }, signal),
-    tellOutcome: (id: string, signal?: AbortSignal) =>
+    tellOutcome: (id: string, includeLive: boolean, signal?: AbortSignal) =>
       reader.read((heart) => {
         const tell = tellFact(heart, id);
         // A retry cannot replace this exact admission's first retained terminal.
         const end = terminalTurnForTell(heart, id)?.end;
-        return { ...lifeSnapshot(heart), tell, end };
+        const snapshot = { ...lifeSnapshot(heart), tell, end };
+        if (!includeLive) return { ...snapshot, live: undefined };
+        try {
+          return { ...snapshot, live: statusFacts(heart) };
+        } catch (error) {
+          // The exact end remains observable even when optional detail cannot be read.
+          return { ...snapshot, live: { error } };
+        }
       }, signal),
     clear: reader.clear,
     read: (signal?: AbortSignal) =>

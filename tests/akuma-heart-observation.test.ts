@@ -3,9 +3,10 @@ import { rename, rm } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { bornDirectAkuma, heartFixture } from "./support/akuma-fixtures.js";
-import { temporaryDirectory } from "./support/process.js";
+import { deferred, temporaryDirectory } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
 import { observeAdmittedTellAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { pendingTellReceipt } from "../src/akuma/call-initial-tell.js";
 import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, readHeart, readTell } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
@@ -86,40 +87,46 @@ test("malformed and future Heart versions fail distinctly instead of becoming ab
   }
 });
 
-test("ask shares its Heart connection across rounds and releases it after settlement", async (context) => {
+test("live Ask shares its exact witness and retires the retained Heart reader", async (context) => {
   const root = await World.at(temporaryDirectory(context, "kei-ask-reader-"));
-  const parent = await born(root);
-  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-  const turn = await beginTurn(parent.paths, { bodySequence: body.sequence, startedAt: AT });
-  await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
-  await bindTellsToTurn(parent.paths, { turnSequence: turn.sequence, tellIds: ["asked"], boundAt: AT });
+  const { id, paths, leash } = await born(root);
+  const { sequence: bodySequence } = await leash.recordBody(paths, { leashTakenAt: AT });
+  const { sequence: turnSequence } = await beginTurn(paths, { bodySequence, startedAt: AT });
+  await recordTell(paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
+  await bindTellsToTurn(paths, { turnSequence, tellIds: ["asked"], boundAt: AT });
+  const exact = `turn/${turnSequence}`;
+  const detailFailure = new Error("frontier unavailable");
   const connections = new Set<DatabaseSync>();
+  const notified: string[] = [];
+  let refuseDetail = false;
   const prepare = DatabaseSync.prototype.prepare;
   context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
     if (sql.includes("FROM tells WHERE id = ?")) connections.add(this);
+    if (refuseDetail && sql.includes("WITH selected(sequence)")) throw detailFailure;
     return prepare.call(this, sql);
   });
-  let rounds = 0;
+  const owner = new AkumaOwner(id, root, async (_id, identities) => {
+    notified.push(...identities);
+    if (notified.length === 1) await beginTurn(paths, { bodySequence, startedAt: AT });
+  });
   try {
-    const result = await new AkumaOwner(parent.id, root).tellOutcome("asked", {
+    const outcome = { kind: "failed", diagnostic: "test settlement" } as const;
+    const result = await owner.tellOutcome("asked", {
       timeoutMs: 3000,
-      observe: async () => {
-        if (++rounds === 2) {
-          await endTurn(parent.paths, {
-            turnSequence: turn.sequence,
-            outcome: { kind: "failed", diagnostic: "test settlement" },
-            completedAt: AT,
-          });
-        }
+      observe: async ({ status, rows }) => {
+        assert.equal(status.work.turn?.sequence, turnSequence, "notification may run after the snapshot, not split it");
+        if (rows.every((row) => row.kind !== "outcome")) await endTurn(paths, { turnSequence, outcome, completedAt: AT });
       },
     });
-    assert.equal(result.reason, "completed");
-    assert.equal(result.outcome?.kind, "failed");
-    assert.ok(rounds >= 3);
+    assert.deepEqual(result, { reason: "completed", outcome, completedAt: AT });
     assert.equal(connections.size, 1);
     assert.equal([...connections][0]!.isOpen, false);
+    refuseDetail = true;
+    assert.deepEqual((await owner.tellOutcome("asked")).outcome, outcome);
+    await assert.rejects(owner.tellOutcome("asked", { observe: () => assert.fail() }), detailFailure);
+    assert.deepEqual(notified, [exact, exact, exact]);
   } finally {
-    parent.leash.release();
+    leash.release();
   }
 });
 
@@ -141,23 +148,22 @@ test("ask stops on an abandoned bound Turn without inventing an answer", async (
 test("ask preserves the launch gap, then returns an explicit failed wake without waiting forever", async (context) => {
   const root = await World.at(temporaryDirectory(context, "kei-ask-wake-failed-"));
   const parent = await born(root);
-  await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
+  const admitted = await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
   parent.leash.release();
-  const owner = new AkumaOwner(parent.id, root);
-  const receipt = await owner.admittedReceipt("asked");
-  let release!: (value: typeof receipt) => void;
-  const wake = new Promise<typeof receipt>((resolve) => { release = resolve; });
+  assert.equal(admitted.kind, "recorded");
+  const receipt = pendingTellReceipt(admitted.tell);
+  const { promise: wake, resolve } = deferred<typeof receipt>();
   let rounds = 0;
   const result = await observeAdmittedTellAkuma({
-    path: root, id: parent.id, tellId: "asked", wake,
+    path: root, id: parent.id, receipt, wake,
     signal: AbortSignal.timeout(2000),
-    onObserve: { observe: async () => {
-      if (++rounds === 2) release({ ...receipt, wake: { kind: "failed", diagnostic: "spawn failed" } });
+    onObserve: { observe: () => {
+      if (++rounds === 2) resolve({ ...receipt, wake: { kind: "failed", diagnostic: "spawn failed" } });
     } },
   });
   assert.ok(rounds >= 3);
-  assert.equal(result.kind, "unanswered");
-  assert.deepEqual(result.wake, { kind: "failed", diagnostic: "spawn failed" });
+  assert.deepEqual(result.observation, { kind: "unanswered" });
+  assert.deepEqual(result.receipt.wake, { kind: "failed", diagnostic: "spawn failed" });
   assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
 });
 

@@ -19,7 +19,6 @@ import type { BodyLauncher } from "./body-launch.js";
 import {
   tellAdmissionEvidence,
   completeTell,
-  type AkumaAskObservation,
   type AkumaAskResult,
   type AkumaKillResult,
   type AkumaTellResult,
@@ -58,7 +57,7 @@ type TellExecutionInput = Readonly<{
   outcomeObserved?: OutcomeObserver;
 }>;
 
-type AskExecutionInput = TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>;
+type AskExecutionInput = TellExecutionInput & Readonly<{ schemaJson?: string }>;
 
 async function admitExecutionTell(input: AskExecutionInput) {
   input.signal?.throwIfAborted();
@@ -73,9 +72,10 @@ async function admitExecutionTell(input: AskExecutionInput) {
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   if (input.wait === true) {
-    const { akumaId, tellId, wake, interrupt, ...observation } = await executeObservedTellAkuma(input);
+    const { receipt, observation } = await executeObservedTellAkuma(input);
+    const { subject, pending } = observedTellEvidence(input.id, receipt);
     return completeTell(
-      { akumaId, tellId, ...(wake === undefined ? {} : { wake }), ...(interrupt === undefined ? {} : { interrupt }) },
+      observation.kind === "unanswered" || observation.kind === "deadline" ? { ...subject, ...pending } : subject,
       observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
     );
   }
@@ -99,64 +99,45 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   }
 }
 
-type TextObservation =
-  | Exclude<AkumaAskObservation, { kind: "answered" }>
-  | Readonly<{ kind: "answered"; answer: string; completedAt?: string }>;
-type TextAskResult =
-  | Exclude<AkumaAskResult, { kind: "answered" }>
-  | (Omit<Extract<AkumaAskResult, { kind: "answered" }>, "answer"> & Readonly<{ answer: string }>);
-
-function tellObservation(observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>): TextObservation {
-  if (observed.outcome === null) return observed.reason === "deadline" ? { kind: "deadline" } : { kind: "unanswered" };
-  if (observed.outcome.kind === "canceled") return { kind: "unanswered" };
-  const completedAt = observed.completedAt === null ? {} : { completedAt: observed.completedAt };
-  if (observed.outcome.kind === "answered")
-    return { kind: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer, ...completedAt };
-  if (observed.outcome.kind === "failed")
-    return { kind: "failed", diagnostic: observed.outcome.diagnostic, ...completedAt };
-  return {
-    kind: "invalid-output",
-    diagnostic: observed.outcome.diagnostic,
-    answer: observed.outcome.answer,
-    ...completedAt,
-  };
+function tellObservation({ outcome, reason, completedAt }: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>) {
+  if (outcome === null && reason === "deadline") return { kind: "deadline" } as const;
+  if (outcome === null || outcome.kind === "canceled") return { kind: "unanswered" } as const;
+  const time = completedAt === null ? {} : { completedAt };
+  if (outcome.kind === "answered") return { kind: outcome.kind, answer: outcome.answerJson ?? outcome.answer, ...time };
+  const { kind, diagnostic } = outcome;
+  return kind === "failed" ? { kind, diagnostic, ...time } : { kind, diagnostic, answer: outcome.answer, ...time };
 }
 
-function observedTellResult(id: AkumaStatus["id"], tell: TellResult, observation: TextObservation): TextAskResult {
-  const { action: _action, wake: settlement, interrupt, ...base } = tellAdmissionEvidence(id, tell);
-  const subject = { ...base, ...(interrupt === undefined || interrupt.kind === "completed" ? {} : { interrupt }) };
-  const wake =
-    settlement?.kind === "confirmation-stopped"
-      ? { kind: "failed" as const, diagnostic: settlement.diagnostic }
-      : settlement;
-  return observation.kind === "unanswered" || observation.kind === "deadline"
-    ? { ...subject, ...(wake === undefined ? {} : { wake }), ...observation }
-    : { ...subject, ...(wake?.kind === "failed" ? { wake } : {}), ...observation };
+function observedTellEvidence(id: AkumaStatus["id"], tell: TellResult) {
+  const { action: _action, wake, interrupt, ...base } = tellAdmissionEvidence(id, tell);
+  const failed =
+    wake?.kind === "confirmation-stopped" ? { kind: "failed" as const, diagnostic: wake.diagnostic } : wake;
+  return {
+    subject: {
+      ...base,
+      ...(interrupt === undefined || interrupt.kind === "completed" ? {} : { interrupt }),
+      ...(failed?.kind === "failed" ? { wake: failed } : {}),
+    },
+    pending: wake?.kind === "pending" ? { wake } : {},
+  };
 }
 
 export async function observeAdmittedTellAkuma(
   input: Readonly<{
     path: WorldRoot;
     id: AkumaStatus["id"];
-    tellId: string;
+    receipt: TellResult;
     timeoutMs?: number;
     signal?: AbortSignal;
     startedAt?: number;
     wake?: Promise<TellResult>;
-    /**
-     * The exact receipt of the admission this observation is bound to. The
-     * call-facing seam always supplies it so observation never substitutes a
-     * later Heart read for that invocation's admission evidence. Ordinary
-     * Tell-bound asks may omit it and keep reading the current admitted receipt.
-     */
-    receipt?: TellResult;
     knownReceipt?: () => TellResult;
     onObserve?: AskObserver;
     outcomeObserved?: OutcomeObserver;
   }>,
-): Promise<TextAskResult> {
+) {
+  const { receipt: tell } = input;
   const owner = new AkumaOwner(input.id, input.path, input.outcomeObserved);
-  const tell = input.receipt ?? (await owner.admittedReceipt(input.tellId));
   let settled: TellResult | undefined;
   let wakeError: { error: unknown } | undefined;
   let wakeState: "launching" | "settled" | "failed" = input.wake === undefined ? "settled" : "launching";
@@ -171,18 +152,11 @@ export async function observeAdmittedTellAkuma(
     },
   );
   const known = () => settled ?? input.knownReceipt?.() ?? tell;
-  const admittedAt = Date.parse(tell.row.at);
-  const observedAt = performance.timeOrigin + performance.now();
-  const elapsed =
-    input.startedAt === undefined
-      ? Number.isFinite(admittedAt)
-        ? Math.max(0, observedAt - admittedAt)
-        : 0
-      : Math.max(0, performance.now() - input.startedAt);
-  let observed;
+  const admittedAt = input.startedAt ?? Date.parse(tell.row.at) - performance.timeOrigin;
+  const elapsed = Number.isFinite(admittedAt) ? Math.max(0, performance.now() - admittedAt) : 0;
   try {
     await input.onObserve?.admitted?.(tell, input.id);
-    observed = await owner.tellOutcome(input.tellId, {
+    const observed = await owner.tellOutcome(tell.admission.tellId, {
       wake: () => {
         if (wakeError !== undefined) throw wakeError.error;
         return wakeState;
@@ -191,6 +165,7 @@ export async function observeAdmittedTellAkuma(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
     });
+    return { receipt: known(), observation: tellObservation(observed) };
   } catch (error) {
     throw withTellFailureReceipt(
       error,
@@ -198,17 +173,19 @@ export async function observeAdmittedTellAkuma(
       input.signal,
     );
   }
-  return observedTellResult(input.id, known(), tellObservation(observed));
 }
 
 export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult> {
-  const result = await executeObservedTellAkuma(input);
-  return result.kind === "answered" && input.schemaJson !== undefined
-    ? { ...result, answer: JSON.parse(result.answer) }
-    : result;
+  const { receipt, observation } = await executeObservedTellAkuma(input);
+  const { subject, pending } = observedTellEvidence(input.id, receipt);
+  if (observation.kind === "unanswered" || observation.kind === "deadline")
+    return { ...subject, ...pending, ...observation };
+  return observation.kind === "answered" && input.schemaJson !== undefined
+    ? { ...subject, ...observation, answer: JSON.parse(observation.answer) }
+    : { ...subject, ...observation };
 }
 
-async function executeObservedTellAkuma(input: AskExecutionInput): Promise<TextAskResult> {
+async function executeObservedTellAkuma(input: AskExecutionInput) {
   const { owner, admission, receipt } = await admitExecutionTell(input);
   const startedAt = performance.now();
   const observing = new AbortController();
@@ -224,7 +201,6 @@ async function executeObservedTellAkuma(input: AskExecutionInput): Promise<TextA
   try {
     return await observeAdmittedTellAkuma({
       ...input,
-      tellId: admission.tell.id,
       receipt,
       knownReceipt: () => known,
       wake,

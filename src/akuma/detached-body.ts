@@ -2,18 +2,11 @@ import { stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawnDetachedProcess } from "../runtime/proc/run.js";
 import type { BodyLaunch, LiveBodyLaunch } from "./body-launch.js";
-import { readHeart } from "./heart/index.js";
+import { readSoul } from "./heart/index.js";
 import { worldRootForAkumaPaths } from "./identity.js";
 import { akumaExecutionEnvironment } from "./providers/execution-environment.js";
 
 export const LEASH_HELD_EXIT = 75;
-
-async function launchCwd(launch: BodyLaunch): Promise<string> {
-  if (launch.seed !== undefined) return launch.seed.cwd;
-  const soul = (await readHeart(launch.paths)).soul;
-  if (soul === null) throw new Error("Akuma wake has no born soul");
-  return soul.cwd;
-}
 
 async function executableMissing(path: string): Promise<boolean> {
   try {
@@ -64,16 +57,16 @@ async function diagnoseSpawnEnoent(
 
 export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
-  const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
-  if (actorId === undefined) throw new Error("Akuma wake has no born soul");
+  const soul = launch.seed ?? (await readSoul(launch.paths));
+  if (soul === null) throw new Error("Akuma wake has no born soul");
   const executable = process.execPath;
   const source = bodyModuleUrl.endsWith(".ts");
   const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
   return {
     argv: source ? [executable, "--import", import.meta.resolve("tsx"), entry, encoded] : [executable, entry, encoded],
-    cwd: await launchCwd(launch),
+    cwd: soul.cwd,
     env: akumaExecutionEnvironment(process.env, {
-      KEIYAKU_ACTOR_ID: actorId,
+      KEIYAKU_ACTOR_ID: soul.id,
       KEIYAKU_ACTOR_WORLD: worldRootForAkumaPaths(launch.paths),
     }),
     log: launch.paths.log,
