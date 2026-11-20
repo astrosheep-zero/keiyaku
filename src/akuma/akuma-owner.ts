@@ -45,8 +45,7 @@ import {
 import { parseExactHistorySelector, pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import type { ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
-import { projectFact, selectExactHistory } from "./projection.js";
-import { selectHistory } from "./projection-read.js";
+import { projectFact, selectExactHistory, selectHistory } from "./projection.js";
 import type { AkumaWaitItem } from "./selection-observation.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";

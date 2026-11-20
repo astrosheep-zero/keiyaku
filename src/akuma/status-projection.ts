@@ -1,5 +1,12 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { publicPermissionRequestSchema, type PermissionRow, type ActivityRow, type ToolRow } from "./projection.js";
+import {
+  publicFileChangeSchema,
+  publicPermissionRequestSchema,
+  type PermissionRow,
+  type ActivityRow,
+  type ToolRow,
+} from "./projection.js";
 import { turnHistoryIdSchema } from "./identity.js";
 
 const sequence = z.number().int().nonnegative().safe();
@@ -181,10 +188,25 @@ function currentAction(row: ActivityRow): CurrentWork["summary"] {
   };
 }
 
-function unmatchedTools(rows: readonly ActivityRow[], turnSequence: number | undefined): readonly ToolRow[] {
+function belongsToTurn(row: ActivityRow, sequence: number | undefined): boolean {
+  if (row.kind === "tell") return row.deliveries.some((delivery) => delivery.turnSequence === sequence);
+  return (row.kind === "turn" ? row.sequence : row.turnSequence) === sequence;
+}
+
+/** Turn membership follows retained coordinates, including delivered Tells. */
+export function frontierRows(rows: readonly ActivityRow[]): readonly ActivityRow[] {
+  const turn = rows.findLast((row) => row.kind === "turn");
+  return rows.filter((row) => belongsToTurn(row, turn?.sequence));
+}
+
+export function frontierTail(rows: readonly ActivityRow[]): readonly ActivityRow[] {
+  return frontierRows(rows).slice(-3);
+}
+
+function unmatchedTools(rows: readonly ActivityRow[], turnSequence: number): readonly ToolRow[] {
   const active = new Map<string, ToolRow>();
   for (const row of rows) {
-    if (row.kind !== "tool" || row.turnSequence !== turnSequence) continue;
+    if (row.kind !== "tool" || !belongsToTurn(row, turnSequence)) continue;
     active.delete(row.toolId);
     if (row.phase === "started") active.set(row.toolId, row);
   }
@@ -201,18 +223,16 @@ export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
     row.kind === "tell" && row.state === "pending" ? [{ id: row.sequence, tellId: row.tellId }] : [],
   );
   const permission = open
-    ? rows.findLast((row): row is PermissionRow => row.kind === "permission" && row.turnSequence === turn.sequence)
+    ? rows.findLast((row): row is PermissionRow => row.kind === "permission" && belongsToTurn(row, turn.sequence))
     : undefined;
   const awaiting = permission?.requests.length ? permission : undefined;
   const selected =
     awaiting ??
     active.at(-1) ??
-    rows.findLast((row) =>
-      row.kind === "said" || row.kind === "call"
-        ? row.turnSequence === turn?.sequence
-        : row.kind === "tell" &&
-          row.state === "told" &&
-          row.deliveries.some((delivery) => delivery.turnSequence === turn?.sequence),
+    rows.findLast(
+      (row) =>
+        (row.kind === "said" || row.kind === "call" || (row.kind === "tell" && row.state === "told")) &&
+        belongsToTurn(row, turn?.sequence),
     );
   const summary = selected === undefined ? undefined : currentAction(selected);
   return {
@@ -249,5 +269,51 @@ export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
           },
         }),
     ...(summary === undefined ? {} : { summary }),
+  };
+}
+
+export const reportedFileChangeSchema = publicFileChangeSchema.unwrap().pick({ path: true, diffstat: true }).readonly();
+type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
+
+function accumulateChange(previous: ReportedFileChange | undefined, change: ReportedFileChange): ReportedFileChange {
+  if (previous === undefined) return change;
+  const before = previous.diffstat;
+  const after = change.diffstat;
+  return before === undefined || after === undefined
+    ? { path: change.path }
+    : { path: change.path, diffstat: { added: before.added + after.added, removed: before.removed + after.removed } };
+}
+
+/** Native status derives its detail and advisory changes on the same work frontier. */
+export function summarizeFrontier(rows: readonly ActivityRow[], executionDir: string) {
+  const work = projectCurrentWork(rows);
+  const recent = frontierTail(rows);
+  const changes = new Map<string, ReportedFileChange>();
+  for (const row of rows) {
+    if (
+      row.kind !== "tool" ||
+      !belongsToTurn(row, work.turn?.sequence) ||
+      row.phase !== "completed" ||
+      row.result?.status !== "ok" ||
+      row.call.kind !== "fileChange"
+    )
+      continue;
+    for (const { path, diffstat } of row.call.changes) {
+      const combined = accumulateChange(changes.get(path), { path, ...(diffstat === undefined ? {} : { diffstat }) });
+      changes.delete(path);
+      changes.set(path, combined);
+    }
+  }
+  const inside = [...changes.values()].filter((change) => {
+    const path = relative(executionDir, resolve(executionDir, change.path));
+    return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+  });
+  const outside = changes.size - inside.length;
+  return {
+    work,
+    ...(recent.length === 0 ? {} : { recent }),
+    ...(inside.length === 0 ? {} : { changes: inside.slice(-5) }),
+    ...(inside.length > 5 ? { moreChanges: true as const } : {}),
+    ...(outside === 0 ? {} : { outsideChanges: outside }),
   };
 }

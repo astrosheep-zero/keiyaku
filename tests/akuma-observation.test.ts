@@ -13,7 +13,7 @@ import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectFact } from "../src/akuma/projection.js";
-import { summarizeFrontier } from "../src/akuma/projection-read.js";
+import { summarizeFrontier } from "../src/akuma/status-projection.js";
 import {
   HeldAkumaLeash,
   activitySlice,

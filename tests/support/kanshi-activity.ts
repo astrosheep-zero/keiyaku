@@ -1,4 +1,4 @@
-import type { ActivityRow, OutcomeRow, ReportedFileChange, ToolRow } from "../../src/akuma/projection.js";
+import type { ActivityRow, OutcomeRow, ToolRow } from "../../src/akuma/projection.js";
 import { projectCurrentWork } from "../../src/akuma/status-projection.js";
 import { parseAkumaId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
@@ -40,7 +40,7 @@ export function answeredOutcome(sequence: number, answer: string, turnSequence =
   };
 }
 
-export function reportedFileChange(path: string): ReportedFileChange {
+export function reportedFileChange(path: string) {
   return { path };
 }
 

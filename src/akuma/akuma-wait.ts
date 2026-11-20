@@ -15,7 +15,7 @@ import { UnsupportedHistoricalHeartError } from "./heart/schema.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
 import { projectFact, type OutcomeRow } from "./projection.js";
-import { frontierRows } from "./projection-read.js";
+import { frontierTail } from "./status-projection.js";
 
 export type NativeWaitResult = Readonly<{ reason: WaitReason; results: readonly AkumaWaitItem[] }>;
 export const AKUMA_WAIT_POLL_MS = 250;
@@ -52,7 +52,7 @@ function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
   const events =
     snapshot.activity === undefined || snapshot.life !== "running"
       ? undefined
-      : frontierRows(snapshot.activity.map(projectFact)).slice(-3);
+      : frontierTail(snapshot.activity.map(projectFact));
   return {
     kind: "observed",
     id: snapshot.id,

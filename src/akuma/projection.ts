@@ -1,3 +1,4 @@
+import { selectHistoryPage } from "../history.js";
 import { z } from "zod";
 import {
   toolCallSchema,
@@ -156,12 +157,6 @@ export const toolRowSchema = z
   })
   .refine((row) => (row.phase === "completed") === (row.result !== undefined), "only completed tools have results")
   .readonly();
-export const reportedFileChangeSchema = z
-  .strictObject({
-    path: z.string(),
-    diffstat: strictDiffstatSchema.exactOptional(),
-  })
-  .readonly();
 export const activityRowSchema = z.union([
   permissionRowSchema,
   turnRowSchema,
@@ -191,9 +186,7 @@ export type PermissionRow = z.output<typeof permissionRowSchema>;
 export type OutcomeRow = z.output<typeof outcomeRowSchema>;
 export type ToolRow = z.output<typeof toolRowSchema>;
 export type ActivityRow = z.output<typeof activityRowSchema>;
-export type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
 export type ActivityHistory = z.output<typeof activityHistorySchema>;
-export type HistoryPage = ActivityHistory;
 export type { TellRow } from "./heart/facts.js";
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
@@ -323,6 +316,26 @@ export function projectFact(fact: TimelineFact): ActivityRow {
       };
     }
   }
+}
+
+export function selectHistory(
+  timeline: Readonly<{ rows: readonly ActivityRow[]; lowestRetained: number | null; highest: number | null }>,
+  cursor: HistoryCursor,
+): ActivityHistory {
+  const { rows, omitted } = selectHistoryPage(timeline.rows, (row) => row.sequence, cursor);
+  const historyLost =
+    cursor.since !== undefined
+      ? timeline.rows[0] !== undefined && timeline.rows[0].sequence > cursor.since + 1
+      : timeline.lowestRetained !== null && timeline.lowestRetained > 1 && omitted === 0;
+  return {
+    rows,
+    omitted,
+    hasEarlier: cursor.since === undefined && omitted > 0,
+    hasLater: cursor.since !== undefined && omitted > 0,
+    historyLost,
+    lowestRetained: timeline.lowestRetained,
+    highest: timeline.highest,
+  };
 }
 
 export function selectExactHistory(

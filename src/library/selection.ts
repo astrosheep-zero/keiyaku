@@ -14,8 +14,7 @@ import {
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
 import { executeWaitAkuma } from "../akuma/akuma-wait.js";
-import type { LiveStatusObservation } from "../akuma/akuma-observe.js";
-import { type AkumaStatus } from "../akuma/akuma.js";
+import type { AkumaStatus } from "../akuma/akuma.js";
 import { type ActivityHistory } from "../akuma/projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "../akuma/schema.js";
 import type {
@@ -133,50 +132,35 @@ export async function dispatchAssociations(
  * active or abandoned Contract, and an unproven Contract read all keep the
  * reported changes: unplaced work still matters.
  */
-function placementDischarged(repo: Repo | undefined): (contract: DispatchAssociation) => Promise<boolean> {
-  const cache = new Map<string, boolean>();
-  return async (contract) => {
-    if (repo === undefined || contract.kind !== "associated") return false;
-    const known = cache.get(contract.contractId);
-    if (known !== undefined) return known;
-    let claimed = false;
-    try {
-      const scope = scopeForRepo(repo);
-      claimed = await withGitDecodeChannel(
-        scope,
-        async (channel) =>
-          (await observeContractAt(scope, channel, contract.contractId)).state?.terminal?.kind === "claimed",
-      );
-    } catch {
-      claimed = false;
-    }
-    cache.set(contract.contractId, claimed);
-    return claimed;
-  };
+async function placementDischarged(repo: Repo | undefined, contract: DispatchAssociation): Promise<boolean> {
+  if (repo === undefined || contract.kind !== "associated") return false;
+  try {
+    const scope = scopeForRepo(repo);
+    return await withGitDecodeChannel(
+      scope,
+      async (channel) =>
+        (await observeContractAt(scope, channel, contract.contractId)).state?.terminal?.kind === "claimed",
+    );
+  } catch {
+    return false;
+  }
 }
 
-async function observeAkuma(status: LiveStatusObservation["status"], repo?: Repo): Promise<AkumaObservation> {
+async function observeAkuma(status: AkumaStatus, repo?: Repo): Promise<AkumaObservation> {
   const contract = (await dispatchAssociations(repo, [status.id])).get(status.id)!;
-  if (status.cwd === undefined || status.provider === undefined)
+  const { birth: _birth, cwd, provider, ...native } = status;
+  if (cwd === undefined || provider === undefined)
     throw new Error(`Born Akuma ${status.id} lacks its frozen execution context`);
-  const discharged = await placementDischarged(repo)(contract);
-  const changes = discharged ? [] : (status.changes ?? []);
-  return {
+  const observation: AkumaObservation = {
     kind: "akuma",
-    id: status.id,
-    life: status.life,
-    cwd: status.cwd,
-    provider: status.provider,
-    ...(status.model === undefined ? {} : { model: status.model }),
-    work: status.work,
-    ...(status.recent === undefined ? {} : { recent: status.recent }),
-    ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
-    ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
+    ...native,
+    cwd,
+    provider,
     ...(contract.kind === "none" ? {} : { contract }),
-    ...(changes.length === 0 ? {} : { changes }),
-    ...(discharged || status.moreChanges !== true ? {} : { moreChanges: true }),
-    ...(discharged || status.outsideChanges === undefined ? {} : { outsideChanges: status.outsideChanges }),
   };
+  if (!(await placementDischarged(repo, contract))) return observation;
+  const { changes: _changes, moreChanges: _more, outsideChanges: _outside, ...discharged } = observation;
+  return discharged;
 }
 
 function timeout(value: unknown): number | undefined {

@@ -4,6 +4,7 @@ isolateUserHome();
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import {
   breakBody,
@@ -697,12 +698,7 @@ test("World running rows keep only one bounded latest activity line through the 
 test("thin catalogue reads no current frontiers while World keeps its original aperture", async (t) => {
   const repository = fixtureRepository(t);
   const world = await World.at(repository.path);
-  const reads: string[] = [];
-  const original = AkumaOwner.prototype.status;
-  t.mock.method(AkumaOwner.prototype, "status", async function(this: AkumaOwner) {
-    reads.push(this.id);
-    return original.call(this);
-  });
+  const status = t.mock.method(AkumaOwner.prototype, "status", async () => assert.fail("full status read"));
   for (let index = 0; index < 11; index += 1) {
     const at = `2026-08-09T00:00:${String(index).padStart(2, "0")}.000Z`;
     const born = await bornDirectAkuma({ root: world, akumaName: "worker", draw: index.toString(16).padStart(8, "0"), createdAt: at });
@@ -715,20 +711,20 @@ test("thin catalogue reads no current frontiers while World keeps its original a
   const catalogue = await Akumas.of(world).list({ limit: 10 });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
   assert.equal(catalogue.more, true);
-  assert.deepEqual(reads, []);
-  reads.length = 0;
+  assert.ok(catalogue.rows!.every(row => !("work" in row)));
   const view = Kanshi.of({ world });
   const report = await view.board();
-  assert.equal(report.akumas.kind, "present");
   if (report.akumas.kind !== "present") assert.fail(JSON.stringify(report));
-  assert.deepEqual(report.akumas.rows!.map(row => row.id), catalogue.rows!.map(row => row.id));
-  assert.deepEqual(reads, catalogue.rows!.slice(0, 3).map(row => row.id));
+  const rows = report.akumas.rows!;
+  assert.deepEqual(rows.map(row => row.id), catalogue.rows!.map(row => row.id));
+  assert.deepEqual(rows.flatMap(row => row.work === undefined ? [] : [row.id]), rows.slice(0, 3).map(row => row.id));
+  assert.ok(rows.slice(0, 3).every(row => row.work?.kind === "idle" && row.work.outcome?.verdict === "answered"));
   const bounded = await view.board({ akumaLimit: 2 });
   if (bounded.akumas.kind !== "present") assert.fail("bounded Akuma observation failed");
-  assert.deepEqual(bounded.akumas.rows!.map(row => row.id), catalogue.rows!.slice(0, 2).map(row => row.id));
+  assert.deepEqual(bounded.akumas.rows, rows.slice(0, 2));
   assert.equal(bounded.akumas.more, true);
   assert.equal(report.akumas.more, true);
-  assert.ok(report.akumas.rows!.slice(0, 3).every(row => row.work !== undefined && row.work.kind !== "unavailable" && row.work.outcome?.verdict === "answered"));
+  assert.equal(status.mock.callCount(), 0);
 });
 
 test("birthless members retain associations without timelines and born snapshot failure preserves peers", async (t) => {
@@ -738,7 +734,13 @@ test("birthless members retain associations without timelines and born snapshot 
   const unborn = await allocatedHeart(world, "worker", "a0000000");
   const stillborn = await allocatedHeart(world, "worker", "a0000002");
   const born = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
+  const at = born.soul.createdAt;
+  const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
+  const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at });
+  await appendActivity(born.paths, { turnSequence: turn.sequence, at, event: { type: "assistant", text: "work" } });
   born.leash.release();
+  using heart = new DatabaseSync(born.paths.heart);
+  heart.exec("UPDATE activity SET event_json = '{}'");
   const peer = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "a0000003", createdAt: "2026-08-09T00:00:01.000Z" });
   peer.leash.release();
   // A failed birth seal is native allocation evidence, not a failed status snapshot.
@@ -746,29 +748,20 @@ test("birthless members retain associations without timelines and born snapshot 
   await claim.sealIfUnborn(stillborn.paths, { evidence: "birth failed", at: "2026-08-09T00:00:00.000Z" });
   claim.release();
   for (const id of [unborn.id, stillborn.id]) assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: id, contractId: contractId("kei/catalogue") })).kind, "dispatched");
-  const reads: string[] = [];
-  const original = AkumaOwner.prototype.status;
-  t.mock.method(AkumaOwner.prototype, "status", async function(this: AkumaOwner) {
-    reads.push(this.id);
-    if (this.id === born.id) throw new Error("selected Heart became unreadable");
-    return original.call(this);
-  });
   const catalogue = await Akumas.of(world).list({ repo });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
-  assert.deepEqual(reads, []);
-  assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, peer.id]);
+  assert.deepEqual(catalogue.rows!.map(row => row.id), [born.id, unborn.id, peer.id]);
   const all = await Akumas.of(world).list({ repo, selection: "all" });
-  assert.deepEqual(all.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
+  assert.deepEqual(all.rows!.map(row => row.id), [born.id, unborn.id, stillborn.id, peer.id]);
   for (const row of all.rows!.filter(row => row.life === "unborn" || row.life === "stillborn"))
     assert.deepEqual(row.contract, { kind: "associated", contractId: "kei/catalogue" });
-  reads.length = 0;
   const report = await Kanshi.of({ world, repo }).board();
-  assert.equal(report.akumas.kind, "present");
   if (report.akumas.kind !== "present") assert.fail("missing Akumas");
-  assert.deepEqual(report.akumas.rows!.find(row => row.id === born.id)?.work, { kind: "unavailable", diagnostic: "selected Heart became unreadable" });
-  assert.deepEqual(report.akumas.rows!.map(row => row.id), catalogue.rows!.map(row => row.id));
-  assert.deepEqual(reads, catalogue.rows!.slice(0, 3).filter(row => row.id === born.id || row.id === peer.id).map(row => row.id),
-    "snapshots use positions in the owner's selected page");
+  const rows = report.akumas.rows!;
+  assert.deepEqual(rows.map(row => row.id), catalogue.rows!.map(row => row.id));
+  assert.deepEqual(rows.map(row => row.work?.kind), ["unavailable", undefined, "idle"]);
+  const work = rows[0]!.work;
+  assert.match(work?.kind === "unavailable" ? work.diagnostic : "", /invalid_union/u);
 });
 
 test("catalogue Alias failures survive empty and readable membership; source failures stay hard", async (t) => {

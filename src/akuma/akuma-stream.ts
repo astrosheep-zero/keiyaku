@@ -4,8 +4,7 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 import { OBSERVATION_POLL_MS, type OutcomeObserver } from "./akuma-observe.js";
 import { createTimelineReader } from "./heart/index.js";
 import type { AkumaId, AkumaPaths } from "./identity.js";
-import { projectFact, type ActivityHistory, type ActivityRow } from "./projection.js";
-import { selectHistory } from "./projection-read.js";
+import { projectFact, selectHistory, type ActivityHistory, type ActivityRow } from "./projection.js";
 
 /** The complete bounded latest timeline window one stream emission carries; never a delta. */
 export type AkumaStreamSnapshot = ActivityHistory;

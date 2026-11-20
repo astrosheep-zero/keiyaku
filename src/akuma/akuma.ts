@@ -6,7 +6,7 @@ import { projectBoundedList, lifecycleSelection, type LifecycleSelection } from 
 import { akumaLifecycle } from "./heart/facts.js";
 import type { WorldRoot } from "../world.js";
 import { readBornLife, rosterListRow } from "./akuma-observe.js";
-import { AkumaOwner } from "./akuma-owner.js";
+export { readAkumaWork } from "./akuma-observe.js";
 import { readSoul } from "./heart/index.js";
 import {
   akumaIdFromDirectoryName,
@@ -18,8 +18,8 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import { activityRowSchema, reportedFileChangeSchema } from "./projection.js";
-import { currentWorkSchema } from "./status-projection.js";
+import { activityRowSchema } from "./projection.js";
+import { currentWorkSchema, reportedFileChangeSchema } from "./status-projection.js";
 import { boundedMap } from "./read-pool.js";
 
 type BornLife = AkumaStatus["life"];
@@ -404,9 +404,4 @@ export async function readAkumaCompleteRoster(
     observedAt,
     rows: (await observeRows(known.rows, "all")).rows,
   };
-}
-
-/** Internal current-work observation for composition owners. */
-export async function readAkumaWork(path: WorldRoot, id: AkumaId): Promise<AkumaStatus["work"]> {
-  return (await new AkumaOwner(id, path).status()).work;
 }

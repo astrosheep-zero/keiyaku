@@ -1,8 +1,5 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
-import { currentWorkSchema } from "./status-projection.js";
-import { activityRowSchema } from "./projection.js";
-import { diffstatSchema } from "./heart/activity-schema.js";
 import {
   failedWakeSchema,
   pendingWakeSchema,
@@ -40,33 +37,14 @@ export const akumaCatalogueSchema = z
   })
   .readonly();
 
-export const akumaObservationSchema = z
-  .strictObject({
+const nativeStatus = akumaStatusSchema.unwrap();
+export const akumaObservationSchema = nativeStatus
+  .omit({ birth: true })
+  .extend({
     kind: z.literal("akuma"),
-    id: akumaIdSchema,
-    life: akumaStatusSchema.unwrap().shape.life,
-    cwd: z.string(),
-    provider: z.string(),
-    model: z.string().exactOptional(),
-    work: currentWorkSchema,
-    recent: z.array(activityRowSchema).max(3).readonly().exactOptional(),
-    lastActivityAt: z.string().exactOptional(),
-    strandedReason: z.literal("resume-unsupported").exactOptional(),
+    cwd: nativeStatus.shape.cwd.unwrap(),
+    provider: nativeStatus.shape.provider.unwrap(),
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),
-    changes: z
-      .array(
-        z
-          .strictObject({
-            path: z.string(),
-            diffstat: diffstatSchema.strict().readonly().exactOptional(),
-          })
-          .readonly(),
-      )
-      .nonempty()
-      .readonly()
-      .exactOptional(),
-    moreChanges: z.literal(true).exactOptional(),
-    outsideChanges: z.number().int().positive().exactOptional(),
   })
   .readonly();
 // A wait reports the settled outcome, not the timeline row that carries its event coordinates.
@@ -80,9 +58,9 @@ export const observedAkumaWaitItemSchema = z
   .strictObject({
     kind: z.literal("observed"),
     id: akumaIdSchema,
-    life: akumaStatusSchema.unwrap().shape.life,
-    lastActivityAt: akumaCatalogueRowSchema.unwrap().shape.lastActivityAt,
-    events: z.array(activityRowSchema).max(3).readonly().exactOptional(),
+    life: nativeStatus.shape.life,
+    lastActivityAt: nativeStatus.shape.lastActivityAt,
+    events: nativeStatus.shape.recent,
     eventsUnavailable: z.string().exactOptional(),
     pending: z.literal(true).exactOptional(),
     outcome: waitOutcomeSchema.exactOptional(),

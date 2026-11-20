@@ -18,7 +18,7 @@ import {
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import type { LeashProbe } from "./heart/facts.js";
 import { projectFact, type ActivityRow } from "./projection.js";
-import { summarizeFrontier } from "./projection-read.js";
+import { projectCurrentWork, summarizeFrontier, type CurrentWork } from "./status-projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
@@ -215,6 +215,18 @@ export async function readLiveStatus(
   signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
   return await bornLiveStatus(pathsForAkumaId(worldPath, id), id, signal);
+}
+
+/** Bounded native current work without status/detail or provider capability. */
+export async function readAkumaWork(worldPath: WorldRoot, id: AkumaId): Promise<CurrentWork> {
+  const paths = pathsForAkumaId(worldPath, id);
+  const reader = createStatusFactReader(paths);
+  try {
+    const { snapshot } = await bornObservation(paths, id, () => reader.read());
+    return projectCurrentWork(snapshot.timeline.map(projectFact));
+  } finally {
+    reader.clear();
+  }
 }
 
 export type ExecutionProgress = "settled" | "advancing" | "stopped";
