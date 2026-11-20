@@ -94,6 +94,15 @@ can leave a ref custody diagnostic without blocking release of an appointment
 whose physical absence is independently proved. Retention does not change
 acceptance.
 
+Reconciliation repairs each active Contract's admitted Verification snapshot
+custody independently of delivery, using its current journal under publication
+custody. Recovery uses the same exact association as admission and reuse. Only
+the literal recorded commit proves availability; a Git replacement does not
+count. A missing historical object is reported unavailable, never rebuilt or
+substituted, and does not prevent repair of another snapshot. Terminal
+reconciliation retires evidence-only custody independently of candidate
+custody and leaves any live attempt's own custody intact.
+
 Successful Git removal alone does not prove that the filesystem path is gone.
 Cleanup confirms physical absence before reporting removal and releasing
 custody. Observation failure or a leftover or recreated path retains custody

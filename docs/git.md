@@ -111,8 +111,9 @@ for the same Contract when its tree and sole predecessor match the planned
 integration. The reused commit keeps its original message and dates; a new
 delivery note does not rewrite it. A different tree or predecessor requires a
 fresh integration, and an unavailable recorded commit is skipped rather than
-blocking preparation. This reuse creates no additional identity or evidence
-authority; Verification still judges the exact snapshot and requirement.
+blocking preparation. A Git replacement cannot prove that the recorded commit
+exists or supply its tree and predecessor for reuse. Reuse creates no additional
+identity or evidence authority and does not change which testimony is current.
 Evidence captured before delivery applies when a later delivery names that same
 integration under the same target selection. Target or candidate movement never
 retargets earlier testimony. Explicit target amendment uses the existing
@@ -130,8 +131,9 @@ cancelled transfer yields no identity, even when partial output resembles one.
 A failed transfer awaits retirement of both owned commands and preserves any
 retirement failure.
 For each selected Verification declaration Git materializes the exact captured
-integration in an independent clean worktree without importing mutable execution
-state from another declaration or checkout. Preparation, command execution, and
+integration in an independent clean worktree. Git replacements cannot substitute
+another tree for that integration, and mutable execution state from another
+declaration or checkout is not imported. Preparation, command execution, and
 the decision to retain a failed scene belong to
 [verification.md](verification.md); Git owns scratch byte custody, Contract and
 requirement association, and physical removal. A retained diagnostic scratch
@@ -145,7 +147,10 @@ prove no live attempt owns.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's
-checkout; it does not authorize dirty submodule internals. When conflict
+checkout; it does not authorize dirty submodule internals. A captured merge
+keeps its parents in the tender; target planning uses the committed workspace
+head for ancestry, augmented only by the captured parent of a proved live
+Keiyaku handoff, and the captured tree for content. When conflict
 materialization is explicitly requested with that authorization, it preserves
 the captured bytes as the handoff base before projecting the judged conflict.
 Review can observe
@@ -204,8 +209,28 @@ remain private to ordinary text.
 
 ## Custody And Cleanup
 
-Journal facts retain candidate identities, but are not reachability edges. Git
-keeps the tender and integration reachable while a managed worktree or pending
+Journal facts retain snapshot identities, but are not reachability edges.
+Explicit Verification pins its integration in independent attempt custody before
+any check. It takes custody as soon as it has selected an existing integration
+or minted a new one, before doing further preparation with that choice. A clean
+workspace head is reachable from its registered checkout until that head moves;
+the attempt pin does not depend on the checkout staying put. The pin survives
+scratch retirement and testimony admission. Git's ordinary object expiration
+protects freshly written objects until this root is established. Concurrent
+forced pruning without the ordinary grace period is outside this guarantee.
+Before admitting or reusing
+testimony, Git requires positive evidence that the owned pin names the exact
+commit object. An unavailable pin or commit stops admission; an object name or
+same-value reference transaction is not evidence of bytes. An active
+Contract keeps every distinct snapshot named by its admitted Verification
+attestations, satisfied or unsatisfied. New testimony and its snapshot custody
+publish atomically; reuse confirms or repairs that same custody without a new
+fact. Checks without admitted testimony leave no evidence custody. These edges
+are derived from the journal, never gate inputs or a second evidence authority.
+Terminal release of evidence custody does not remove live attempt custody or
+substitute for delivery and landing custody.
+
+Git keeps the tender and integration reachable while a managed worktree or pending
 placement needs them, and an accepted target may become a custodian. Refs are
 released only after an independent surviving custodian proves the required exact
 commit or tender bytes remain available. A disposable Contract worktree head

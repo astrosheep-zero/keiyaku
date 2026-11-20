@@ -1,7 +1,8 @@
 import { cleanupTerminalContract, repairContractEffects, type ReconcileResult } from "../git/reconcile.js";
 import { observeContractJournals } from "../git/observe.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
-import type { ContractHead, ContractId } from "../core/facts/types.js";
+import type { ContractHead, ContractId, ContractState } from "../core/facts/types.js";
+import { attestedVerificationSnapshots } from "../verification/declaration.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import type { MutationOperationInput, RepositoryScope } from "./operations.js";
 
@@ -11,6 +12,8 @@ function gitInput(input: ReconcileOperationInput) {
   return {
     ...input,
     repository: input.scope,
+    attestedSnapshots: (state: ContractState) =>
+      state.attestations.flatMap(({ data }) => attestedVerificationSnapshots(data)),
     onPhysical: (report: ReconcileResult) => input.progress?.recordPhysical(input.contractId, report),
   };
 }

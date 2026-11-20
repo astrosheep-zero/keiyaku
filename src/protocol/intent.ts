@@ -5,7 +5,7 @@ import type { GitRepository } from "../git/process.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ContractId } from "../core/facts/types.js";
 import { runProtocol, type CompanionDecorator, type ProtocolPreparation, type ProtocolResult } from "./run.js";
-import { mintAttempts } from "./attempt.js";
+import { mintAttempts, type PrepareRefCompanion } from "./attempt.js";
 
 type CommonIntentAdmissionOptions<Refusal> = Readonly<{
   progress?: ProtocolProgress;
@@ -16,6 +16,7 @@ type CommonIntentAdmissionOptions<Refusal> = Readonly<{
     contracts: readonly ContractId[],
   ) => Promise<ContractReadView>;
   decorateOffer?: CompanionDecorator;
+  prepareRefCompanion?: PrepareRefCompanion<Refusal>;
   validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
 }>;
@@ -25,19 +26,6 @@ export type IntentAdmissionOptions<Refusal = never> = CommonIntentAdmissionOptio
 type PreparedIntentAdmissionOptions<Input, Refusal, Seed, Prepared> = CommonIntentAdmissionOptions<Refusal> &
   Readonly<{ preparation: ProtocolPreparation<Input, Refusal, Seed, Prepared> }>;
 
-function admissionOptions<Refusal>(
-  options: CommonIntentAdmissionOptions<Refusal>,
-): CommonIntentAdmissionOptions<Refusal> {
-  return {
-    ...(options.progress === undefined ? {} : { progress: options.progress }),
-    ...(options.observedContracts === undefined ? {} : { observedContracts: options.observedContracts }),
-    ...(options.observe === undefined ? {} : { observe: options.observe }),
-    ...(options.decorateOffer === undefined ? {} : { decorateOffer: options.decorateOffer }),
-    ...(options.validateAdmission === undefined ? {} : { validateAdmission: options.validateAdmission }),
-    ...(options.observationSelection === undefined ? {} : { observationSelection: options.observationSelection }),
-  };
-}
-
 /** Observe, decide, and atomically admit one intent whose invocation already is its decision input. */
 export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
   channel: GitDecodeChannel,
@@ -46,13 +34,13 @@ export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, 
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
   options: IntentAdmissionOptions<Refusal> = {},
 ): Promise<ProtocolResult<Refusal>> {
-  const contracts = options.observedContracts ?? [input.contractId];
+  const { observedContracts = [input.contractId], ...admission } = options;
   return runProtocol<Input, Refusal, Input, Input>({
-    ...admissionOptions(options),
+    ...admission,
     input,
     channel,
     repository,
-    contracts,
+    contracts: observedContracts,
     attempts: mintAttempts({ entryCount: 1 }),
     decide,
   });
@@ -74,14 +62,13 @@ export function admitPreparedIntent<
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
   options: PreparedIntentAdmissionOptions<Input, Refusal, Seed, Prepared>,
 ): Promise<ProtocolResult<Refusal>> {
-  const contracts = options.observedContracts ?? [input.contractId];
+  const { observedContracts = [input.contractId], ...admission } = options;
   return runProtocol<Input, Refusal, Seed, Prepared>({
-    ...admissionOptions(options),
+    ...admission,
     input,
-    preparation: options.preparation,
     channel,
     repository,
-    contracts,
+    contracts: observedContracts,
     attempts: mintAttempts({ entryCount: 1 }),
     decide,
   });

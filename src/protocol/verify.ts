@@ -4,7 +4,8 @@ import type { AttestationData, ChangeId, ContractState, SnapshotId } from "../co
 import { activeContract, targetContractRefusal, type ActiveContractRefusal } from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
-import { materializeScratchCandidate } from "../git/scratch.js";
+import { holdVerificationSnapshot, materializeScratchCandidate, ScratchMaterializationError } from "../git/scratch.js";
+import { associateVerificationSnapshot } from "../git/repository.js";
 import { projectSettings } from "../settings.js";
 import { executeVerification } from "../verification/execution.js";
 import { contractJournal, observeContractsAt } from "../git/observe.js";
@@ -17,20 +18,24 @@ import { timestamp } from "./operations.js";
 import { executionStop, type ContractCheckpoint } from "./progress.js";
 import { verifyRefusalSchema, deliverRefusalSchema, verificationDeclarationRefusalSchema } from "./operations.js";
 import { placementSchema, normalPlacementSchema } from "./completion.js";
-import { activeReasonSchema, retrySchema, compactRetry, compactReason } from "./result-reasons.js";
+import { activeReasonSchema, retrySchema, compactRetry, compactReason, type Retry } from "./result-reasons.js";
 
 const checkCoordinate = {
   index: z.number().int().positive(),
   requirement: z.string().min(1),
   retainedPath: z.string().exactOptional(),
 };
+const unavailableCandidateSchema = z
+  .strictObject({ kind: z.literal("candidate-unavailable"), diagnostic: z.string().min(1) })
+  .readonly();
 const runtimeStopSchema = z.union([
+  unavailableCandidateSchema,
   z
     .strictObject({ kind: z.enum(["unknown-exit", "cancelled"]), diagnostic: z.string().min(1).exactOptional() })
     .readonly(),
   z
     .strictObject({
-      kind: z.enum(["candidate-unavailable", "spawn-error", "environment-failure"]),
+      kind: z.enum(["spawn-error", "environment-failure"]),
       diagnostic: z.string().min(1),
     })
     .readonly(),
@@ -45,6 +50,7 @@ const runtimeStopSchema = z.union([
 const checkAdmissionStopSchema = z
   .union([
     z.strictObject({ kind: z.literal("refused"), reason: activeReasonSchema }).readonly(),
+    unavailableCandidateSchema,
     ...retrySchema.options,
     z.strictObject({ kind: z.literal("cancelled") }).readonly(),
   ])
@@ -54,23 +60,18 @@ const normalAdmissionSchema = z.enum(["admitted", "reused", "unrecorded"]);
 export function verificationAdmissionOutcome(
   admission: z.output<typeof normalAdmissionSchema | typeof checkAdmissionStopSchema>,
 ): "benign" | "retry" | "failed" {
-  switch (admission) {
-    case "admitted":
-    case "reused":
-    case "unrecorded":
-      return "benign";
-    default:
-      switch (admission.kind) {
-        case "retry":
-          return "retry";
-        case "refused":
-        case "cancelled":
-          return "failed";
-        default: {
-          const exhaustive: never = admission;
-          return exhaustive;
-        }
-      }
+  if (typeof admission === "string") return "benign";
+  switch (admission.kind) {
+    case "retry":
+      return "retry";
+    case "refused":
+    case "candidate-unavailable":
+    case "cancelled":
+      return "failed";
+    default: {
+      const exhaustive: never = admission;
+      return exhaustive;
+    }
   }
 }
 
@@ -132,6 +133,7 @@ type PreparedVerification = Readonly<{
 
 async function prepareVerification(
   input: VerifyOperationInput,
+  holdIntegration: (snapshot: SnapshotId) => Promise<void>,
 ): Promise<PreparedVerification | Extract<VerifyOperationResult, { kind: "refused" }>> {
   input.signal?.throwIfAborted();
   const observed = await observeContractsAt(input.scope, input.channel, [input.contractId], { after: true });
@@ -163,6 +165,7 @@ async function prepareVerification(
       document: derivation.bytes,
       includeDirty: input.includeDirty,
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      holdIntegration,
     },
   );
   if (prepared.kind === "refused") return prepared;
@@ -175,138 +178,173 @@ async function prepareVerification(
   };
 }
 
+type HeldVerificationSnapshot = Awaited<ReturnType<typeof holdVerificationSnapshot>>;
+type VerificationAdmissionRefusal =
+  | ActiveContractRefusal
+  | { kind: "verification-reuse" }
+  | Extract<Retry, { reason: "publication-failed" }>
+  | z.output<typeof unavailableCandidateSchema>;
+
 function admitVerificationTestimony(
   input: VerifyOperationInput,
   at: string,
   data: AttestationData,
-): Promise<ProtocolResult<ActiveContractRefusal | { kind: "verification-reuse" }>> {
-  return admitIntent<AttestationInput, ActiveContractRefusal | { kind: "verification-reuse" }>(
+  { snapshot, cwd: anchor }: HeldVerificationSnapshot,
+): Promise<ProtocolResult<VerificationAdmissionRefusal>> {
+  return admitIntent<AttestationInput, VerificationAdmissionRefusal>(
     input.channel,
     input.scope,
     { contractId: input.contractId, at, preparation: { kind: "prepared", data } },
     decideAttestation,
     {
       ...(input.progress === undefined ? {} : { progress: input.progress }),
-      validateAdmission: (observation) => {
-        const state = activeContract(observation.decision, input.contractId);
-        if ("kind" in state) return undefined;
-        const current = [...state.attestations]
-          .reverse()
-          .find(
-            (attestation) =>
-              attestation.data.gate === data.gate &&
-              attestation.data.requirement === data.requirement &&
-              attestation.data.subject === data.subject,
-          );
-        if (current?.data.verdict === data.verdict && current.data.summary === data.summary)
-          return { kind: "verification-reuse" };
-        return undefined;
+      prepareRefCompanion: async ({ journals }) => {
+        const state = contractJournal(journals, input.contractId).state;
+        const current = state?.attestations.findLast(
+          ({ data: prior }) =>
+            prior.gate === data.gate && prior.requirement === data.requirement && prior.subject === data.subject,
+        );
+        const reuse = current?.data.verdict === data.verdict && current.data.summary === data.summary;
+        const result = await associateVerificationSnapshot(input.scope, input.contractId, snapshot, { anchor, reuse });
+        if (result.kind === "companion") return result;
+        const refusal: VerificationAdmissionRefusal =
+          result.kind === "associated"
+            ? { kind: "verification-reuse" }
+            : result.kind === "publication-failed"
+              ? { kind: "retry", reason: result.kind, diagnostic: result.diagnostic }
+              : result;
+        return { kind: "refused", refusal };
       },
     },
   );
 }
 
-/** Capture a prospective delivery, then independently execute each selected declaration. */
-// eslint-disable-next-line max-lines-per-function, complexity -- Keep execution, admission, and final checks in one ordered loop.
+// eslint-disable-next-line max-lines-per-function, complexity -- Keep preparation, execution, admission, and retirement in order.
 export async function verifyOperation(input: VerifyOperationInput): Promise<VerifyOperationResult> {
-  const prepared = await prepareVerification(input);
-  if (prepared.kind === "refused") return prepared;
-  const { snapshot, changeId, definition } = prepared;
-  let checkpoint = prepared.checkpoint;
-  const { state, journal } = checkpoint;
-  const checks: VerificationCheck[] = [];
-  const subject = dependencyKeySet([
-    { kind: "snapshot", value: snapshot },
-    ...(input.verificationMode === "strict" ? [] : [{ kind: "change" as const, value: changeId }]),
-    ...(state.targetRevision === undefined ? [] : [{ kind: "target" as const, value: state.targetRevision }]),
-  ]);
-  // This observation carries no new fact. It supplies the exact head even when every admission reuses testimony.
-  input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal });
-  const selected = definition.declarations
-    .map((declaration, offset) => ({ declaration, index: offset + 1 }))
-    .filter(({ index }) => input.index === undefined || input.index === index);
-  for (const { declaration, index } of selected) {
-    if (input.signal?.aborted) {
-      input.progress?.recordStop(executionStop(state.id, input.signal.reason, input.signal));
-      break;
-    }
-    const requirement = verificationRequirement(declaration);
-    const at = timestamp();
-    const execution = await executeVerification({
-      repository: input.scope,
-      candidate: snapshot,
-      contractId: state.id,
-      declaration,
-      requirement,
-      index,
-      total: definition.declarations.length,
-      materializeScratchCandidate,
-      projectSettings,
-      observe: (observation) =>
-        input.progress?.observe({ kind: "verification", contractId: state.id, snapshot, observation }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    input.progress?.recordVerification(state.id, snapshot, execution, { requirement, index });
-    const coordinate = {
-      index,
-      requirement,
-      ...(execution.leak?.path === undefined ? {} : { retainedPath: execution.leak.path }),
-    };
-    const { outcome } = execution;
-    let check: VerificationCheck;
-    if (outcome.kind !== "terminal") {
-      const stop =
-        outcome.kind === "environment-failure" && "name" in outcome
-          ? { ...outcome, kind: "environment-hook-failure" as const }
-          : outcome;
-      check = { ...coordinate, kind: "stopped", stop };
-      checks.push(check);
-      input.progress?.recordVerificationCheck(state.id, snapshot, check);
-      break;
-    }
-    let admission: Extract<VerificationCheck, { kind: "terminal" }>["admission"] = "unrecorded";
-    if (state.terms.gates.includes(VERIFIED)) {
+  let custody: HeldVerificationSnapshot | undefined;
+  let materialize = materializeScratchCandidate;
+  try {
+    const prepared = await prepareVerification(input, async (snapshot) => {
       try {
-        const result = await admitVerificationTestimony(input, at, {
-          gate: VERIFIED,
-          requirement,
-          subject,
-          verdict: outcome.verdict,
-          ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+        custody = await holdVerificationSnapshot(input.scope, snapshot);
+      } catch (error) {
+        // The existing materialization stop describes failure to acquire the snapshot as well.
+        if (input.signal?.aborted && error instanceof ScratchMaterializationError) {
+          input.progress?.recordVerification(input.contractId, snapshot, { leak: error.leak });
+        }
+        materialize = () => Promise.reject(error);
+      }
+    });
+    if (prepared.kind === "refused") return prepared;
+    const { snapshot, changeId, definition } = prepared;
+    let checkpoint = prepared.checkpoint;
+    const { state, journal } = checkpoint;
+    const checks: VerificationCheck[] = [];
+    const subject = dependencyKeySet([
+      { kind: "snapshot", value: snapshot },
+      ...(input.verificationMode === "strict" ? [] : [{ kind: "change" as const, value: changeId }]),
+      ...(state.targetRevision === undefined ? [] : [{ kind: "target" as const, value: state.targetRevision }]),
+    ]);
+    // This observation carries no new fact. It supplies the exact head even when every admission reuses testimony.
+    input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal });
+    const selected = definition.declarations
+      .map((declaration, offset) => ({ declaration, index: offset + 1 }))
+      .filter(({ index }) => input.index === undefined || input.index === index);
+    for (const { declaration, index } of selected) {
+      if (input.signal?.aborted) {
+        input.progress?.recordStop(executionStop(state.id, input.signal.reason, input.signal));
+        break;
+      }
+      const requirement = verificationRequirement(declaration);
+      const at = timestamp();
+      const execution = await executeVerification({
+        repository: input.scope,
+        candidate: snapshot,
+        contractId: state.id,
+        declaration,
+        requirement,
+        index,
+        total: definition.declarations.length,
+        materializeScratchCandidate: materialize,
+        projectSettings,
+        observe: (observation) =>
+          input.progress?.observe({ kind: "verification", contractId: state.id, snapshot, observation }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      input.progress?.recordVerification(state.id, snapshot, execution, { requirement, index });
+      const coordinate = {
+        index,
+        requirement,
+        ...(execution.leak?.path === undefined ? {} : { retainedPath: execution.leak.path }),
+      };
+      const { outcome } = execution;
+      let check: VerificationCheck;
+      if (outcome.kind !== "terminal") {
+        const stop =
+          outcome.kind === "environment-failure" && "name" in outcome
+            ? { ...outcome, kind: "environment-hook-failure" as const }
+            : outcome;
+        check = { ...coordinate, kind: "stopped", stop };
+        checks.push(check);
+        input.progress?.recordVerificationCheck(state.id, snapshot, check);
+        break;
+      }
+      let admission: Extract<VerificationCheck, { kind: "terminal" }>["admission"] = "unrecorded";
+      if (state.terms.gates.includes(VERIFIED)) {
+        if (custody === undefined) throw new Error("terminal Verification requires a held snapshot");
+        const result = await admitVerificationTestimony(
+          input,
+          at,
+          {
+            gate: VERIFIED,
+            requirement,
+            subject,
+            verdict: outcome.verdict,
+            ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
+          },
+          custody,
+        ).catch((error: unknown) => {
+          const stop = executionStop(state.id, error, input.signal);
+          if (stop.reason !== "cancelled") throw error;
+          input.progress?.recordStop(stop);
+          return null;
         });
-        if (result.kind === "accepted") {
+        if (result?.kind === "accepted") {
           checkpoint = { state: result.state, journal: result.journal };
           input.progress?.recordResidue(state.id, result);
           admission = "admitted";
-        } else if (result.kind === "refused") {
+        } else if (result?.kind === "refused") {
+          const { refusal } = result;
           admission =
-            result.refusal.kind === "verification-reuse"
+            refusal.kind === "verification-reuse"
               ? "reused"
-              : { kind: "refused", reason: compactReason(result.refusal) };
+              : refusal.kind === "candidate-unavailable" || refusal.kind === "retry"
+                ? refusal
+                : { kind: "refused", reason: compactReason(refusal) };
         } else {
-          admission = compactRetry(result);
+          admission = result === null ? { kind: "cancelled" } : compactRetry(result);
         }
-      } catch (error) {
-        const stop = executionStop(state.id, error, input.signal);
-        if (stop.reason !== "cancelled") throw error;
-        input.progress?.recordStop(stop);
-        admission = { kind: "cancelled" };
       }
+      const terminal = { ...coordinate, kind: "terminal" as const, admission };
+      if (outcome.verdict === "satisfied") {
+        check = { ...terminal, verdict: "satisfied" };
+      } else {
+        if (outcome.summary === undefined) throw new Error("unsatisfied terminal check requires its diagnosis");
+        check = { ...terminal, verdict: "unsatisfied", summary: outcome.summary };
+      }
+      checks.push(check);
+      input.progress?.recordVerificationCheck(state.id, snapshot, check);
+      if (typeof check.admission !== "string") break;
     }
-    const terminal = { ...coordinate, kind: "terminal" as const, admission };
-    if (outcome.verdict === "satisfied") {
-      check = { ...terminal, verdict: "satisfied" };
-    } else {
-      if (outcome.summary === undefined) throw new Error("unsatisfied terminal check requires its diagnosis");
-      check = { ...terminal, verdict: "unsatisfied", summary: outcome.summary };
+    return {
+      kind: "accepted",
+      ...(state.terms.gates.includes(VERIFIED) ? { checkpoint } : {}),
+      value: { snapshot, checks },
+    };
+  } finally {
+    if (custody !== undefined) {
+      const leak = await custody.dispose();
+      if (leak !== null) input.progress?.recordVerification(input.contractId, custody.snapshot, { leak });
     }
-    checks.push(check);
-    input.progress?.recordVerificationCheck(state.id, snapshot, check);
-    if (typeof check.admission !== "string") break;
   }
-  return {
-    kind: "accepted",
-    ...(state.terms.gates.includes(VERIFIED) ? { checkpoint } : {}),
-    value: { snapshot, checks },
-  };
 }

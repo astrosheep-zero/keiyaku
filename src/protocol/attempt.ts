@@ -10,7 +10,7 @@ import {
   type PrivateStateSeatCloseLag,
 } from "../git/private-state-seat.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
-import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
+import { GIT_REF, readRefs, type GitRefAssertion, type GitRefUpdate } from "../git/repository.js";
 import { targetRef } from "../git/target.js";
 import type { GitRepository } from "../git/process.js";
 import type { AttemptContext } from "../core/decide.js";
@@ -113,6 +113,10 @@ async function publicationPremiseMoved(
   return offer.target !== undefined && refs.get(targetRef(offer.target.target)) !== offer.target.expectedOid;
 }
 
+export type PrepareRefCompanion<Refusal> = (
+  observation: ContractReadView,
+) => Promise<Readonly<{ kind: "companion"; update: GitRefUpdate }> | Readonly<{ kind: "refused"; refusal: Refusal }>>;
+
 /** Admit one decided offer without making another legal decision. */
 export async function admitDecidedOffer<Refusal = never>(
   input: Readonly<{
@@ -124,6 +128,7 @@ export async function admitDecidedOffer<Refusal = never>(
     attempt: AttemptContext;
     offer: Offer;
     assertions?: readonly GitRefAssertion[];
+    prepareRefCompanion?: PrepareRefCompanion<Refusal>;
     validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
     progress?: ProtocolProgress;
   }>,
@@ -137,7 +142,9 @@ export async function admitDecidedOffer<Refusal = never>(
     const refusal = await input.validateAdmission(decisionObservation);
     if (refusal !== undefined) return { kind: "refused", refusal };
   }
-  const admission = await admit(repository, offer, decisionObservation, assertions);
+  const companion = await input.prepareRefCompanion?.(decisionObservation);
+  if (companion?.kind === "refused") return companion;
+  const admission = await admit(repository, offer, decisionObservation, assertions, companion?.update);
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(seat);
     input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));

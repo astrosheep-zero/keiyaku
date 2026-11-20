@@ -24,8 +24,10 @@ import type { GitDecodeChannel } from "./read-observation.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
   DELIVERY_REF_NAMESPACE,
+  associateVerificationSnapshot,
   pathExists,
   registeredWorktreePaths,
+  verificationSnapshotRef,
 } from "./repository.js";
 import { removeCollectableScratchWorktrees } from "./scratch.js";
 import {
@@ -125,6 +127,7 @@ type ReconcileInput = Readonly<{
   contractId: ContractId;
   hooks: WorktreeHooks;
   retryHooks: boolean;
+  attestedSnapshots: (state: ContractState) => readonly SnapshotId[];
   onPhysical?: (report: ReconcileResult) => void;
 }>;
 export type ReconcileAccumulation = Readonly<{
@@ -268,6 +271,23 @@ async function ensureWorktree(
   return true;
 }
 
+async function reconcileVerificationRefs(input: ReconcileInput, state: ContractState, acc: ReconcileAccumulation) {
+  const { repository } = input;
+  for (const snapshot of new Set(input.attestedSnapshots(state))) {
+    try {
+      if (state.terminal !== null) {
+        await updateRef(repository, verificationSnapshotRef(state.id, snapshot), null, acc);
+        continue;
+      }
+      const result = await associateVerificationSnapshot(repository, state.id, snapshot, "repair");
+      if ("diagnostic" in result) acc.recordLag({ kind: "reconcile-failed", diagnostic: result.diagnostic });
+      else if (result.kind === "associated" && result.effect !== undefined) acc.recordEffect(result.effect);
+    } catch (error) {
+      acc.recordFailure(error);
+    }
+  }
+}
+
 async function repairPins(
   input: ReconcileInput,
   state: ContractState,
@@ -283,6 +303,7 @@ async function repairPins(
       try {
         const current = (await observeContractAt(repository, channel, state.id)).state;
         if (current?.head !== state.head) throw moved(state.id);
+        if (state.terminal === null) await reconcileVerificationRefs(input, state, acc).catch(acc.recordFailure);
         if (terminalWithoutWorkspace && state.delivery !== null) {
           await repairDetachedTerminalCustody({ repository, channel, state, ref, pin, acc });
         } else {
@@ -432,6 +453,8 @@ export async function cleanupTerminalContract(
           const paths = new Set(await registeredWorktreePaths(repository));
           const place = (await readPlaceRegister(repository)).get(contractId);
           await collectScratch(repository, paths, acc, contractId);
+          // The exact terminal head was proved under effect custody; it cannot admit new testimony.
+          await reconcileVerificationRefs({ ...input, repository }, state, acc);
           if (place !== undefined) {
             const path = worktreePath(repository, place);
             if (paths.has(path) && (await pathExists(path))) {

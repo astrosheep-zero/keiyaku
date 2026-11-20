@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { VERIFIED } from "../verification/declaration.js";
+import { attestedVerificationSnapshots, VERIFIED } from "../verification/declaration.js";
 import { snapshotIdSchema } from "../git/identity.js";
 import { compactDelivery, type DeliveryIdentity } from "./result-leaves.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
@@ -19,6 +19,7 @@ import {
 } from "../git/tender.js";
 import {
   checkoutDetachedSnapshot,
+  observeConflictHandoff,
   recordConflictHandoff,
   retireConflictHandoff,
   workspaceMergeStatePresent,
@@ -39,7 +40,6 @@ import {
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState, targetContractRefusal } from "../core/facts/observation.js";
-import { dependencyKeys } from "../core/subject.js";
 import { resolveContractTarget } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import type {
@@ -72,9 +72,7 @@ export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): 
     .flatMap((entry) => {
       if (entry.kind === "deliver") return [entry.data.integration.snapshot];
       if (entry.kind === "reintegrated") return [entry.data.snapshot];
-      if (entry.kind === "attestation" && entry.data.gate === "verified") {
-        return dependencyKeys(entry.data.subject).flatMap((key) => (key.kind === "snapshot" ? [key.value] : []));
-      }
+      if (entry.kind === "attestation") return attestedVerificationSnapshots(entry.data);
       return [];
     })
     .reverse();
@@ -121,6 +119,9 @@ type DeliveryFailure =
   | DeliveryPreparationRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal
   | DeliverRefusal;
+type DeliveryTender = TenderCapture & Readonly<{ ownedHandoff: boolean }>;
+type DeliveryWorktreeWitness = WorktreeWitness & Pick<DeliveryTender, "ownedHandoff">;
+
 async function captureAuthorizedDeliveryTender(
   repository: import("../git/process.js").GitRepository,
   stage: Readonly<{
@@ -129,10 +130,7 @@ async function captureAuthorizedDeliveryTender(
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
   includeDirty: boolean | undefined,
-): Promise<
-  | { kind: "prepared"; data: import("../git/tender.js").TenderCapture }
-  | { kind: "refused"; refusal: MechanicalPreparationRefusal }
-> {
+): Promise<{ kind: "prepared"; data: DeliveryTender } | { kind: "refused"; refusal: MechanicalPreparationRefusal }> {
   const { contractId, coordinates } = stage;
   const place =
     coordinates.workspace === "worktree"
@@ -153,8 +151,29 @@ async function captureAuthorizedDeliveryTender(
   ) {
     return { kind: "refused", refusal: dirtyTenderRefusal(tender.data) };
   }
-  return { kind: "prepared", data: tender.data };
+  const { head, mergeHead } = tender.data;
+  const ownedHandoff =
+    coordinates.target !== undefined &&
+    place !== undefined &&
+    mergeHead !== undefined &&
+    (
+      await observeConflictHandoff(
+        repository,
+        { contractId, place, workspace: worktreePath(repository, place) },
+        { head, mergeHead },
+      )
+    ).kind === "active";
+  return { kind: "prepared", data: { ...tender.data, ownedHandoff } };
 }
+
+type DeliveryPreparationInput = Readonly<{
+  title: string;
+  document: string;
+  message?: string;
+  requireBranchesToBeUpToDate?: boolean;
+  includeDirty?: boolean;
+  holdIntegration?: (snapshot: SnapshotId) => Promise<void>;
+}>;
 
 async function prepareDeliveryWithWorktree(
   repository: import("../git/process.js").GitRepository,
@@ -164,16 +183,10 @@ async function prepareDeliveryWithWorktree(
     recordedIntegrations?: readonly SnapshotId[];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
-  input: Readonly<{
-    title: string;
-    document: string;
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-  }>,
-  captured?: TenderCapture,
+  input: DeliveryPreparationInput,
+  captured?: DeliveryTender,
 ): Promise<
-  | { kind: "prepared"; data: DeliverData; worktree: WorktreeWitness }
+  | { kind: "prepared"; data: DeliverData; worktree: DeliveryWorktreeWitness }
   | { kind: "refused"; refusal: MechanicalPreparationRefusal }
 > {
   const { contractId, coordinates } = stage;
@@ -182,6 +195,23 @@ async function prepareDeliveryWithWorktree(
       ? await captureAuthorizedDeliveryTender(repository, stage, input.includeDirty)
       : { kind: "prepared" as const, data: captured };
   if (tender.kind === "refused") return tender;
+  const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
+  const targetless = coordinates.target === undefined;
+  const { holdIntegration } = input;
+  const holdTenderEarly = holdIntegration !== undefined && targetless;
+  // Decide reuse before minting or pinning when the tender could itself be the integration.
+  const reuse = (tree: TenderCapture["tree"], predecessor: SnapshotId) =>
+    reusableIntegrationSnapshot(
+      repository,
+      tree,
+      targetless && tender.data.dirty ? tender.data.head : predecessor,
+      stage.recordedIntegrations ?? [],
+    );
+  const existingTargetlessIntegration = async () =>
+    (await reuse(tender.data.tree, coordinates.start)) ??
+    (tender.data.dirty || tender.data.mergeHead !== undefined ? undefined : tender.data.head);
+  const earlyIntegration = holdTenderEarly ? await existingTargetlessIntegration() : undefined;
+  if (earlyIntegration !== undefined) await holdIntegration?.(earlyIntegration);
   const commit = await prepareDeliveryCommitMetadata(repository, {
     contractId,
     title: input.title,
@@ -190,27 +220,24 @@ async function prepareDeliveryWithWorktree(
     ...(input.message === undefined ? {} : { message: input.message }),
   });
   const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, commit);
-  const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
+  if (holdTenderEarly && earlyIntegration === undefined) await holdIntegration(tenderSnapshot);
   const integration = await planIntegration(
     repository,
     { coordinates },
-    { ...tender.data, head: tenderSnapshot },
+    { ...tender.data, head: tender.data.ownedHandoff ? tenderSnapshot : tender.data.head },
     requireBranchesToBeUpToDate,
   );
   if (integration.kind === "refused") return integration;
   const changeId = await worktreeChangeId(repository, { coordinates }, tender.data);
-  // A targetless dirty integration is the captured tender, whose sole parent is the worktree head.
-  const reusedIntegration = await reusableIntegrationSnapshot(
-    repository,
-    integration.data.tree,
-    coordinates.target === undefined && tender.data.dirty ? tender.data.head : integration.data.predecessor,
-    stage.recordedIntegrations ?? [],
-  );
+  const reusedIntegration = holdTenderEarly
+    ? earlyIntegration
+    : await reuse(integration.data.tree, integration.data.predecessor);
   const integrationSnapshot =
     reusedIntegration ??
-    (coordinates.target === undefined
+    (targetless
       ? tenderSnapshot
       : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, commit));
+  if (!holdTenderEarly) await holdIntegration?.(integrationSnapshot);
   return {
     kind: "prepared",
     data: {
@@ -236,13 +263,7 @@ export async function prepareDelivery(
     recordedIntegrations?: readonly SnapshotId[];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
-  input: Readonly<{
-    title: string;
-    document: string;
-    message?: string;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-  }>,
+  input: DeliveryPreparationInput,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: MechanicalPreparationRefusal }> {
   const prepared = await prepareDeliveryWithWorktree(repository, stage, input);
   return prepared.kind === "refused" ? prepared : { kind: "prepared", data: prepared.data };
@@ -255,9 +276,9 @@ export async function prepareDelivery(
  */
 type DeliveryArtifacts =
   | Readonly<{ kind: "defer" }>
-  | Readonly<{ kind: "reuse"; worktree: WorktreeWitness }>
+  | Readonly<{ kind: "reuse"; worktree: DeliveryWorktreeWitness }>
   | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
-  | Readonly<{ kind: "mechanical"; data: DeliverData; worktree: WorktreeWitness }>;
+  | Readonly<{ kind: "mechanical"; data: DeliverData; worktree: DeliveryWorktreeWitness }>;
 
 type ExternalDeliveryPreparation =
   | Readonly<{ kind: "unavailable" }>
@@ -286,7 +307,7 @@ function deliveryPreparationInput(input: DeliverOperationInput, derivation: Docu
 async function recaptureDeliveryWorktree(
   input: DeliverOperationInput,
   state: ContractState,
-): Promise<WorktreeWitness | undefined> {
+): Promise<DeliveryWorktreeWitness | undefined> {
   const tender = await captureAuthorizedDeliveryTender(
     input.scope,
     { contractId: state.id, coordinates: state.coordinates },
@@ -304,14 +325,14 @@ async function mechanicalDeliveryPreparation(
   state: ContractState,
   derivation: DocumentDerivation,
   journal: readonly JournalEntry[],
-  captured?: TenderCapture,
+  captured?: DeliveryTender,
 ): Promise<
   | Extract<DeliverInput<DeliveryFailure>["preparation"], { kind: "refused" }>
   | Readonly<{
       kind: "prepared";
       document: DocumentDerivation["document"];
       data: DeliverData;
-      worktree: WorktreeWitness;
+      worktree: DeliveryWorktreeWitness;
     }>
 > {
   const prepared = await prepareDeliveryWithWorktree(
@@ -335,10 +356,11 @@ async function mechanicalDeliveryPreparation(
   };
 }
 
-function worktreeWitness(tender: TenderCapture, changeId: ChangeId): WorktreeWitness {
+function worktreeWitness(tender: DeliveryTender, changeId: ChangeId): DeliveryWorktreeWitness {
   return {
     tree: tender.tree,
     head: tender.head,
+    ownedHandoff: tender.ownedHandoff,
     ...(tender.mergeHead === undefined ? {} : { mergeHead: tender.mergeHead }),
     dirty: tender.dirty,
     changeId,
@@ -432,7 +454,11 @@ async function assembleDeliveryAttempt(
       preparation: { kind: "refused", document: derivation.document, refusal: artifacts.refusal },
     };
   }
-  if (!sameWorktreeWitness(artifacts.worktree, await recaptureDeliveryWorktree(input, state))) {
+  const freshWorktree = await recaptureDeliveryWorktree(input, state);
+  if (
+    artifacts.worktree.ownedHandoff !== freshWorktree?.ownedHandoff ||
+    !sameWorktreeWitness(artifacts.worktree, freshWorktree)
+  ) {
     return { kind: "stale" };
   }
   if (artifacts.kind === "reuse") {

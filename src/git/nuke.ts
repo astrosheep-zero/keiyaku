@@ -18,6 +18,7 @@ import {
   CANDIDATE_PIN_REF_NAMESPACE,
   DELIVERY_REF_NAMESPACE,
   GIT_REF,
+  VERIFICATION_REF_NAMESPACE,
   NoGitWorldError,
   readRef,
   registeredWorktrees,
@@ -133,7 +134,7 @@ async function deleteObservedStateRef(
 
 async function removeOwnedRefs(repository: GitRepository, onRemoved?: (count: number) => void): Promise<number> {
   let removed = 0;
-  const roots = [DELIVERY_REF_NAMESPACE, CANDIDATE_PIN_REF_NAMESPACE] as const;
+  const roots = [DELIVERY_REF_NAMESPACE, CANDIDATE_PIN_REF_NAMESPACE, VERIFICATION_REF_NAMESPACE] as const;
   for (const root of roots) {
     const refs = (await executeGit(repository, ["for-each-ref", "--format=%(refname)", root]))
       .toString("utf8")

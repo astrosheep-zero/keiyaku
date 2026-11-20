@@ -10,6 +10,7 @@ import {
   GIT_FORMAT_PATH,
   GIT_REF,
   type GitRefAssertion,
+  type GitRefUpdate,
   type GitSnapshot,
   type RefPublication,
   type TreeChange,
@@ -144,7 +145,9 @@ async function publishOffer(
   changes: ReadonlyMap<string, TreeChange>,
   assertions: readonly GitRefAssertion[],
   owner: ContractId,
+  refCompanion: GitRefUpdate | undefined,
 ): Promise<RefPublication> {
+  if (target !== null && refCompanion !== undefined) throw new Error("ref companion cannot accompany target placement");
   const gitTree = await updateGitTree(repository, snapshot.tree, changes);
   const gitCommit = mintSnapshotId(
     await writeStateCommit({
@@ -153,34 +156,23 @@ async function publishOffer(
       parent: snapshot.commit,
     }),
   );
-  const pin =
-    target !== null && typeof target.target !== "string"
-      ? `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(owner)}`
-      : undefined;
-  const previousPin = pin === undefined ? null : await readRef(repository, pin);
-  const crossWorktree =
-    (target !== null && typeof target.target !== "string") ||
-    assertions.some((assertion) => assertion.ref.startsWith("worktrees/"));
+  const updates: GitRefUpdate[] = [
+    { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
+  ];
+  const managedTarget = target !== null && typeof target.target !== "string";
+  if (target !== null) {
+    const newOid = gitObjectIdForSnapshot(target.newOid);
+    updates.push({ ref: targetRef(target.target), newOid, expectedOid: gitObjectIdForSnapshot(target.expectedOid) });
+    if (managedTarget) {
+      const ref = `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(owner)}`;
+      updates.push({ ref, newOid, expectedOid: await readRef(repository, ref) });
+    }
+  } else if (refCompanion !== undefined) {
+    updates.push(refCompanion);
+  }
+  const crossWorktree = managedTarget || assertions.some((assertion) => assertion.ref.startsWith("worktrees/"));
   const stable = crossWorktree ? { ...repository, effectiveCwd: repository.primaryWorktree } : repository;
-  return await updateRefsAtomically(
-    stable,
-    [
-      { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
-      ...(target === null
-        ? []
-        : [
-            {
-              ref: targetRef(target.target),
-              newOid: gitObjectIdForSnapshot(target.newOid),
-              expectedOid: gitObjectIdForSnapshot(target.expectedOid),
-            },
-          ]),
-      ...(pin === undefined || target === null
-        ? []
-        : [{ ref: pin, newOid: gitObjectIdForSnapshot(target.newOid), expectedOid: previousPin }]),
-    ],
-    assertions,
-  );
+  return await updateRefsAtomically(stable, updates, assertions);
 }
 
 export async function admit(
@@ -188,6 +180,7 @@ export async function admit(
   offer: Offer,
   view: ContractReadView,
   assertions: readonly GitRefAssertion[] = [],
+  refCompanion?: GitRefUpdate,
 ): Promise<Admission> {
   if (!Array.isArray(offer.facts) || offer.facts.length === 0) {
     throw new Error("facts must be a nonempty array");
@@ -198,13 +191,15 @@ export async function admit(
   const target = offer.target ?? null;
 
   const attempt = await buildOffer(repository, view, appends, companions);
+  const owner = appends[0]!.contractId;
   const publication = await publishOffer(
     repository,
     view.epoch,
     target,
     attempt.changes,
     assertions,
-    appends[0]!.contractId,
+    owner,
+    refCompanion,
   );
   if (publication.kind === "published") {
     return {

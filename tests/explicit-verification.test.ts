@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { Keis, Keiyaku, KeiyakuError, Repo, Settings } from "../src/index.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
@@ -10,8 +10,9 @@ import { contractObservationSchema } from "../src/protocol/read/status.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project } from "../src/library/outcome.js";
 import { gateReports } from "../src/core/facts/gate.js";
+import { VERIFICATION_REF_NAMESPACE, verificationSnapshotRef } from "../src/git/repository.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
-import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
+import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
 const verifyNormalOutcomeSchema = Keiyaku.verbs.verify.normal;
@@ -20,56 +21,243 @@ function verificationFences(scripts: readonly string[]): string {
   return scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") + "\n";
 }
 
-async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"], mode?: "optimistic" | "strict") {
+async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"], mode?: "optimistic" | "strict", target: string | null = "refs/heads/main") {
   const repository = repositoryWithMain();
+  if (target === null) repository.run(["config", "core.logAllRefUpdates", "false"]);
   if (mode !== undefined) {
     mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
     writeFileSync(join(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ verification: { mode } }));
   }
   const settings = mode === undefined ? undefined : await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
   const contract = accepted(await Keis.of(await Repo.at({ path: repository.path }), settings === undefined ? undefined : { settings }).bind({
-    terms: `${document()}\n## Verification\n\n${verificationFences(scripts)}`, gates, target: "refs/heads/main",
+    terms: scripts.length === 0 ? document() : `${document()}\n## Verification\n\n${verificationFences(scripts)}`, gates, target,
   })).kei;
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), present(await contract.state()).id);
   commitCandidate(repository, worktree);
   return { repository, contract, worktree };
 }
 
-test("explicit checks accumulate on the prospective snapshot and unchanged delivery consumes them", async () => {
-  const { contract } = await fixture(["true", "test -f candidate.txt"]);
-  const first = accepted(await contract.verify({ index: 1 }));
-  assertWireConformance(verifyNormalOutcomeSchema, first);
-  assert.equal(first.checks.length, 1);
-  assert.equal(first.checks[0]?.index, 1);
-  assert.equal(first.checks[0]?.kind, "terminal");
-  assert.equal(first.checks[0]?.admission, "admitted");
-  assert.equal(present(await contract.state()).attestations.length, 1);
-  assert.equal(present(await contract.state()).delivery, null);
-  const preview = await contract.previewDelivery();
-  assert.ok(preview.kind === "ready");
-  assert.equal(preview.unmetGates?.length, 2);
-  assert.deepEqual(preview.unmetGates?.map(({ state }) => state), ["missing", "missing"]);
-  // Both review and the second check are unmet; the first check is not retransmitted.
-  assert.equal(preview.unmetGates?.some(({ requirement }) => requirement === first.checks[0]?.requirement), false);
+function collectGitObjects(repository: ReturnType<typeof repositoryWithMain>): void {
+  repository.run(["reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all"]);
+  repository.run(["gc", "--prune=now"]);
+}
+
+function pinnedSnapshots(repository: ReturnType<typeof repositoryWithMain>): string[] {
+  return repository.run(["for-each-ref", "--format=%(objectname)", VERIFICATION_REF_NAMESPACE]).trim().split("\n").filter(Boolean);
+}
+
+test("distinct admitted snapshots survive GC and repair through exact delivery and retirement", async () => {
+  const { repository, contract, worktree } = await fixture(["true", "grep -qx candidate candidate.txt"]);
+  const head = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+  let concurrent: ReturnType<typeof contract.verify> | undefined;
+  let atAdmission: string[] | undefined;
+  const first = accepted(await contract.verify({ index: 1 }, { observe: (event) => {
+    if (event.kind === "admitted" && event.fact.kind === "attestation") atAdmission = pinnedSnapshots(repository);
+    if (event.kind !== "verification" || event.observation.kind !== "phase" || event.observation.state !== "started" ||
+        event.observation.phase !== "materialize") return;
+    repository.run(["gc"]);
+    writeFileSync(join(worktree, "candidate.txt"), "changed\n");
+    repository.run(["-C", worktree, "commit", "-aqm", "change the captured tree"]);
+    concurrent = contract.verify({ index: 2 });
+  } }));
+  assert.ok(concurrent);
+  const red = accepted(await concurrent);
+  assert.ok(atAdmission?.includes(first.snapshot));
+  const check = first.checks[0];
+  assert.ok(check?.kind === "terminal" && check.index === 1 && check.verdict === "satisfied" && check.admission === "admitted");
+  assert.ok(red.checks[0]?.kind === "terminal" && red.checks[0].verdict === "unsatisfied" && red.checks[0].admission === "admitted");
+  const ref = (snapshot: typeof first.snapshot) => verificationSnapshotRef(first.contractId, snapshot);
+  const expected = [first.snapshot, red.snapshot].sort();
+  assert.deepEqual(pinnedSnapshots(repository).sort(), expected);
+  const before = present(await contract.state());
+  repository.run(["update-ref", "-d", ref(red.snapshot)]);
+  const reused = accepted(await contract.verify({ index: 2 })).checks[0];
+  assert.ok(reused?.kind === "terminal" && reused.admission === "reused" && reused.retainedPath);
+  repository.run(["worktree", "remove", "--force", reused.retainedPath]);
+  repository.run(["update-ref", "-d", ref(first.snapshot)]);
+  await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: first.contractId });
+  assert.deepEqual(present(await contract.state()), before);
+  collectGitObjects(repository);
+  assert.deepEqual(pinnedSnapshots(repository).sort(), expected);
+  for (const snapshot of expected) assert.equal(repository.run(["cat-file", "-t", snapshot]).trim(), "commit");
+
+  repository.run(["-C", worktree, "reset", "--hard", head]);
   accepted(await contract.amend({ edits: "## Replace: Objective\n\nSame candidate with revised author intent.\n" }));
-  const second = accepted(await contract.verify({ index: 2 }));
-  assert.equal(second.snapshot, first.snapshot);
   const delivered = accepted(await contract.deliver());
   assert.equal(delivered.integration, first.snapshot);
   assert.ok(delivered.placement?.kind === "gates-unsatisfied");
-  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
-  assert.equal(reviewed.placement?.kind, "placed");
-  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
+  assert.equal(delivered.placement.unmet.some(({ requirement }) => requirement === check.requirement), false);
+  repository.run(["update-ref", "refs/foreign/retain", red.snapshot]);
+  const review = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
+  assert.equal(review.placement?.kind, "gates-unsatisfied");
+  const final = accepted(await contract.verify({ index: 2 }));
+  assert.ok(final.placement?.kind === "placed" && final.placement.integration === first.snapshot);
+  assert.deepEqual(pinnedSnapshots(repository), []);
+  assert.equal(repository.run(["rev-parse", "refs/heads/main", "refs/foreign/retain"]), `${first.snapshot}\n${red.snapshot}\n`);
+});
+
+for (const scenario of ["clean", "dirty", "lost"] as const) {
+  test(`Verification custody at selection: ${scenario}`, async () => {
+    const dirty = scenario === "dirty";
+    const lost = scenario === "lost";
+    const { repository, contract, worktree } = await fixture([`grep -qx ${dirty ? "dirty" : "candidate"} candidate.txt`], ["verified"], undefined, lost ? "refs/heads/main" : null);
+    const before = present(await contract.state());
+    const capture = join(repository.path, ".git", "capture");
+    if (dirty) writeFileSync(join(worktree, "candidate.txt"), "dirty\n");
+    if (scenario === "clean") {
+      const head = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+      writeFileSync(capture, `${head}\n`);
+      utimesSync(join(repository.path, ".git", "objects", head.slice(0, 2), head.slice(2)), 0, 0);
+    }
+    let declared = false;
+    const result = accepted(await withGitShim(`
+      case " $* " in
+        " commit-tree "*)
+          "$KEIYAKU_REAL_GIT" "$@" > "$CAPTURE" || exit "$?"
+          if [ "$CASE" = lost ]; then "$KEIYAKU_REAL_GIT" prune --expire=now || exit "$?"; fi
+          exec /bin/cat "$CAPTURE" ;;
+        *" diff --no-ext-diff "*)
+          [ "$CASE" = lost ] && exec "$KEIYAKU_REAL_GIT" "$@"
+          read -r oid < "$CAPTURE"
+          if [ "$CASE" = clean ]; then
+            "$KEIYAKU_REAL_GIT" -C "$WORKTREE" update-ref --no-deref HEAD "$START" "$oid" || exit "$?"
+          fi
+          "$KEIYAKU_REAL_GIT" worktree list --porcelain | grep -Fqx "HEAD $oid" || exit 93
+          "$KEIYAKU_REAL_GIT" gc || exit "$?"
+          mv "$CAPTURE" "$CAPTURE.checked" || exit "$?" ;;
+      esac
+      exec "$KEIYAKU_REAL_GIT" "$@"
+    `.trim(), { CAPTURE: capture, CASE: scenario, WORKTREE: worktree, START: before.coordinates.start },
+    async (gitPath) => await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: before.id }).verify({ includeDirty: dirty }, { observe: (event) => {
+      if (event.kind === "verification" && event.observation.kind === "phase" && event.observation.phase === "declaration") declared = true;
+    } })));
+    const check = result.checks[0];
+    assert.equal(result.snapshot, readFileSync(lost ? capture : `${capture}.checked`, "utf8").trim());
+    assert.equal(declared, !lost);
+    if (lost) {
+      assert.ok(check?.kind === "stopped" && check.stop.kind === "candidate-unavailable");
+      assert.equal(repository.run(["cat-file", "--batch-check"], `${result.snapshot}\n`), `${result.snapshot} missing\n`);
+      assert.deepEqual(present(await contract.state()), before);
+    } else {
+      assert.ok(check?.kind === "terminal" && check.verdict === "satisfied" && check.admission === "admitted");
+    }
+    assert.deepEqual(pinnedSnapshots(repository), lost ? [] : [result.snapshot]);
+    assert.doesNotMatch(repository.run(["worktree", "list", "--porcelain"]), /keiyaku-v4-verify-/u);
+  });
+}
+
+test("targeted dirty merge planning judges the committed workspace head against main", async () => {
+  const repository = repositoryWithMain();
+  mkdirSync(join(repository.path, ".keiyaku"));
+  writeFileSync(join(repository.path, ".keiyaku", "settings.json"), JSON.stringify({
+    git: { requireBranchesToBeUpToDate: true },
+  }));
+  const settings = await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
+  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path }), { settings }).bind({
+    terms: document("true"), gates: ["verified"], target: "refs/heads/main",
+  })).kei;
+  try {
+    const before = present(await contract.state());
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), before.id);
+    commitCandidate(repository, worktree);
+    const head = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
+    writeFileSync(join(repository.path, "target.txt"), "main\n");
+    repository.run(["add", "target.txt"]);
+    repository.run(["commit", "--quiet", "-m", "advance main"]);
+    const targetHead = repository.run(["rev-parse", "refs/heads/main"]).trim();
+    repository.run(["-C", worktree, "merge", "--no-commit", targetHead]);
+    assert.equal(repository.run(["merge-base", head, targetHead]).trim(), before.coordinates.start);
+    assert.equal(repository.run(["-C", worktree, "rev-parse", "MERGE_HEAD"]).trim(), targetHead);
+
+    const reason = { kind: "not-based-on-target", targetHead };
+    const preview = await contract.previewDelivery({ includeDirty: true });
+    assert.ok(preview.kind === "blocked", JSON.stringify(preview));
+    assert.deepEqual(preview.reason, reason);
+    const verified = await contract.verify({ index: 1, includeDirty: true });
+    assert.ok(verified.kind === "refused", JSON.stringify(verified));
+    assert.deepEqual(verified.reason, reason);
+    assert.deepEqual(present(await contract.state()), before);
+    assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD", "MERGE_HEAD"]), `${head}\n${targetHead}\n`);
+  } finally {
+    accepted(await contract.abandon());
+  }
+});
+
+test("literal bytes govern checkout, admission, and repair in the presence of replacements", async () => {
+  const { repository, contract } = await fixture(["true", "grep -qx candidate candidate.txt", "test -f candidate.txt"]);
+  const { contractId, snapshot } = accepted(await contract.verify({ index: 1 }));
+  const pin = verificationSnapshotRef(contractId, snapshot);
+  const [tree, parent] = repository.run(["show", "-s", "--format=%T %P", snapshot]).trim().split(" ");
+  assert.ok(tree && parent);
+  repository.run(["replace", snapshot, parent]);
+  const literal = accepted(await contract.verify({ index: 2 })).checks[0];
+  assert.ok(literal?.kind === "terminal" && literal.verdict === "satisfied" && literal.admission === "admitted");
+  const before = present(await contract.state());
+  const replacement = repository.run(["commit-tree", tree, "-p", parent, "-m", "same tree, different commit"]).trim();
+  repository.run(["replace", "-f", snapshot, replacement]);
+  const loose = join(repository.path, ".git", "objects", snapshot.slice(0, 2), snapshot.slice(2));
+  const displaced = `${loose}.displaced`;
+  for (const index of [3, 1]) {
+    const result = accepted(await contract.verify({ index }, { observe: (event) => {
+      if (event.kind === "verification" && event.observation.kind === "phase" &&
+          event.observation.phase === "cleanup" && event.observation.state === "finished") renameSync(loose, displaced);
+    } }));
+    const check = result.checks[0];
+    assert.ok(check?.kind === "terminal" && check.verdict === "satisfied" && typeof check.admission !== "string");
+    assert.equal(check.admission.kind, "candidate-unavailable");
+    assert.equal(classifyVerb("verify", {}, { kind: "returned", value: result }), "failed");
+    assert.equal(repository.run(["rev-parse", "--verify", pin]).trim(), snapshot);
+    renameSync(displaced, loose);
+    assert.deepEqual(present(await contract.state()), before);
+  }
+  repository.run(["update-ref", "-d", pin]);
+  collectGitObjects(repository);
+  assert.equal(repository.run(["--no-replace-objects", "cat-file", "--batch-check"], `${snapshot}\n`), `${snapshot} missing\n`);
+  assert.equal(repository.run(["cat-file", "-t", snapshot]).trim(), "commit");
+  const result = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: contractId });
+  assert.ok(result.kind === "contract" && result.issues?.some((issue) =>
+    "diagnostic" in issue && issue.diagnostic.includes(`Verification snapshot unavailable: ${snapshot}`)));
+  assert.deepEqual(pinnedSnapshots(repository), []);
+  const { integration } = accepted(await contract.deliver({ message: "Fresh delivery after literal object loss" }));
+  assert.ok(integration !== snapshot && integration !== replacement);
+  assert.equal(repository.run(["--no-replace-objects", "show", "-s", "--format=%T %P", integration]).trim(), `${tree} ${parent}`);
+});
+
+test("native pin publication failure leaves earlier Verification testimony intact", async () => {
+  const { repository, contract } = await fixture(["true", "test -f candidate.txt", "exit 9"]);
+  const { contractId, snapshot } = accepted(await contract.verify({ index: 2 }));
+  const pin = verificationSnapshotRef(contractId, snapshot);
+  const lock = join(repository.path, ".git", `${pin}.lock`);
+  const before = present(await contract.state());
+  for (const reuse of [false, true]) {
+    const result = accepted(await contract.verify(reuse ? {} : { index: 1 }, { observe: (event) => {
+      if (event.kind !== "verification" || event.observation.kind !== "phase" || event.observation.phase !== "cleanup" ||
+          event.observation.state !== "finished" || event.observation.index !== (reuse ? 2 : 1)) return;
+      repository.run(["update-ref", "-d", pin]);
+      mkdirSync(dirname(lock), { recursive: true });
+      writeFileSync(lock, "", { flag: "wx" });
+    } }));
+    unlinkSync(lock);
+    assert.deepEqual(result.checks.map((check) => check.index), reuse ? [1, 2] : [1]);
+    const stopped = result.checks.at(-1);
+    assert.ok(stopped?.kind === "terminal" && stopped.verdict === "satisfied" && typeof stopped.admission !== "string");
+    assert.ok(stopped.admission.kind === "retry" && stopped.admission.reason === "publication-failed");
+    assert.ok(stopped.admission.diagnostic.includes(`${pin}.lock`));
+    const after = present(await contract.state());
+    if (!reuse) assert.deepEqual(after, before);
+    else {
+      const first = result.checks[0];
+      assert.ok(first?.kind === "terminal" && first.admission === "admitted");
+      assert.deepEqual(after.attestations.map(({ data }) => data.requirement), [stopped.requirement, first.requirement]);
+    }
+    assert.deepEqual(pinnedSnapshots(repository), []);
+  }
+  assert.doesNotMatch(repository.run(["worktree", "list", "--porcelain"]), /keiyaku-v4-verify-/u);
 });
 
 test("review-only Contracts without declarations refuse verify and retain the delivery lifecycle", async () => {
-  const repository = repositoryWithMain();
-  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    terms: document(), gates: ["reviewed"], target: "refs/heads/main",
-  })).kei;
+  const { contract } = await fixture([], ["reviewed"]);
   const before = present(await contract.state());
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), before.id);
-  commitCandidate(repository, worktree);
   const invalid = await contract.verify();
   assert.ok(invalid.kind === "refused");
   assert.equal(invalid.reason.kind, "verification-declaration-invalid");
@@ -96,8 +284,8 @@ test("each declaration executes in fresh scratch and terminal failure preserves 
   assert.ok(scenes.every(existsSync));
   const repeated = accepted(await contract.verify({ index: 2 }));
   assertWireConformance(verifyNormalOutcomeSchema, repeated);
-  assert.equal(repeated.checks[0]?.kind, "terminal");
-  if (repeated.checks[0]?.kind === "terminal") assert.equal(repeated.checks[0].admission, "reused");
+  const replay = repeated.checks[0];
+  assert.ok(replay?.kind === "terminal" && replay.admission === "reused");
   assert.equal(present(await contract.state()).attestations.length, 4);
   assert.ok(existsSync(scenes[1]!));
   await contract.abandon();
@@ -190,19 +378,6 @@ test("verify validates selection and dirty capture before executing or admitting
   await contract.abandon();
 });
 
-test("the last selected check completes a delivered and reviewed candidate", async () => {
-  const { contract } = await fixture(["true", "test -f candidate.txt"]);
-  accepted(await contract.deliver());
-  accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
-  const first = accepted(await contract.verify({ index: 1 }));
-  assert.equal(first.placement?.kind, "gates-unsatisfied");
-  const last = accepted(await contract.verify({ index: 2 }));
-  assert.ok(last.placement?.kind === "placed");
-  assert.equal(last.placement.integration, first.snapshot);
-  assert.equal(present(await contract.state()).attestations.length, 3);
-  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
-});
-
 test("strict currency keeps prior checks tied to their tested snapshot after target movement", async () => {
   const { repository, contract } = await fixture(["true", "test -f candidate.txt"], undefined, "strict");
   accepted(await contract.deliver());
@@ -290,32 +465,8 @@ test("verify after target movement reuses its prospective snapshot during ordina
   assert.equal(present(await contract.state()).currentIntegration?.snapshot, verified.snapshot);
 });
 
-test("concurrent selected admissions preserve both requirements and repeated checks still execute", async () => {
-  const { repository, contract } = await fixture(["true", "test -f candidate.txt"]);
-  accepted(await contract.deliver());
-  const results = await Promise.all([contract.verify({ index: 1 }), contract.verify({ index: 2 })]);
-  const selected = results.map((result) => accepted(result).checks[0]!);
-  assert.deepEqual(selected.map(({ index }) => index), [1, 2]);
-  assert.notEqual(selected[0]?.requirement, selected[1]?.requirement);
-  const state = present(await contract.state());
-  const verified = gateReports(state).reports.find((gate) => gate.gate === "verified")!;
-  assert.equal(verified.satisfied, true);
-  assert.equal(verified.requirements.length, 2);
-  assert.deepEqual(selected.map(({ requirement }) => requirement), verified.requirements.map(({ requirement }) => requirement));
-  const observations: string[] = [];
-  const repeated = accepted(await contract.verify({ index: 1 }, { observe: (event) => {
-    if (event.kind === "verification" && event.observation.kind === "phase") observations.push(event.observation.phase);
-  } }));
-  assert.ok(observations.includes("declaration"));
-  assert.equal(repeated.checks[0]?.kind, "terminal");
-  if (repeated.checks[0]?.kind === "terminal") assert.equal(repeated.checks[0].admission, "reused");
-  assert.equal(present(await contract.state()).attestations.length, state.attestations.length);
-  assert.equal(repository.run(["worktree", "list", "--porcelain"]).includes("keiyaku-v4-verify-"), false);
-  await contract.abandon();
-});
-
 test("cancellation after terminal execution retains the check and stops its admission", async () => {
-  const { contract } = await fixture(["true", "printf second", "printf never"]);
+  const { repository, contract } = await fixture(["true", "printf second", "printf never"]);
   const controller = new AbortController();
   let thirdExecuted = false;
   let result;
@@ -345,6 +496,8 @@ test("cancellation after terminal execution retains the check and stops its admi
   assert.match(text, /^  check {2}2\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}stopped$/mu);
   assert.match(text, /^  reason {2}cancelled$/mu);
   assert.equal(present(await contract.state()).attestations.length, 1);
+  assert.deepEqual(pinnedSnapshots(repository), [result.snapshot]);
+  assert.doesNotMatch(repository.run(["worktree", "list", "--porcelain"]), /keiyaku-v4-verify-/u);
   assert.equal(thirdExecuted, false);
   assertWireConformance(verifyNormalOutcomeSchema, result, false);
   await contract.abandon();

@@ -10,7 +10,7 @@ import {
 } from "../coordination/sqlite-transaction-lock.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, gitRefLocator, gitObjectIdForSnapshot } from "./identity.js";
-import { executeGit, type GitRepository } from "./process.js";
+import { executeGit, executeLiteralGit, type GitRepository } from "./process.js";
 import { pathExists, registeredWorktreePaths } from "./repository.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
@@ -207,12 +207,11 @@ async function retainScratch(
   }
 }
 
-/** Materialize a disposable candidate worktree and own only its removal. */
+/** Materialize a disposable checkout, or hold only a detached reachability root. */
 export async function materializeScratchCandidate(
   repository: GitRepository,
   candidate: SnapshotId,
-  contract: ContractId,
-  requirement: string,
+  ...scene: [] | [contract: ContractId, requirement: string]
 ): Promise<MaterializedScratchCandidate> {
   const cwd = scratchPath();
   const lockPath = ownershipLockPath(cwd);
@@ -223,7 +222,14 @@ export async function materializeScratchCandidate(
     ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
   try {
-    await executeGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
+    await (scene.length === 0 ? executeGit : executeLiteralGit)(repository, [
+      "worktree",
+      "add",
+      "--detach",
+      ...(scene.length === 0 ? ["--no-checkout"] : []),
+      cwd,
+      gitObjectIdForSnapshot(candidate),
+    ]);
   } catch (error) {
     let leak: WorktreeLeak | null;
     try {
@@ -242,12 +248,18 @@ export async function materializeScratchCandidate(
       if (disposed) return null;
       disposed = true;
       try {
-        if (!retain) return await removeScratch(repository, cwd);
-        return await retainScratch(repository, cwd, contract, requirement);
+        if (!retain || scene.length === 0) return await removeScratch(repository, cwd);
+        return await retainScratch(repository, cwd, ...scene);
       } finally {
         ownership.close();
         if (!(await pathExists(cwd))) await removeOwnershipLock(lockPath);
       }
     },
   };
+}
+
+/** Own a detached Git reachability root without checking out or executing candidate content. */
+export async function holdVerificationSnapshot(repository: GitRepository, snapshot: SnapshotId) {
+  const stable = { ...repository, effectiveCwd: repository.primaryWorktree };
+  return { snapshot, ...(await materializeScratchCandidate(stable, snapshot)) };
 }

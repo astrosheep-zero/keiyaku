@@ -2,7 +2,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { parseTreeEntries, validPath, type TreeEntry } from "./tree.js";
 import type { GitOid, GitSnapshot } from "./repository.js";
-import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
+import { executeGit, executeLiteralGit, GitPlumbingError, type GitRepository } from "./process.js";
 
 export const GIT_REF = "refs/heads/keiyaku-state";
 export const GIT_FORMAT_PATH = "meta/format.json";
@@ -96,6 +96,18 @@ function parseBatch(output: Buffer, oids: readonly GitOid[]): ReadonlyMap<GitOid
   }
   if (offset !== output.length) malformed("trailing bytes");
   return objects;
+}
+
+async function readObjectBatch(repository: GitRepository, oids: readonly GitOid[], literal = false) {
+  const execute = literal ? executeLiteralGit : executeGit;
+  return parseBatch(await execute(repository, ["cat-file", "--batch"], `${oids.join("\n")}\n`), oids);
+}
+
+/** Fresh byte evidence for exact OIDs, independent of replacement refs and observation caches. */
+export async function readLiteralObjects(repository: GitRepository, oids: readonly GitOid[]) {
+  if (oids.length === 0) return new Map<GitOid, GitObjectResult>();
+  for (const oid of oids) gitObjectId(oid, "Git object");
+  return await readObjectBatch(repository, oids, true);
 }
 
 async function allTrees(repository: GitRepository, oids: readonly GitOid[]): Promise<boolean> {
@@ -211,11 +223,7 @@ export async function withGitDecodeChannel<Value>(
     const uncached = unique.filter((oid) => !objects.has(oid));
     if (uncached.length > 0) {
       // Install every promise before starting IO so concurrent callers share the same batch.
-      const batch = own(
-        Promise.resolve().then(async () =>
-          parseBatch(await executeGit(repository, ["cat-file", "--batch"], `${uncached.join("\n")}\n`), uncached),
-        ),
-      );
+      const batch = own(Promise.resolve().then(() => readObjectBatch(repository, uncached)));
       for (const oid of uncached)
         objects.set(
           oid,

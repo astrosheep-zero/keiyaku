@@ -557,10 +557,17 @@ export async function readConflictHandoffs(
   return handoffs;
 }
 
-export async function retireConflictHandoff(
+type ObservedHandoff =
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{ kind: "active" | "orphan"; stored: StoredHandoffReceipt }>
+  | Extract<HandoffRetirement, { kind: "retained" }>;
+
+/** Classify receipt ownership without retiring the merge or its receipt. */
+export async function observeConflictHandoff(
   repository: GitRepository,
-  input: Readonly<{ contractId: ContractId; place: string; workspace: string; consume: boolean }>,
-): Promise<HandoffRetirement> {
+  input: HandoffReceiptCoordinate,
+  captured?: Pick<HandoffReceipt, "head" | "mergeHead">,
+): Promise<ObservedHandoff> {
   const stored = await storedHandoffReceipt(repository, input.contractId, input.place);
   if (stored === null) return { kind: "absent" };
   const { receipt } = stored;
@@ -576,15 +583,29 @@ export async function retireConflictHandoff(
   ]);
   if (mergeHead === null) {
     if (operation.unmerged) return { kind: "retained", reason: "operation-in-progress" };
-    await removeHandoffReceipt(repository, stored);
-    return { kind: "orphan-retired" };
+    return { kind: "orphan", stored };
   }
-  if (head !== receipt.head) return { kind: "retained", reason: "receipt-mismatch" };
-  if (mergeHead !== receipt.mergeHead) {
+  if (
+    head !== receipt.head ||
+    mergeHead !== receipt.mergeHead ||
+    (captured !== undefined && (captured.head !== head || captured.mergeHead !== mergeHead))
+  )
     return { kind: "retained", reason: "receipt-mismatch" };
+  return { kind: "active", stored };
+}
+
+export async function retireConflictHandoff(
+  repository: GitRepository,
+  input: HandoffReceiptCoordinate & Readonly<{ consume: boolean }>,
+): Promise<HandoffRetirement> {
+  const observed = await observeConflictHandoff(repository, input);
+  if (observed.kind === "absent" || observed.kind === "retained") return observed;
+  if (observed.kind === "orphan") {
+    await removeHandoffReceipt(repository, observed.stored);
+    return { kind: "orphan-retired" };
   }
   if (!input.consume) return { kind: "active" };
   await executeGit(repository, ["-C", input.workspace, "merge", "--quit"]);
-  await removeHandoffReceipt(repository, stored);
+  await removeHandoffReceipt(repository, observed.stored);
   return { kind: "retired" };
 }

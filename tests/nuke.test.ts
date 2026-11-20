@@ -442,14 +442,14 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(raw.path);
   const racedRef = "refs/keiyaku/delivery/legacy";
-  for (const ref of [
+  const ownedRefs = [
     racedRef,
+    `refs/keiyaku/verification/kei-legacy/${raw.run(["rev-parse", "HEAD"]).trim()}`,
     "refs/keiyaku/candidate/legacy",
     "refs/keiyaku/delivery/current",
     "refs/keiyaku/candidate/current",
-    "refs/heads/business-branch",
-    "refs/heads/keiyaku-state",
-  ])
+  ];
+  for (const ref of [...ownedRefs, "refs/heads/business-branch", "refs/heads/keiyaku-state"])
     raw.run(["update-ref", ref, "HEAD"]);
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-leaf"]);
   const moved = raw.run(["rev-parse", "HEAD"]).trim();
@@ -474,10 +474,7 @@ test("Git nuke retains a leaf whose expected OID changed and retries later", asy
     assert.equal(refPresent(raw, racedRef), true);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
     await nukeGit(world);
-    assert.equal(refPresent(raw, racedRef), false);
-    assert.equal(refPresent(raw, "refs/keiyaku/candidate/legacy"), false);
-    assert.equal(refPresent(raw, "refs/keiyaku/delivery/current"), false);
-    assert.equal(refPresent(raw, "refs/keiyaku/candidate/current"), false);
+    for (const ref of ownedRefs) assert.equal(refPresent(raw, ref), false, ref);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
   } finally {
     rmSync(raw.path, { recursive: true, force: true });

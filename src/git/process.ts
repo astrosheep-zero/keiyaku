@@ -162,6 +162,10 @@ export async function executeGit(
   });
 }
 
+export function executeLiteralGit(repository: GitRepository, args: readonly string[], input?: string | Uint8Array) {
+  return executeGit(repository, args, input, { GIT_NO_REPLACE_OBJECTS: "1" });
+}
+
 function boundedPipeOutput(
   child: ReturnType<typeof spawnCancellableProcess>["child"],
   args: readonly string[],

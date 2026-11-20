@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 import type { Preparation } from "../core/decide.js";
-import { gate, requirementId, type DocumentSegmentKey, type Gate, type RequirementId } from "../core/facts/types.js";
+import {
+  gate,
+  requirementId,
+  type AttestationData,
+  type DocumentSegmentKey,
+  type Gate,
+  type RequirementId,
+  type SnapshotId,
+} from "../core/facts/types.js";
+import { dependencyKeys } from "../core/subject.js";
 
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 
@@ -20,6 +29,12 @@ export type VerificationDeclarationRefusal = Readonly<{ kind: "verification-decl
 export type VerificationDeclarationPreparation = Preparation<VerificationDefinition, VerificationDeclarationRefusal>;
 
 export const VERIFIED = gate("verified");
+
+/** Recover tested snapshots without judging the currency or verdict of the testimony. */
+export function attestedVerificationSnapshots(data: AttestationData): readonly SnapshotId[] {
+  if (data.gate !== VERIFIED) return [];
+  return dependencyKeys(data.subject).flatMap((key) => (key.kind === "snapshot" ? [key.value] : []));
+}
 
 /** The display index and surrounding document never participate in execution identity. */
 export function verificationRequirement(declaration: VerificationDeclaration): RequirementId {

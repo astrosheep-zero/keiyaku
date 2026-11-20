@@ -19,7 +19,13 @@ import type { Offer, TreeUpdate } from "../core/facts/offer.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ChangeId, ContractHead, ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { GitObjectId } from "../git/identity.js";
-import { admitDecidedOffer, type AcceptedAdmission, type AttemptTerminal, type DecidedOfferResult } from "./attempt.js";
+import {
+  admitDecidedOffer,
+  type AcceptedAdmission,
+  type AttemptTerminal,
+  type DecidedOfferResult,
+  type PrepareRefCompanion,
+} from "./attempt.js";
 
 export const STALE_PRIVATE_STATE_PREPARATION = {
   kind: "stale",
@@ -117,6 +123,7 @@ type ProtocolAdmission<Input extends Readonly<{ contractId: ContractId }>, Refus
   extendAttempt?: (attempt: AttemptContext, observedContractCount: number) => AttemptContext;
   /** Add opaque companions from the exact immutable observation for this attempt. */
   decorateOffer?: CompanionDecorator;
+  prepareRefCompanion?: PrepareRefCompanion<Refusal>;
   validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
 }>;

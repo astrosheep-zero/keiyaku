@@ -80,9 +80,10 @@ declarations after those results. Candidate unavailability, environment/setup
 failure, spawn failure,
 unknown exit, and caller cancellation admit no testimony for the affected
 check. An operational stop may stop further scheduling; cancellation stops later
-owned work. Earlier admissions and cleanup residue remain visible. A terminal
-execution result survives a later cancelled admission: the check retains its
-verdict and identifies the admission stop without claiming testimony was recorded.
+owned work. Earlier check results, admissions, and cleanup residue remain visible.
+A terminal execution result survives cancellation during its admission or an
+operational failure to restore custody for reuse: the check retains its verdict
+and reports the admission stop without claiming testimony was recorded or reused.
 
 Admission never retargets captured testimony, even when the Contract has moved.
 Requirement identity carries declaration currency; no whole-section subject

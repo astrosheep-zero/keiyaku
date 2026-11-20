@@ -1,20 +1,24 @@
 import { KeiyakuError } from "../errors.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { gitObjectId } from "./identity.js";
-import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
+import type { ContractId, SnapshotId } from "../core/facts/types.js";
+import { contractPhysicalName, gitObjectId, gitObjectIdForSnapshot } from "./identity.js";
+import { executeGit, executeLiteralGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
 import {
   assertAssertionRef,
   assertRef,
   GIT_REF,
   withGitDecodeChannel,
   withGitTargetedReadObservation,
+  readRef,
 } from "./read-observation.js";
 import { parseTreeEntries, validPath, type TreeChange, type TreeEntry } from "./tree.js";
 export { GIT_REF, GIT_FORMAT_PATH, GIT_FORMAT_BYTES, readRef } from "./read-observation.js";
 export type { TreeChange } from "./tree.js";
 export const DELIVERY_REF_NAMESPACE = "refs/keiyaku/delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/keiyaku/candidate";
+export const VERIFICATION_REF_NAMESPACE = "refs/keiyaku/verification";
 export const HANDOFF_RECEIPT_REF_NAMESPACE = "refs/keiyaku/handoff";
 const STATE_COMMIT_SUBJECT = "keiyaku authority - do not delete or rewrite";
 export function isKeiyakuOwnedRef(ref: string): boolean {
@@ -24,9 +28,15 @@ export function isKeiyakuOwnedRef(ref: string): boolean {
     ref.startsWith(`${DELIVERY_REF_NAMESPACE}/`) ||
     ref === CANDIDATE_PIN_REF_NAMESPACE ||
     ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`) ||
+    ref === VERIFICATION_REF_NAMESPACE ||
+    ref.startsWith(`${VERIFICATION_REF_NAMESPACE}/`) ||
     ref === HANDOFF_RECEIPT_REF_NAMESPACE ||
     ref.startsWith(`${HANDOFF_RECEIPT_REF_NAMESPACE}/`)
   );
+}
+
+export function verificationSnapshotRef(contract: ContractId, snapshot: SnapshotId): string {
+  return `${VERIFICATION_REF_NAMESPACE}/${contractPhysicalName(contract)}/${gitObjectIdForSnapshot(snapshot)}`;
 }
 
 export type GitOid = string;
@@ -207,6 +217,59 @@ export async function worktreeGitDirectory(repository: GitRepository, worktree: 
 
 async function worktreeRoot(repository: GitRepository): Promise<string> {
   return await absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
+}
+
+export async function updateSnapshotRef(
+  repository: GitRepository,
+  ref: string,
+  desired: SnapshotId | null,
+  expected?: GitOid | null,
+) {
+  const before = expected === undefined ? await readRef(repository, ref) : expected;
+  if (before === desired) return undefined;
+  const update =
+    desired === null
+      ? ["-d", ref, before!]
+      : [ref, gitObjectIdForSnapshot(desired), before ?? "0".repeat(desired.length)];
+  await executeGit(repository, ["update-ref", "--no-deref", ...update]);
+  return { kind: "ref" as const, name: ref, before, after: desired };
+}
+
+/** Prepare or repair the exact evidence root. Live callers supply their owned attempt anchor. */
+export async function associateVerificationSnapshot(
+  repository: GitRepository,
+  contract: ContractId,
+  snapshot: SnapshotId,
+  intent: "repair" | Readonly<{ anchor: string; reuse: boolean }>,
+) {
+  const anchor = intent === "repair" ? undefined : intent.anchor;
+  const oid = gitObjectIdForSnapshot(snapshot);
+  const diagnostic = `Verification snapshot unavailable: ${snapshot}`;
+  let present = false;
+  try {
+    const object = await executeLiteralGit(
+      repository,
+      [...(anchor === undefined ? [] : ["-C", anchor]), "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+      `${anchor === undefined ? oid : "HEAD"}\n`,
+    );
+    const literal = object.toString("ascii");
+    if (literal !== `${oid} commit\n`) {
+      if (anchor === undefined && literal !== `${oid} missing\n`)
+        throw new AuthorityCorruptionError(`Verification snapshot is not a commit: ${snapshot}`);
+      return { kind: "candidate-unavailable" as const, diagnostic };
+    }
+    present = true;
+    const ref = verificationSnapshotRef(contract, snapshot);
+    const expectedOid = await readRef(repository, ref);
+    if (intent !== "repair" && !intent.reuse)
+      return { kind: "companion" as const, update: { ref, newOid: oid, expectedOid } };
+    return { kind: "associated" as const, effect: await updateSnapshotRef(repository, ref, snapshot, expectedOid) };
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError) || repository.signal?.aborted) throw error;
+    return present
+      ? { kind: "publication-failed" as const, diagnostic: error.message }
+      : { kind: "candidate-unavailable" as const, diagnostic: `${diagnostic}: ${error.message}` };
+  }
 }
 
 /** Read an explicit set of asserted refs from one fresh Git observation. */
@@ -400,13 +463,14 @@ function refAssertionLine(assertion: GitRefAssertion): string {
   return `${assertion.ref === "HEAD" ? "" : "option no-deref\n"}verify ${assertion.ref} ${assertion.oid}`;
 }
 
-function refUpdateLine(
-  update: { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid | null },
-  index: number,
-): string {
+export type GitRefUpdate = Readonly<{ ref: string; newOid: GitOid; expectedOid: GitOid | null }>;
+
+function refUpdateLine(update: GitRefUpdate, index: number): string {
   assertRef(update.ref);
   if (index > 0 && update.ref === GIT_REF) throw new Error(`duplicate ref update: ${update.ref}`);
-  if (index === 1 && update.expectedOid === null) throw new Error("target ref updates require non-null OIDs");
+  if (index === 1 && update.expectedOid === null && !update.ref.startsWith(`${VERIFICATION_REF_NAMESPACE}/`)) {
+    throw new Error("target ref updates require non-null OIDs");
+  }
   if (index === 2 && !update.ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`))
     throw new Error("third atomic update must be a candidate pin");
   gitObjectId(update.newOid, `new oid for ${update.ref}`);
@@ -416,14 +480,11 @@ function refUpdateLine(
 
 export async function updateRefsAtomically(
   repository: GitRepository,
-  updates: readonly (
-    | { readonly ref: typeof GIT_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
-    | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
-  )[],
+  updates: readonly GitRefUpdate[],
   assertions: readonly GitRefAssertion[] = [],
 ): Promise<RefPublication> {
   if (updates.length === 0) throw new Error("an atomic ref transaction needs a Git update");
-  if (updates.length > 3) throw new Error("an atomic ref transaction accepts at most one target and candidate pin");
+  if (updates.length > 3) throw new Error("an atomic ref transaction accepts at most two companion ref updates");
   const git = updates[0];
   if (git === undefined || git.ref !== GIT_REF) {
     throw new Error(`the first atomic update must be the Git ref: ${GIT_REF}`);

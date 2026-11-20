@@ -1,4 +1,11 @@
-import { CANDIDATE_PIN_REF_NAMESPACE, isKeiyakuOwnedRef, pathExists, readRef, writeCommit } from "./repository.js";
+import {
+  CANDIDATE_PIN_REF_NAMESPACE,
+  isKeiyakuOwnedRef,
+  pathExists,
+  readRef,
+  updateSnapshotRef,
+  writeCommit,
+} from "./repository.js";
 import { contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { withGitReadObservation, type GitDecodeChannel } from "./read-observation.js";
@@ -63,20 +70,8 @@ export async function updateRef(
   desired: SnapshotId | null,
   acc: ReconcileAccumulation,
 ): Promise<void> {
-  const before = await readRef(repository, ref);
-  if (before === desired) return;
-  if (desired === null) {
-    await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, before!]);
-  } else {
-    await executeGit(repository, [
-      "update-ref",
-      "--no-deref",
-      ref,
-      gitObjectIdForSnapshot(desired),
-      before ?? "0".repeat(desired.length),
-    ]);
-  }
-  acc.recordEffect({ kind: "ref", name: ref, before, after: desired });
+  const update = await updateSnapshotRef(repository, ref, desired);
+  if (update !== undefined) acc.recordEffect(update);
 }
 
 async function removeRefWithCustody(
