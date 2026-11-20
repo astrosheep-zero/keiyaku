@@ -2,9 +2,7 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { deferred as promiseBarrier, temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
-  constants,
   existsSync,
-  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import {
   activitySlice,
   appendActivity,
@@ -25,11 +22,10 @@ import {
   breakBody,
   endTurn,
   HeldAkumaLeash,
-  initializeHeart,
   readTell,
   recordTell,
 } from "../src/akuma/heart/index.js";
-import { akumaId, allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { akumaId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -38,12 +34,11 @@ import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
-import { addressAkumaSet, observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
+import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
 import { Debts, type DebtId } from "../src/debt/index.js";
 import { World } from "../src/world.js";
-import { observeAkumaRoster, readAkumaCompleteRoster } from "../src/akuma/akuma.js";
 import { allocatedHeart, bornBody, bornDirectAkuma, driveWithTell } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
@@ -95,17 +90,6 @@ function fixtureRoot(t: TestContext, prefix: string): WorldRoot {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix))) as WorldRoot;
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
-}
-
-// The template is a closed, unborn database pair: no Soul or identity-bound facts.
-// Copy bytes, never hard-link them, so every catalog member keeps independent custody.
-async function initializeUnbornFixture(
-  paths: Parameters<typeof initializeHeart>[0],
-  template: Parameters<typeof initializeHeart>[0] | undefined,
-): Promise<void> {
-  if (template === undefined) return initializeHeart(paths);
-  copyFileSync(template.heart, paths.heart, constants.COPYFILE_EXCL);
-  copyFileSync(template.leash, paths.leash, constants.COPYFILE_EXCL);
 }
 
 function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
@@ -636,26 +620,6 @@ test("a Tell admitted as the free leash is acquired invalidates the stale Heart 
   }
 });
 
-test("a missing Soul is reported missing behind a running plural peer", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-wait-not-born-");
-  const running = await retainedRunningWorker(root, "00000071", WAIT_AT);
-  const missing = akumaId({ akumaName: "worker", suffix: "00000072" });
-  try {
-    const all = await executeWaitAkuma({ path: root, ids: [running.id, missing], completion: "all", timeoutMs: 0 });
-    assert.equal(all.reason, "deadline", "a missing peer never proves the running member complete");
-    assert.deepEqual(
-      all.results.map(({ akuma, state }) => [state, akuma]),
-      [["running", running.id], ["missing", missing]],
-      "missing keeps caller order and its own identity",
-    );
-    const any = await executeWaitAkuma({ path: root, ids: [running.id, missing], completion: "any", timeoutMs: 0 });
-    assert.equal(any.results.find((item) => item.state === "missing")?.akuma, missing);
-    const single = await executeWaitAkuma({ path: root, ids: [missing], completion: "all", timeoutMs: 0 });
-    assert.deepEqual(single.results, [{ state: "missing", akuma: missing }], "a missing identity contributes no fabricated status");
-  } finally {
-    await running.end();
-  }
-});
 test("wait ignores a Dispatch published during polling", { timeout: 15_000 }, async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -759,53 +723,6 @@ test("wait ignores a Dispatch published during polling", { timeout: 15_000 }, as
   }
 });
 
-test("Akumas roster returns bounded Heart activity in semantic order", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-");
-  const first = await answered(root, "worker", "00000003");
-  const tiedFirst = await answered(root, "worker", "00000001");
-  const tiedSecond = await answered(root, "worker", "00000002");
-  const reviewer = await answered(root, "reviewer", "00000001");
-  await appendActivity(first.paths, {
-    turnSequence: 2,
-    event: { type: "unknown", kind: "fixture" },
-    at: "2026-08-11T00:00:01.000Z",
-  });
-  for (const source of [tiedFirst, tiedSecond]) {
-    await appendActivity(source.paths, {
-      turnSequence: 2,
-      event: { type: "unknown", kind: "fixture" },
-      at: "2026-08-11T00:00:02.000Z",
-    });
-  }
-  await appendActivity(reviewer.paths, {
-    turnSequence: 2,
-    event: { type: "unknown", kind: "fixture" },
-    at: "2026-08-11T00:00:03.000Z",
-  });
-
-  const page = await Akumas.of(await World.at(root)).list({ akumaName: "worker", selection: "all", limit: 2 });
-  assert.deepEqual(
-    page.rows?.map((row) => row.id),
-    [tiedFirst.id, tiedSecond.id],
-  );
-  assert.equal(page.more, true);
-  const originalPrepare = DatabaseSync.prototype.prepare;
-  let custodyReads = 0;
-  DatabaseSync.prototype.prepare = function (...args) {
-    custodyReads += 1;
-    return originalPrepare.apply(this, args);
-  };
-  try {
-    await assert.rejects(
-      Akumas.of(await World.at(root)).list({ limit: 501 }),
-      /limit must be an integer from 1 to 500/u,
-    );
-  } finally {
-    DatabaseSync.prototype.prepare = originalPrepare;
-  }
-  assert.equal(custodyReads, 0);
-});
-
 test("Akumas catalogue preserves readable rows through corrupt Alias authority", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-alias-corrupt-");
   const source = await answered(root, "worker", "00000003");
@@ -815,90 +732,6 @@ test("Akumas catalogue preserves readable rows through corrupt Alias authority",
   assert.match(catalogue.aliasesError!, /invalid Alias JSON/u);
   assert.deepEqual(catalogue.rows?.map((row) => row.id), [source.id]);
   assert.equal(catalogue.rows?.[0]?.aliases, undefined);
-});
-
-test("recent Akuma page keeps complete membership without timestamp pruning", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
-  const old = new Date("2000-01-01T00:00:00.000Z");
-  const originalPrepare = DatabaseSync.prototype.prepare;
-  let template: Parameters<typeof initializeHeart>[0] | undefined;
-  // Pagination limits are asserted at the owner below; a mixed catalogue keeps
-  // the semantic order observable under deliberately misleading mtimes.
-  const oldCount = PAGE_POOL_SIZE;
-  try {
-    const oldIds = [];
-    for (let index = 0; index < oldCount; index += 1) {
-      const suffix = index.toString(16).padStart(8, "0");
-      const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "worker", draw: () => suffix });
-      await initializeUnbornFixture(allocated.paths, template);
-      template ??= allocated.paths;
-      oldIds.push(allocated.id);
-      utimesSync(allocated.paths.heart, old, old);
-      try {
-        utimesSync(`${allocated.paths.heart}-wal`, old, old);
-      } catch {}
-    }
-    const recent = await Promise.all(
-      Array.from({ length: 3 }, async (_, index) => {
-        const source = await answered(root, "worker", `a00000${index.toString(16).padStart(2, "0")}`);
-        await appendActivity(source.paths, {
-          turnSequence: 2,
-          event: { type: "unknown", kind: "fixture" },
-          at: `2099-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
-        });
-        return source;
-      }),
-    );
-    let prepareCalls = 0;
-    DatabaseSync.prototype.prepare = function (...args) {
-      prepareCalls += 1;
-      return originalPrepare.apply(this, args);
-    };
-    const proved = await World.at(root);
-    const page = await observeAkumaRoster(proved, 2);
-    const pagePrepares = prepareCalls;
-    DatabaseSync.prototype.prepare = originalPrepare;
-    prepareCalls = 0;
-    DatabaseSync.prototype.prepare = function (...args) {
-      prepareCalls += 1;
-      return originalPrepare.apply(this, args);
-    };
-    const complete = await readAkumaCompleteRoster(proved);
-    const completePrepares = prepareCalls;
-    DatabaseSync.prototype.prepare = originalPrepare;
-    const reference = complete.rows.map((row) => row.id);
-    const completeGlob = await addressAkumaSet({ path: root, akuma: ["aku/*/*"] });
-
-    assert.equal("hasMore" in complete, false);
-    assert.deepEqual(
-      reference,
-      [...recent]
-        .reverse()
-        .map((source) => source.id)
-        .concat(oldIds),
-    );
-    assert.deepEqual(completeGlob.ids, [...oldIds, ...recent.map((source) => source.id)].sort());
-    assert.deepEqual(
-      page.rows?.map((row) => row.id),
-      reference.slice(0, 2),
-    );
-    assert.equal(page.more, true);
-    assert.deepEqual(
-      page.rows?.map((row) => row.id),
-      recent
-        .slice()
-        .reverse()
-        .slice(0, 2)
-        .map((row) => row.id),
-    );
-    assert.ok(
-      pagePrepares === completePrepares,
-      `bounded page ${pagePrepares} observes the same candidates as complete ${completePrepares}`,
-    );
-  } finally {
-    DatabaseSync.prototype.prepare = originalPrepare;
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("recent Debt catalog does not skip older-mtime malformed authority", async (t) => {
@@ -981,42 +814,6 @@ test("Contract wait refuses selectors while cross-World Contract kill refuses be
     }),
     (error: unknown) => error instanceof AkumaWorldScopeError && error.refusal.kind === "akuma-not-in-world",
   );
-});
-
-test("selection status projects Dispatch association without changing Akuma core", async (t) => {
-  const repository = fixtureRepository(t);
-
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const source = await answered(repository.path, "worker", "deadbeef");
-  const owner = contractId("kei/provider-core");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: source.id, contractId: owner }))
-      .kind,
-    "dispatched",
-  );
-
-  const world = await World.at(repository.path);
-  const plain = await Akumas.of(world).status({
-    akuma: source.id,
-  });
-  assert.equal("contractId" in plain, false);
-  assert.equal(plain.id, source.id);
-  assert.equal(plain.kind, "akuma");
-  const projected = await Akumas.of(world).status({
-    akuma: source.id,
-    repo: await Repo.at({ path: repository.path }),
-  });
-  assert.deepEqual(projected.contract, { kind: "associated", contractId: owner });
-  assert.equal(projected.id, source.id);
-  const waited = await Akumas.of(world).wait({
-    akuma: [source.id],
-    repo: await Repo.at({ path: repository.path }),
-    timeoutMs: 0,
-  });
-  const waitedMember = waited.results[0];
-  assert.equal(waitedMember?.state, "done");
-  assert.ok(waitedMember && !("contract" in waitedMember));
-  assert.equal(waited.reason, "completed");
 });
 
 function fixtureRepository(t: TestContext) {

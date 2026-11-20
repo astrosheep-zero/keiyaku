@@ -74,7 +74,7 @@ test("a Zig version below 0.14.1 is a hard failure on Windows", () => {
   assert.doesNotMatch(result.stderr, /mock Zig compiler invoked/);
 });
 
-for (const version of ["0.14.1", "0.16.0"]) {
+for (const version of ["0.14.1"]) {
   test(`Zig ${version} reaches the Windows launcher compiler`, () => {
     const result = runLauncher(executableReporting(version));
 

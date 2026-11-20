@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { captureOutput } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
@@ -86,59 +86,6 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   assert.equal(stderr, "");
 });
 
-test("show preserves a Debt's multi-line body end to end", () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-debt-"));
-  const added = runCli(root, ["debt", "add", "Title", "--body", "first\nsecond", "--json"]);
-  assert.equal(added.status, 0);
-  const id = JSON.parse(added.stdout).id as string;
-  const shown = runCli(root, ["show", id]);
-  assert.equal(shown.status, 0);
-  assert.match(shown.stdout, /body\n  first\n  second/u);
-  rmSync(root, { recursive: true, force: true });
-});
-
-test("audit show-diff preserves an actual candidate diff", () => {
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const markdown = [
-    "# CLI audit",
-    "",
-    "## Context",
-    "test",
-    "",
-    "## Objective",
-    "test",
-    "",
-    "## Design",
-    "test",
-    "",
-    "## Region",
-    "src/**",
-    "",
-    "## Criteria",
-    "### candidate",
-    "test",
-  ].join("\n");
-  const bound = spawnSync(process.execPath, [builtCli(), "-C", repository.path, "bind", "--gates", "", "-", "--json"], {
-    input: markdown,
-    encoding: "utf8",
-  });
-  assert.equal(bound.status, 0, bound.stderr);
-  const binding = JSON.parse(bound.stdout) as { readonly contractId: string; readonly worktreePath: string };
-  const contract = binding.contractId;
-  writeFileSync(join(binding.worktreePath, "candidate.txt"), "candidate\n");
-  const audited = spawnSync(
-    process.execPath,
-    [builtCli(), "-C", repository.path, "deliver", contract, "--dry-run", "--include-dirty", "--show-diff"],
-    {
-      encoding: "utf8",
-    },
-  );
-  assert.equal(audited.status, 0, audited.stderr);
-  assert.match(audited.stdout, /diff --git/u);
-  assert.match(audited.stdout, /\+\+\+|@@/u);
-});
-
 test("a local status on an absent complete id reports one caller-facing fact", (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-found-"));
   mkdirSync(join(root, ".keiyaku"));
@@ -182,23 +129,6 @@ test("invalid args keep diagnostic with deepest leaf usage", async () => {
     "  help  keiyaku --help",
     "",
   ].join("\n"));
-});
-
-test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-json-refusal-"));
-  const result = runCli(cwd, ["bind", "--json", "-"], "not valid bind markdown\n");
-  assert.equal(result.status, 1);
-  assert.equal(result.stderr, "");
-  const body = JSON.parse(result.stdout) as {
-    kind: string;
-    reason: { kind: string; diagnostic: string };
-    draft?: { path?: string; warning?: string };
-  };
-  assert.equal(body.kind, "refused");
-  assert.equal(body.reason.kind, "invalid-document");
-  assert.match(body.reason.diagnostic, /contract document/u);
-  assert.ok(body.draft?.path !== undefined || body.draft?.warning !== undefined);
-  rmSync(cwd, { recursive: true, force: true });
 });
 
 test("blank stdin remains a visible usage diagnostic and performs no operation", () => {

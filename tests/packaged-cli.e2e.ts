@@ -175,9 +175,13 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   command("git", ["add", "README.md"], repository);
   command("git", ["commit", "--quiet", "-m", "initial"], repository);
   const status = JSON.parse(installedCommand(["-C", repository, "kanshi", "--json"], installed)) as {
-    contracts?: { kind?: string };
+    contracts?: unknown;
   };
-  assert.equal(status.contracts?.kind, "present");
+  assert.deepEqual(
+    status.contracts,
+    {},
+    "an established empty Git World reports an observed empty Contract section",
+  );
 
   const providerRegistry = join(
     installed,

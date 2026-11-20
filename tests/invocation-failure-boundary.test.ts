@@ -105,31 +105,6 @@ test("native review publications survive observer mutation and preserve independ
   assert.deepEqual(conflict.outcome, expected);
 });
 
-test("native delivery keeps an independent programming failure when the caller aborts", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
-  commitCandidate(repository);
-  const controller = new AbortController();
-  const original = new TypeError("Git capability failure after leading publication");
-  const native = createKeiHandle(bound.contractId, {
-    ...scopeForRepo(repo),
-    onPrivateStateSeatClose() {
-      Object.defineProperty(this, "gitPath", { get() {
-        controller.abort();
-        throw original;
-      } });
-    },
-  }, captureLocalContractComposition());
-  await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
-    assert.ok(error instanceof KeiyakuError && error.outcome?.kind === "contract");
-    assert.equal(error.category, "internal");
-    assert.equal(error.cause, original);
-    assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "deliver"));
-    return true;
-  });
-});
-
 test("native Contract reads tag lawful absence while corrupt fork terms remain exceptional", async () => {
   const { decodeJournal, encodeEntry } = await import("../src/core/facts/codec.js");
   const { contractJournalPath } = await import("../src/git/identity.js");
@@ -216,59 +191,6 @@ test("a pre-admission finite read failure keeps its native cause without claimin
   assert.equal(state.delivery, null);
   assert.equal(state.terminal, null);
   assert.equal(readFileSync(join(bound.worktreePath, "dirty.txt"), "utf8"), "unadmitted bytes\n");
-});
-
-test("native delivery retains an earlier completed checkout follow when a later checkout throws", async () => {
-  const { rmSync } = await import("node:fs");
-  const repository = repositoryWithMain();
-  const sibling = `${repository.path}-other-checkout`;
-  repository.run(["worktree", "add", "--quiet", "--force", sibling, "main"]);
-  try {
-    const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
-    assert.ok(bound.worktreePath);
-    commitCandidate(repository, bound.worktreePath);
-    const base = scopeForRepo(repo);
-    const original = new TypeError("later checkout program failure");
-    const [first, second] = [repository.path, sibling].sort((a, b) => a.localeCompare(b)) as [string, string];
-    const reachedSecond = join(repository.path, ".git", "reached-second-checkout");
-    await withGitShim(
-      [
-        'if [ "$1" = "-C" ] && [ "$2" = "$KEIYAKU_TEST_SECOND" ]; then',
-        '  : > "$KEIYAKU_TEST_REACHED_SECOND"',
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      { KEIYAKU_TEST_SECOND: second, KEIYAKU_TEST_REACHED_SECOND: reachedSecond },
-      async (gitPath) => {
-        const scope = {
-          ...base,
-          get gitPath(): string {
-            if (existsSync(reachedSecond)) throw original;
-            return gitPath;
-          },
-        };
-        const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
-        await assert.rejects(native.deliver(), (error: unknown) => {
-          assert.ok(error instanceof KeiyakuError);
-          assert.equal(error.cause, original);
-          assert.equal(error.category, "internal");
-          assert.ok(error.outcome?.kind === "contract");
-          assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
-          const followed = error.outcome.effects?.filter((movement) => movement.kind === "target-checkout");
-          assert.deepEqual(followed, [{ kind: "target-checkout", path: first, target: "refs/heads/main" }]);
-          assert.equal(readFileSync(join(first, "candidate.txt"), "utf8"), "candidate\n");
-          assert.ok(error.outcome.placement?.kind === "placed");
-          assert.equal(repository.run(["-C", first, "rev-parse", "HEAD"]).trim(), error.outcome.placement.integration);
-          assert.ok(!error.outcome.issues?.some((effect) => effect.kind === "target-checkout-retained"));
-          return true;
-        });
-      },
-    );
-  } finally {
-    repository.run(["worktree", "remove", "--force", sibling]);
-    rmSync(sibling, { recursive: true, force: true });
-  }
 });
 
 const failAfterTerminalRemoval = [

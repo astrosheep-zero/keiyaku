@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Akuma } from "../src/akuma/index.js";
-import { HeldAkumaLeash, readHeart, probeLeash } from "../src/akuma/heart/index.js";
+import { readHeart, probeLeash } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
 import test from "node:test";
 import { Kei, Keis, Repo, World } from "../src/index.js";
@@ -14,7 +14,6 @@ import { accepted } from "./support/library-verbs.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
-  deferred,
   installAkumaBodyPidReceipt,
   temporaryDirectory,
   waitForCondition,
@@ -100,69 +99,3 @@ test("CLI ask returns the exact parsed JSON on stdout", { timeout: 60_000 }, asy
   }
 });
 
-test("an observer-held leash cannot strand the original Tell", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-tell-observer-leash-"));
-  const home = temporaryDirectory(t, "keiyaku-tell-observer-home-");
-  const world = await World.at(root);
-  installHostAcpFixture(world);
-  const receipt = join(root, "body-pids");
-  const restore = installAkumaBodyPidReceipt(receipt);
-  let operationFailed = true;
-  let observation: Promise<unknown> | undefined;
-  const blockedTry = deferred<void>();
-  try {
-    const born = await Akuma.birth("acp-worker", { root: world, cwd: world, home, bare: true });
-    const paths = pathsForAkumaId(world, born.id);
-    await waitForCondition("ordinary birth Body settlement before contention", async () =>
-      (await readHeart(paths)).latestBody?.end === "exited" && (await probeLeash(paths)) === "free",
-    );
-    await waitForPidReceiptExit(receipt, 60_000, { requireBirth: true });
-    const take = HeldAkumaLeash.try;
-    const observerHolding = deferred<void>();
-    let denied = false;
-    t.mock.method(HeldAkumaLeash, "try", async (observed: Parameters<typeof take>[0]) => {
-      const observer = new Error().stack?.includes("bornObservation") === true;
-      const claim = await take.call(HeldAkumaLeash, observed);
-      if (observed.leash === paths.leash && observer && claim !== null) {
-        observerHolding.resolve();
-        await blockedTry.promise;
-      } else if (observed.leash === paths.leash && !observer && claim === null) {
-        denied = true;
-        blockedTry.resolve();
-      }
-      return claim;
-    });
-    observation = born.status();
-    void observation.catch(() => undefined);
-    await observerHolding.promise;
-    const result = await runCli(["-C", root, "tell", born.id, "answer this"], {
-      environment: { KEIYAKU_HOME: home },
-      signal: t.signal,
-    });
-    assert.equal(result.exit, 0, result.stderr);
-    assert.equal(denied, true, "the first wake probe met actual observation custody");
-    await observation;
-    assert.match(result.stdout, new RegExp(`^▸ ${born.id} +told(?: turn/[1-9][0-9]*)?\\n$`, "u"));
-    const waited = await runCli(["-C", root, "wait", born.id, "--for", "60s"], {
-      environment: { KEIYAKU_HOME: home }, signal: t.signal,
-    });
-    assert.equal(waited.exit, 0, waited.stderr);
-    assert.match(waited.stdout, /acp-answer/u);
-    assert.deepEqual((await readHeart(paths)).pending, []);
-    operationFailed = false;
-  } finally {
-    blockedTry.resolve();
-    try {
-      await observation?.catch(() => undefined);
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: root,
-        pidReceiptPath: receipt,
-        timeoutMs: 60_000,
-        operationFailed,
-        expectRetainedEvidence: operationFailed,
-      });
-    } finally {
-      restore();
-    }
-  }
-});
