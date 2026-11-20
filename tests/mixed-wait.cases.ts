@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -7,14 +8,19 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Akuma, Akumas, Keis, Keiyaku, Repo, World, type InvocationWaitResult } from "../src/index.js";
 import { appendActivity, beginTurn, endTurn, finishBodyIfIdle } from "../src/akuma/heart/index.js";
+import { GIT_REF, readRef } from "../src/git/read-observation.js";
+import { captureLocalContractComposition } from "../src/library/contract-settings.js";
+import { createKeiHandle } from "../src/library/kei.js";
 import { modelOutputSchemas } from "../src/library/model-tools.js";
+import { scopeForRepo } from "../src/library/repo.js";
+import { withScopeAbortSignal } from "../src/protocol/operations.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { bornBody, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
-import { withContractWaitBarrier } from "./support/contract-wait.js";
+import { withContractWaitBarrier, withContractWaitEpochs } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
@@ -39,7 +45,7 @@ async function fixture(t: TestContext) {
     worker.holder.release();
   };
   const amend = async () => accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nWitness this journal change.\n" }));
-  return { world, repository, environment, bound, worker, facet, finish, amend };
+  return { world, repo, environment, bound, worker, facet, finish, amend };
 }
 
 function observations(value: InvocationWaitResult) { return value.members.map(member => member.observation); }
@@ -59,11 +65,54 @@ test("mixed any wakes from either native owner; all retains its original Contrac
     assert.equal(changed.members[0].observation.summary?.title, "Library verbs");
     assert.equal(changed.members[0].observation.summary?.phase, "bound");
 
-    barrier.reset();
-    const all = facet.run("wait", { selectors, completion: "all", timeout: "1200ms" });
-    await barrier.reads();
-    accepted(await f.bound.kei.arc({ body: "# Still waiting\n\nThis is a new journal fact.\n" }));
-    const deadline = await all;
+    const deadline = await withContractWaitEpochs(f.world, async ({ gitPath, observed }) => {
+      const controller = new AbortController();
+      const { signal } = controller;
+      const scope = withScopeAbortSignal(scopeForRepo(f.repo), signal);
+      const writer = createKeiHandle(f.bound.contractId, scope, captureLocalContractComposition());
+      const epoch = async () => {
+        const snapshot = await readRef(scope, GIT_REF);
+        assert.ok(snapshot);
+        return snapshot;
+      };
+      const watchdogMs = 60_000;
+      const timeoutMs = 120_000; // Safety envelope only; the fixture has its own real watchdog.
+      const watchdog = setTimeout(() => controller.abort(new Error("mixed ALL fixture watchdog expired")), watchdogMs);
+      const nativeWait = new AsyncLocalStorage<boolean>();
+      let expire: (() => void) | undefined;
+      const realTimeout = setTimeout;
+      const timer = t.mock.method(globalThis, "setTimeout", (callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+        // Only the scoped invocation's deadline outlasts the fixture watchdog.
+        if (nativeWait.getStore() && ms !== undefined && ms > watchdogMs && ms <= timeoutMs) {
+          expire = callback;
+          timer.mock.restore();
+        }
+        return realTimeout(callback, ms, ...args);
+      });
+      let all: Promise<InvocationWaitResult> | undefined;
+      try {
+        const baseline = await epoch();
+        all = nativeWait.run(true, () => f.facet(gitPath).run("wait", {
+          selectors, completion: "all", timeout: `${timeoutMs}ms`,
+        }, { signal }));
+        await observed(baseline, all);
+        accepted(await writer.arc({ body: "# Still waiting\n\nThis is a new journal fact.\n" }));
+        await observed(await epoch(), all);
+        assert.ok(expire, "native wait armed its deadline");
+        const expiredAt = performance.now() + timeoutMs;
+        const clock = t.mock.method(performance, "now", () => expiredAt, { times: 1 });
+        try { expire(); } finally { clock.mock.restore(); }
+        return await all;
+      } catch (error) {
+        signal.throwIfAborted();
+        throw error;
+      } finally {
+        clearTimeout(watchdog);
+        timer.mock.restore();
+        controller.abort();
+        await all?.catch(() => {});
+      }
+    });
     assert.equal(deadline.reason, "deadline");
     assert.ok(deadline.members[0]?.kind === "contract");
     assert.equal(deadline.members[0].observation.changed, true);
