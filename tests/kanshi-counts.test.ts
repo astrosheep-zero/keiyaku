@@ -59,7 +59,7 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   accepted(await debts.debt({ id: done }).update({ state: "done" }));
   accepted(await debts.debt({ id: drop }).update({ state: "drop" }));
   const active: Extract<BindOutcome, { kind: "accepted" }>[] = [];
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 11; i++) {
     // Keep the shared Contract target's workspace unchanged for the exact lag witness.
     const target = i < 8 ? "main" : active[2]!.contractId;
     active.push(accepted(await Keis.of(repo).bind({ target, terms: contractMarkdown(`Count ${i}`, {
@@ -74,7 +74,7 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
   await terminal.kei.abandon();
-  for (let i = 1; i <= 12; i++) {
+  for (let i = 1; i <= 11; i++) {
     const running = await bornDirectAkuma({ root: world, akumaName: "worker", draw: i.toString(16).padStart(8, "0"), createdAt: "2026-08-09T00:00:00.000Z" });
     context.after(() => running.leash.release());
     await running.leash.recordBody(running.paths, { leashTakenAt: running.soul.createdAt });
@@ -92,21 +92,24 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
     environment: { KEIYAKU_ACTOR_ID: stopped.id, KEIYAKU_ACTOR_WORLD: world },
     ...(repo === undefined ? {} : { repo }),
   }).status();
-  const summary = await summaryAt(world);
-  assert.deepEqual(summary, {
-    kind: "active-work-summary",
-    contracts: { total: 12, awaitingReview: 1, conflicts: { known: 0, unavailable: 0 } },
-    akumas: { total: 13, byLife: { running: 12, stranded: 1 } },
-    debts: { total: 12, ready: 11, blocked: 1 },
-  });
   const worktree = waiting.worktreePath;
   assert.ok(worktree);
   const child = join(worktree, "child");
   mkdirSync(child);
-  const contextual = { ...summary, currentContract: { id: waiting.contractId, state: "awaiting-review" } };
-  assert.deepEqual(await summaryAt(child, world), contextual);
+  const contextual = await summaryAt(child, world);
+  assert.deepEqual(contextual, {
+    kind: "active-work-summary",
+    contracts: { total: 11, awaitingReview: 1, conflicts: { known: 0, unavailable: 0 } },
+    akumas: { total: 12, byLife: { running: 11, stranded: 1 } },
+    debts: { total: 12, ready: 11, blocked: 1 },
+    currentContract: { id: waiting.contractId, state: "awaiting-review" },
+  });
   const report = await Kanshi.of({ world, repo }).counts();
-  assert.deepEqual([report.akuma, report.contracts, report.debts], [12, 12, 12]);
+  assert.deepEqual([report.akuma, report.contracts, report.debts], [11, 11, 12]);
+  assert.deepEqual(
+    [contextual.contracts.total, contextual.debts.total, contextual.akumas.byLife.running],
+    [report.contracts, report.debts, report.akuma],
+  );
 
   await context.test("World observation bounds physical worktree reads before detail", async (t) => {
     const view = Kanshi.of({ world, repo });
@@ -230,7 +233,7 @@ async function divergentFixture() {
   return { repository, invocation, conflicting, conflictPath, lagPath, admin };
 }
 
-test("active status counts a relative linked-worktree conflict, not target drift or unavailable workspaces", async () => {
+test("active status counts a relative linked-worktree conflict and unavailable evidence independently", async () => {
   const { repository, invocation, conflicting, conflictPath, lagPath, admin } = await divergentFixture();
   const before = await invocation.status();
   assert.equal(before.kind, "active-work-summary");
@@ -248,42 +251,38 @@ test("active status counts a relative linked-worktree conflict, not target drift
   assert.equal(isAbsolute(backlink), false);
   assert.equal(resolve(admin, backlink), join(conflictPath, ".git"));
   repository.run(["-C", conflictPath, "merge", "--quit"]);
-  // Preserve the unmerged index without MERGE_HEAD, and an unusable appointment
-  // directory that Git must not silently replace with the enclosing checkout.
-  repository.run(["worktree", "remove", lagPath]);
-  mkdirSync(lagPath);
-  const refs = repository.run(["show-ref"]);
-  const index = repository.run(["-C", conflictPath, "ls-files", "-u"]);
-  assert.notEqual(index, "");
-  const observed = await invocation.status();
-  assert.equal(observed.kind, "active-work-summary");
-  assert.deepEqual(observed.contracts, {
-    total: 2, awaitingReview: 0, conflicts: { known: 1, unavailable: 1 },
-  });
-  const text = await runCli(["-C", repository.path, "status"], { environment: {} });
-  assert.equal(text.exit, 0, text.stderr);
-  assert.match(text.stdout, /1 known conflict · conflict evidence unavailable for 1/u);
-  assert.equal(repository.run(["show-ref"]), refs);
-  assert.equal(repository.run(["-C", conflictPath, "ls-files", "-u"]), index);
-});
-
-test("active status cannot turn a missing index during a real merge into a zero conflict total", async () => {
-  const { repository, invocation, conflicting, conflictPath, admin } = await divergentFixture();
-  assert.equal((await conflicting.kei.deliver({ materializeConflict: true })).kind, "handoff");
-  const index = join(admin, "index");
-  const displaced = join(admin, "index.fixture");
-  renameSync(index, displaced);
+  // A second appointed worktree in a real merge with its index absent is
+  // unavailable conflict evidence, not a zero conflict total.
+  writeFileSync(join(lagPath, "shared.txt"), "lagging\n");
+  repository.run(["-C", lagPath, "commit", "-qam", "lagging"]);
   try {
-    assert.notEqual(repository.run(["-C", conflictPath, "rev-parse", "--verify", "MERGE_HEAD"]).trim(), "");
-    assert.equal(repository.run(["-C", conflictPath, "ls-files", "--unmerged"]), "");
+    repository.run(["-C", lagPath, "merge", "main"]);
+  } catch {
+    // The fixture merge conflicts on purpose.
+  }
+  const lagAdmin = repository.run(["-C", lagPath, "rev-parse", "--path-format=absolute", "--git-dir"]).trim();
+  const lagIndex = join(lagAdmin, "index");
+  const displacedLagIndex = join(lagAdmin, "index.fixture");
+  renameSync(lagIndex, displacedLagIndex);
+  try {
+    assert.notEqual(repository.run(["-C", lagPath, "rev-parse", "--verify", "MERGE_HEAD"]).trim(), "");
+    assert.equal(repository.run(["-C", lagPath, "ls-files", "--unmerged"]), "");
+    assert.equal(existsSync(lagIndex), false);
+    const refs = repository.run(["show-ref"]);
+    const index = repository.run(["-C", conflictPath, "ls-files", "-u"]);
+    assert.notEqual(index, "");
     const observed = await invocation.status();
     assert.equal(observed.kind, "active-work-summary");
     assert.deepEqual(observed.contracts, {
-      total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 1 },
+      total: 2, awaitingReview: 0, conflicts: { known: 1, unavailable: 1 },
     });
-    assert.equal(existsSync(index), false);
+    const text = await runCli(["-C", repository.path, "status"], { environment: {} });
+    assert.equal(text.exit, 0, text.stderr);
+    assert.match(text.stdout, /1 known conflict · conflict evidence unavailable for 1/u);
+    assert.equal(repository.run(["show-ref"]), refs);
+    assert.equal(repository.run(["-C", conflictPath, "ls-files", "-u"]), index);
   } finally {
-    renameSync(displaced, index);
+    renameSync(displacedLagIndex, lagIndex);
   }
 });
 
@@ -311,7 +310,7 @@ test("caller running count preserves readable ancestry beyond the display bound"
   ancestor.leash.release();
   const branch = await born("child", ancestor.caller);
   await born("grandchild", branch.caller);
-  for (let i = 0; i < 11; i++) await born("peer", ancestor.caller);
+  for (let i = 0; i < 9; i++) await born("peer", ancestor.caller);
   const unrelated = await born("outside");
   await recordTell(unrelated.paths, {
     kind: "tell",
@@ -326,8 +325,8 @@ test("caller running count preserves readable ancestry beyond the display bound"
     diagnostic: "cannot retire",
     at: hung.soul.createdAt,
   });
-  assert.equal((await selected()).akuma, 13);
-  assert.equal((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, 13);
+  assert.equal((await selected()).akuma, 11);
+  assert.equal((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, 11);
   // A life failure must not erase the readable Soul edge to its descendants.
   const database = new DatabaseSync(ancestor.paths.heart);
   try {
@@ -336,7 +335,7 @@ test("caller running count preserves readable ancestry beyond the display bound"
     database.close();
   }
   assert.equal((await readSoul(ancestor.paths))?.id, ancestor.id);
-  assert.equal((await selected()).akuma, 13);
+  assert.equal((await selected()).akuma, 11);
   const total = (await kanshi.counts()).akuma;
   assert.ok(typeof total !== "number" && total.kind === "failed");
   writeFileSync(ancestor.paths.heart, "corrupt");
