@@ -1,6 +1,7 @@
 import { decideArc } from "../core/verbs/arc.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import { admitVoidIntent, type IntentOutcome, type MutationOperationInput } from "./operations.js";
+import { admitVoidIntent, type MutationOperationInput } from "./operations.js";
+import type { IntentOutcome } from "./outcome.js";
 
 export async function arcOperation(
   input: MutationOperationInput & Readonly<{ chapter: Readonly<{ title: string; body: string }> }>,

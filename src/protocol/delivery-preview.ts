@@ -23,8 +23,9 @@ import type { ContractState, DeliverData } from "../core/facts/types.js";
 import { observeTargetLag, contractTargetLagSchema } from "../git/workspace.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { deliveryIntegrationSnapshots, prepareDelivery } from "./deliver.js";
+import type { MechanicalPreparationRefusal } from "./deliver.js";
 import { compactScope, compactScopeSchema, requirementProblemSchema, unmetGateProblems } from "./completion.js";
-import type { DocumentDerivation, MechanicalPreparationRefusal, RepositoryScope } from "./operations.js";
+import type { DocumentDerivation, RepositoryScope } from "./operations.js";
 
 const placeableTargetSchema = z
   .strictObject({

@@ -1,14 +1,16 @@
 import { z } from "zod";
-import {
-  activeReasonSchema,
-  declarationReasonSchema,
-  targetLifecycleReasonSchema,
-  targetWorkspaceReasonSchema,
-  preparationReasonSchema,
-  type Retry,
-} from "../protocol/result-reasons.js";
-import { placementReasonSchema } from "../protocol/completion.js";
-import { amendRefusalSchema } from "../protocol/operations.js";
+import type { Retry } from "../protocol/result-reasons.js";
+import type { placementReasonSchema } from "../protocol/completion.js";
+import type {
+  AbandonOutcome,
+  AmendOutcome,
+  ArcOutcome,
+  BindOutcome,
+  DeliverOutcome,
+  DeliveryPreviewOutcome,
+  ReviewOutcome,
+  VerifyOutcome,
+} from "./contract-outcomes.js";
 
 export const nukeConfirmationRefusalSchema = z.strictObject({
   kind: z.literal("nuke-confirmation-mismatch"),
@@ -32,66 +34,19 @@ export type OperationRetries = {
   readonly arc: KeiyakuRetryReason;
   readonly abandon: KeiyakuRetryReason;
 };
-const previewRefusalSchema = z.union([activeReasonSchema, targetLifecycleReasonSchema, declarationReasonSchema]);
-export const operationRefusalSchemas = {
-  bind: z.union([
-    z
-      .strictObject({
-        kind: z.enum([
-          "contract-exists",
-          "invalid-after",
-          "unknown-prerequisite",
-          "invalid-target",
-          "target-missing",
-          "unborn-head",
-          "target-contract-self",
-          "fork-source-missing",
-          "fork-source-unavailable",
-          "fork-source-moved",
-        ]),
-      })
-      .readonly(),
-    targetLifecycleReasonSchema,
-    targetWorkspaceReasonSchema,
-    declarationReasonSchema,
-  ]),
-  amend: z.union([
-    amendRefusalSchema,
-    z.strictObject({ kind: z.enum(["invalid-target", "target-missing"]) }).readonly(),
-    declarationReasonSchema,
-    targetWorkspaceReasonSchema,
-  ]),
-  deliver: z.union([
-    previewRefusalSchema,
-    preparationReasonSchema,
-    z.strictObject({ kind: z.literal("merge-state-present"), worktreePath: z.string().min(1) }).readonly(),
-  ]),
-  verify: z.union([
-    previewRefusalSchema,
-    preparationReasonSchema,
-    z
-      .strictObject({ kind: z.literal("verification-index-out-of-range"), total: z.number().int().nonnegative() })
-      .readonly(),
-  ]),
-  review: z.union([
-    activeReasonSchema,
-    z.strictObject({ kind: z.literal("worktree-missing") }).readonly(),
-    z
-      .strictObject({ kind: z.literal("dirty-submodules"), paths: z.array(z.string().min(1)).min(1).readonly() })
-      .readonly(),
-  ]),
-  "deliver-preview": previewRefusalSchema,
-  arc: activeReasonSchema,
-  abandon: activeReasonSchema,
-} as const;
-export type OperationRefusals = {
-  readonly [K in keyof typeof operationRefusalSchemas]: z.output<(typeof operationRefusalSchemas)[K]>;
-};
-export type ForkSourceRefusal = Readonly<{
-  kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-moved";
-}>;
+type ContractRefusal = Extract<
+  | BindOutcome
+  | AmendOutcome
+  | DeliverOutcome
+  | VerifyOutcome
+  | ReviewOutcome
+  | DeliveryPreviewOutcome
+  | ArcOutcome
+  | AbandonOutcome,
+  { kind: "refused" }
+>["reason"];
 export type KeiyakuRefusal =
-  | OperationRefusals[keyof OperationRefusals]
+  | ContractRefusal
   | NukeConfirmationRefusal
   | NukeConfirmationRequiredRefusal
   | z.output<typeof placementReasonSchema>;

@@ -13,21 +13,14 @@ import {
   resolveContractTarget,
   targetRef,
   targetRepository,
-  targetWorkspaceRefusalSchema,
+  targetWorkspaceCauseSchema,
   type TargetWorkspaceRefusal,
 } from "./target.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
 
-export const checkoutNotFollowableRefusalSchema = z
-  .object({
-    kind: z.literal("checkout-not-followable"),
-    target: z.string().refine((value) => value.trim() !== ""),
-    path: z.string().refine((value) => value.trim() !== ""),
-    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-  })
-  .strict()
-  .readonly();
-export type TargetPlacementRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema> | TargetWorkspaceRefusal;
+export type TargetPlacementRefusal =
+  | TargetWorkspaceRefusal
+  | Readonly<{ kind: "checkout-not-followable"; target: string; path: string; paths: readonly string[] }>;
 export const targetCheckoutEffectSchema = z
   .object({
     kind: z.literal("target-checkout"),
@@ -49,7 +42,7 @@ export const targetWorkspaceLagSchema = z
   .object({
     kind: z.literal("target-workspace-retained"),
     targetContractId: contractIdSchema,
-    reason: targetWorkspaceRefusalSchema.unwrap().shape.reason,
+    reason: targetWorkspaceCauseSchema,
   })
   .strict()
   .readonly();

@@ -1,4 +1,3 @@
-import { snapshotIdSchema } from "./identity.js";
 import { z } from "zod";
 import type { Preparation } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -33,27 +32,19 @@ async function runAllowingNonzero(
   }
 }
 
-export const integrationPreparationRefusalSchema = z.union([
-  z
-    .object({
-      kind: z.literal("integration-failed"),
-      reason: z.enum(["not-based-on-target", "unrelated-histories", "conflict"]),
-      targetHead: snapshotIdSchema,
-      conflictPaths: z
-        .array(z.string().refine((value) => value.trim() !== ""))
-        .readonly()
-        .exactOptional(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("integration-unsupported"),
-    })
-    .strict()
-    .readonly(),
-]);
-export type IntegrationPreparationRefusal = z.infer<typeof integrationPreparationRefusalSchema>;
+export type IntegrationPreparationRefusal =
+  | Readonly<{ kind: "integration-unsupported" }>
+  | Readonly<{
+      kind: "integration-failed";
+      reason: "not-based-on-target" | "unrelated-histories";
+      targetHead: SnapshotId;
+    }>
+  | Readonly<{
+      kind: "integration-failed";
+      reason: "conflict";
+      targetHead: SnapshotId;
+      conflictPaths: readonly string[];
+    }>;
 type IntegrationCoordinates = Readonly<{
   coordinates: ContractCoordinates;
 }>;

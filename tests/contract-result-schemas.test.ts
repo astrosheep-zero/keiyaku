@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, Repo, type ExecutionObservation } from "../src/index.js";
+import { Keis, Keiyaku, Repo, type ExecutionObservation } from "../src/index.js";
 import {
   bindOutcomeSchema,
   amendOutcomeSchema,
@@ -137,8 +137,17 @@ test("delivery, verification, review and preview carry their native wire results
   const review = await kei.review({ verdict: "satisfied", summary: "Schema review passed" }, options);
   assert.equal(review.kind, "accepted");
   assertWireRoundTrip(reviewOutcomeSchema, review);
+  const unknownIndex = await kei.verify({ index: 2 });
+  assert.deepEqual(unknownIndex, {
+    kind: "refused",
+    contractId: kei.id,
+    reason: { kind: "verification-index-out-of-range", total: 1 },
+  });
+  assertWireRoundTrip(Keiyaku.verbs.verify.output, unknownIndex);
+  assert.equal(Keiyaku.verbs.verify.normal.safeParse(unknownIndex).success, false);
   const verify = await kei.verify(undefined, options);
   assert.equal(verify.kind, "accepted");
+  assertWireRoundTrip(Keiyaku.verbs.verify.normal, verify);
   assertWireRoundTrip(verifyOutcomeSchema, verify);
   const deliver = await kei.deliver({ message: "retained delivery intent" }, options);
   assert.equal(deliver.kind, "accepted");

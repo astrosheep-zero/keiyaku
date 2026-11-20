@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { snapshotIdSchema } from "../git/identity.js";
 import type { AttestationData, ChangeId, ContractState, SnapshotId } from "../core/facts/types.js";
-import { activeContract, targetContractRefusal, type ActiveContractRefusal } from "../core/facts/observation.js";
+import {
+  activeContract,
+  targetContractRefusal,
+  type ActiveContractRefusal,
+  type TargetContractRefusal,
+} from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import { holdVerificationSnapshot, materializeScratchCandidate, ScratchMaterializationError } from "../git/scratch.js";
@@ -9,17 +14,20 @@ import { associateVerificationSnapshot } from "../git/repository.js";
 import { projectSettings } from "../settings.js";
 import { executeVerification } from "../verification/execution.js";
 import { contractJournal, observeContractsAt } from "../git/observe.js";
-import { VERIFIED, verificationRequirement, type VerificationDefinition } from "../verification/declaration.js";
-import { prepareDelivery, deliveryIntegrationSnapshots } from "./deliver.js";
+import {
+  VERIFIED,
+  verificationRequirement,
+  type VerificationDeclarationRefusal,
+  type VerificationDefinition,
+} from "../verification/declaration.js";
+import { prepareDelivery, deliveryIntegrationSnapshots, type MechanicalPreparationRefusal } from "./deliver.js";
 import { admitIntent } from "./intent.js";
 import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import { runBoundedAttempts, type ProtocolResult } from "./run.js";
-import type { DocumentDerivation, MechanicalPreparationRefusal, MutationOperationInput } from "./operations.js";
-import { timestamp } from "./operations.js";
+import { timestamp, type DocumentDerivation, type MutationOperationInput } from "./operations.js";
 import { executionStop, type ContractCheckpoint } from "./progress.js";
-import { verifyRefusalSchema, deliverRefusalSchema, verificationDeclarationRefusalSchema } from "./operations.js";
 import { placementSchema, normalPlacementSchema } from "./completion.js";
-import { activeReasonSchema, retrySchema, compactRetry, compactReason, type Retry } from "./result-reasons.js";
+import { activeReasonSchema, retrySchema, compactRetry, type Retry } from "./result-reasons.js";
 
 const checkCoordinate = {
   index: z.number().int().positive(),
@@ -105,10 +113,11 @@ export type VerifyValue = z.output<typeof verifyValueSchema>;
 type VerifyAcceptedValue = Readonly<{ snapshot: SnapshotId; checks: readonly VerificationCheck[] }>;
 
 type VerifyRefusal =
-  | z.infer<typeof verifyRefusalSchema>
-  | z.infer<typeof deliverRefusalSchema>
+  | Readonly<{ kind: "verification-index-out-of-range"; total: number }>
+  | ActiveContractRefusal
+  | TargetContractRefusal
   | MechanicalPreparationRefusal
-  | z.infer<typeof verificationDeclarationRefusalSchema>;
+  | VerificationDeclarationRefusal;
 export type VerificationMode = "optimistic" | "strict";
 
 type VerifyOperationInput = MutationOperationInput &
@@ -333,7 +342,7 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
               ? "reused"
               : refusal.kind === "candidate-unavailable" || refusal.kind === "retry"
                 ? refusal
-                : { kind: "refused", reason: compactReason(refusal) };
+                : { kind: "refused", reason: refusal };
         } else {
           admission = result === null ? { kind: "cancelled" } : compactRetry(result);
         }

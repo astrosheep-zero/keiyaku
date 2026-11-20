@@ -2,7 +2,8 @@ import { decideAbandon } from "../core/verbs/abandon.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
 import type { GitTreeSelection } from "../git/read-observation.js";
 import type { CompanionDecorator } from "./run.js";
-import { admitVoidIntent, type IntentOutcome, type MutationOperationInput } from "./operations.js";
+import { admitVoidIntent, type MutationOperationInput } from "./operations.js";
+import type { IntentOutcome } from "./outcome.js";
 
 export async function abandonOperation(
   input: MutationOperationInput &

@@ -24,7 +24,7 @@ import {
   type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted } from "./outcome.js";
+import { admitted, type IntentOutcome } from "./outcome.js";
 import {
   privateStateSeatAttempt,
   preparationIsCurrent,
@@ -34,8 +34,7 @@ import {
   type ProtocolTerminal,
   type SpentPreparation,
 } from "./run.js";
-import type { MutationOperationInput, IntentOutcome } from "./operations.js";
-import { timestamp } from "./operations.js";
+import { timestamp, type MutationOperationInput } from "./operations.js";
 
 type AmendOperationInput = MutationOperationInput &
   Readonly<{

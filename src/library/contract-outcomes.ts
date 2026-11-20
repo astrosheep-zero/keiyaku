@@ -1,12 +1,20 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { retrySchema } from "../protocol/result-reasons.js";
+import {
+  activeReasonSchema,
+  declarationReasonSchema,
+  preparationReasonSchema,
+  retrySchema,
+  targetLifecycleReasonSchema,
+  targetWorkspaceReasonSchema,
+  worktreeMissingReasonSchema,
+} from "../protocol/result-reasons.js";
 import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { placementSchema } from "../protocol/completion.js";
 import { verifyValueSchema, verifyNormalValueSchema } from "../protocol/verify.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
-import type { IntentOutcome } from "../protocol/operations.js";
+import type { IntentOutcome } from "../protocol/outcome.js";
 import { deliveredValueSchema } from "./delivery.js";
 import { continuationReportSchema, continuationNormalReportSchema } from "./continuation.js";
 import type { InvocationAccumulator } from "./invocation.js";
@@ -21,7 +29,6 @@ import {
   localIssueSchema,
   previewIssueSchema,
 } from "./outcome.js";
-import { operationRefusalSchemas } from "./refusal.js";
 import { regionOverlapResultSchema } from "./region.js";
 import type { ContractId } from "../core/facts/types.js";
 
@@ -63,7 +70,31 @@ export const bindNormalOutcomeSchema = acceptedOutcomeSchema(
   { ...bindFields, ...localRecoveries },
   optionalLocalIssueSchema,
 );
-const bindOutcomes = operationOutcomeSchema(bindFields, operationRefusalSchemas.bind, localIssueSchema);
+const bindOutcomes = operationOutcomeSchema(
+  bindFields,
+  z.union([
+    z
+      .strictObject({
+        kind: z.enum([
+          "contract-exists",
+          "invalid-after",
+          "unknown-prerequisite",
+          "invalid-target",
+          "target-missing",
+          "unborn-head",
+          "target-contract-self",
+          "fork-source-missing",
+          "fork-source-unavailable",
+          "fork-source-moved",
+        ]),
+      })
+      .readonly(),
+    targetLifecycleReasonSchema,
+    targetWorkspaceReasonSchema,
+    declarationReasonSchema,
+  ]),
+  localIssueSchema,
+);
 export const bindOutcomeSchema = z.union([
   bindOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
   bindOutcomes.options[1].unwrap().omit({ contractId: true }).readonly(),
@@ -71,16 +102,48 @@ export const bindOutcomeSchema = z.union([
 ]);
 export const amendOutcomeSchema = operationOutcomeSchema(
   { ...amendFields, ...localRecoveries },
-  operationRefusalSchemas.amend,
+  z.union([
+    activeReasonSchema,
+    z
+      .strictObject({
+        kind: z.enum([
+          "terms-moved",
+          "unknown-prerequisite",
+          "cyclic-prerequisite",
+          "cyclic-target",
+          "invalid-target",
+          "target-missing",
+        ]),
+      })
+      .readonly(),
+    targetLifecycleReasonSchema,
+    declarationReasonSchema,
+    targetWorkspaceReasonSchema,
+  ]),
   localIssueSchema,
 );
+const previewRefusalSchema = z.union([activeReasonSchema, targetLifecycleReasonSchema, declarationReasonSchema]);
 export const deliverOutcomeSchema = z.union([
-  operationOutcomeSchema(deliveredValueSchema.unwrap().shape, operationRefusalSchemas.deliver, invocationIssueSchema),
+  operationOutcomeSchema(
+    deliveredValueSchema.unwrap().shape,
+    z.union([
+      previewRefusalSchema,
+      preparationReasonSchema,
+      z.strictObject({ kind: z.literal("merge-state-present"), worktreePath: z.string().min(1) }).readonly(),
+    ]),
+    invocationIssueSchema,
+  ),
   handoffOutcomeSchema,
 ]);
 const verifyOutcomes = operationOutcomeSchema(
   { ...verifyValueSchema.unwrap().shape, continuation: continuationReportSchema.exactOptional() },
-  operationRefusalSchemas.verify,
+  z.union([
+    previewRefusalSchema,
+    preparationReasonSchema,
+    z
+      .strictObject({ kind: z.literal("verification-index-out-of-range"), total: z.number().int().nonnegative() })
+      .readonly(),
+  ]),
   invocationIssueSchema,
 );
 export const verifyNormalOutcomeSchema = acceptedOutcomeSchema(
@@ -90,19 +153,21 @@ export const verifyNormalOutcomeSchema = acceptedOutcomeSchema(
 export const verifyOutcomeSchema = z.union([verifyOutcomes.options[0], verifyOutcomes.options[1]]);
 export const reviewOutcomeSchema = operationOutcomeSchema(
   reviewFields,
-  operationRefusalSchemas.review,
+  z.union([
+    activeReasonSchema,
+    worktreeMissingReasonSchema,
+    z
+      .strictObject({ kind: z.literal("dirty-submodules"), paths: z.array(z.string().min(1)).min(1).readonly() })
+      .readonly(),
+  ]),
   invocationIssueSchema,
 );
 export const arcOutcomeSchema = operationOutcomeSchema(
   { chapter: z.number().int().positive(), ...localRecoveries },
-  operationRefusalSchemas.arc,
+  activeReasonSchema,
   localIssueSchema,
 );
-export const abandonOutcomeSchema = operationOutcomeSchema(
-  localRecoveries,
-  operationRefusalSchemas.abandon,
-  localIssueSchema,
-);
+export const abandonOutcomeSchema = operationOutcomeSchema(localRecoveries, activeReasonSchema, localIssueSchema);
 const previewIssues = { issues: z.array(previewIssueSchema).min(1).readonly().exactOptional() };
 export const deliveryPreviewOutcomeSchema = z.union([
   deliveryPreviewReportSchema.options[0].unwrap().extend(previewIssues).readonly(),
@@ -111,7 +176,7 @@ export const deliveryPreviewOutcomeSchema = z.union([
     .strictObject({
       kind: z.literal("refused"),
       contractId: contractIdSchema,
-      reason: operationRefusalSchemas["deliver-preview"],
+      reason: previewRefusalSchema,
     })
     .readonly(),
 ]);
@@ -132,7 +197,7 @@ export type DeliveryPreviewOutcome = z.output<typeof deliveryPreviewOutcomeSchem
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
 
-type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
+type AcceptedIntent<Value> = Extract<IntentOutcome<Value, never>, { kind: "accepted" }>;
 export function retainAdmission<Value>(
   accumulator: InvocationAccumulator,
   contract: ContractId,

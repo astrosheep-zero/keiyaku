@@ -262,10 +262,15 @@ export class Kei {
       });
       // No requested change is the same answer as before: an accepted amendment that changed nothing.
       if (admission.kind === "unchanged") return { kind: "unchanged", contractId: this.id };
-      if (admission.kind !== "accepted")
-        return admission.kind === "refused"
-          ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
-          : { contractId: this.id, ...compactRetry(admission.reason) };
+      if (admission.kind === "retry") return { contractId: this.id, ...compactRetry(admission.reason) };
+      if (admission.kind === "refused") {
+        const { refusal } = admission;
+        return {
+          kind: "refused",
+          contractId: this.id,
+          reason: refusal.kind === "target-workspace-unavailable" ? compactReason(refusal) : refusal,
+        };
+      }
       const changes = {
         ...changedAmendTerms(admission.value.source, admission.value.terms),
         ...(admission.value.target === undefined ? {} : { target: targetName(admission.value.target) }),
@@ -316,8 +321,14 @@ export class Kei {
             conflictPaths: outcome.conflictPaths,
             handoffBase: outcome.handoffBase,
           };
-        if (outcome.kind === "refused")
-          return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
+        if (outcome.kind === "refused") {
+          const { refusal } = outcome;
+          const reason =
+            refusal.kind === "target-workspace-unavailable" || refusal.kind === "integration-failed"
+              ? compactReason(refusal)
+              : refusal;
+          return { kind: "refused", contractId: this.id, reason };
+        }
         if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
         const { leading, ...value } = outcome.value;
         requireMatchingDeliveryLeading(leading, accumulator, this.id);
@@ -370,8 +381,14 @@ export class Kei {
           ...(index === undefined ? {} : { index }),
           ...(scope.signal === undefined ? {} : { signal: scope.signal }),
         });
-        if (outcome.kind === "refused")
-          return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
+        if (outcome.kind === "refused") {
+          const { refusal } = outcome;
+          const reason =
+            refusal.kind === "target-workspace-unavailable" || refusal.kind === "integration-failed"
+              ? compactReason(refusal)
+              : refusal;
+          return { kind: "refused", contractId: this.id, reason };
+        }
         const trailing =
           scope.signal?.aborted || outcome.checkpoint === undefined
             ? undefined
@@ -450,7 +467,7 @@ export class Kei {
       ).result;
       if (admission.kind !== "accepted")
         return admission.kind === "refused"
-          ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
+          ? { kind: "refused", contractId: this.id, reason: admission.refusal }
           : { contractId: this.id, ...compactRetry(admission.reason) };
       retainAdmission(accumulator, this.id, admission);
       await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
@@ -474,7 +491,7 @@ export class Kei {
       });
       if (admission.kind !== "accepted")
         return admission.kind === "refused"
-          ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
+          ? { kind: "refused", contractId: this.id, reason: admission.refusal }
           : { contractId: this.id, ...compactRetry(admission.reason) };
       retainAdmission(accumulator, this.id, admission);
       await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);

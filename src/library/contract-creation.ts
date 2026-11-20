@@ -4,8 +4,9 @@ import { targetName, type ContractId } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { BindTargetSelection } from "../protocol/bind.js";
-import type { IntentOutcome, RepositoryScope } from "../protocol/operations.js";
+import type { RepositoryScope } from "../protocol/operations.js";
+import type { IntentOutcome } from "../protocol/outcome.js";
+import type { BindOperationRefusal, BindTargetSelection } from "../protocol/bind.js";
 import { executionStop, isOperationalStop } from "../protocol/progress.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
@@ -83,7 +84,7 @@ export async function bindKei(
       sourceId: forkOf,
       ...(target === undefined ? {} : { target }),
     });
-    if (fork.kind === "refused") return { kind: "refused", reason: compactReason(fork.refusal) };
+    if (fork.kind === "refused") return { kind: "refused", reason: fork.refusal };
     return await bindAnswer(context, fork.admission, fork.document.region);
   });
 }
@@ -96,18 +97,19 @@ type BindContext = Readonly<{
   handle: (id: ContractId) => Kei;
 }>;
 
-async function bindAnswer<
-  Value extends { contractId: ContractId },
-  Refusal extends Parameters<typeof compactReason>[0],
->(
+async function bindAnswer(
   { accumulator, scope, channel, hooks, handle }: BindContext,
-  leading: IntentOutcome<Value, Refusal>,
+  leading: IntentOutcome<Readonly<{ contractId: ContractId }>, BindOperationRefusal>,
   region: Parameters<typeof observeRegion>[3],
 ): Promise<BindOutcome> {
-  if (leading.kind !== "accepted")
-    return leading.kind === "refused"
-      ? { kind: "refused", reason: compactReason(leading.refusal) }
-      : compactRetry(leading.reason);
+  if (leading.kind === "retry") return compactRetry(leading.reason);
+  if (leading.kind === "refused") {
+    const { refusal } = leading;
+    return {
+      kind: "refused",
+      reason: refusal.kind === "target-workspace-unavailable" ? compactReason(refusal) : refusal,
+    };
+  }
   const id = leading.value.contractId;
   retainAdmission(accumulator, id, leading);
   const bind = accumulator.firstFact("bind");

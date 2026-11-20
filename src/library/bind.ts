@@ -12,7 +12,6 @@ import { admitWithDebtHolderFence, claimDebtHolder } from "../settlement/holder.
 import type { ProtocolProgress } from "../protocol/progress.js";
 import type { DebtId } from "../debt/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
-import type { ForkSourceRefusal } from "./refusal.js";
 import { gitObjectIdForSnapshot } from "../git/identity.js";
 import { KeiyakuError } from "./outcome.js";
 import { contractTerms, documentDerivation } from "./input.js";
@@ -84,6 +83,9 @@ async function attemptCandidates(input: BindAttemptInput): Promise<Awaited<Retur
   });
 }
 
+type ForkSourceRefusal = Readonly<{
+  kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-moved";
+}>;
 type ForkBindAdmission = Readonly<{
   kind: "document";
   document: ReturnType<typeof decodeContractDocument>;

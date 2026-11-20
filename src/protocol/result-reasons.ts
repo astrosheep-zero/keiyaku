@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { targetWorkspaceRefusalSchema } from "../git/target.js";
-import type { IntentOutcome } from "./operations.js";
+import type { IntegrationPreparationRefusal } from "../git/integration.js";
+import { targetWorkspaceCauseSchema, type TargetWorkspaceRefusal } from "../git/target.js";
+import type { MechanicalPreparationRefusal } from "./deliver.js";
 import type { ProtocolTerminal } from "./run.js";
 
 const paths = z.array(z.string().min(1)).min(1).readonly();
@@ -26,7 +27,7 @@ export const targetWorkspaceReasonSchema = z
   .strictObject({
     kind: z.literal("target-workspace-unavailable"),
     targetContractId: contractIdSchema,
-    reason: targetWorkspaceRefusalSchema.unwrap().shape.reason,
+    reason: targetWorkspaceCauseSchema,
   })
   .readonly();
 export const retrySchema = z.union([
@@ -50,9 +51,11 @@ export const integrationProblemSchema = z.union([
     .readonly(),
   z.strictObject({ kind: z.literal("integration-unsupported") }).readonly(),
 ]);
+export const worktreeMissingReasonSchema = z.strictObject({ kind: z.literal("worktree-missing") }).readonly();
 export const preparationReasonSchema = z.union([
   targetWorkspaceReasonSchema,
-  z.strictObject({ kind: z.enum(["target-missing", "worktree-missing"]) }).readonly(),
+  z.strictObject({ kind: z.literal("target-missing") }).readonly(),
+  worktreeMissingReasonSchema,
   z
     .strictObject({
       kind: z.literal("dirty-workspace"),
@@ -70,43 +73,30 @@ export const checkoutCollisionSchema = z
     paths,
   })
   .readonly();
-type PreparationReason = z.output<typeof preparationReasonSchema>;
 
-type RawReason =
-  | Extract<IntentOutcome<unknown>, { kind: "refused" }>["refusal"]
-  | z.output<typeof checkoutCollisionSchema>
-  | Readonly<{ kind: "fork-source-missing" | "fork-source-unavailable" }>;
-export type CompactReason<R> = R extends { kind: infer Kind }
-  ? Kind extends string
-    ? CompactReasonKind<R & { kind: Kind }, Kind>
-    : never
-  : never;
-type CompactReasonKind<R, Kind extends string> = Kind extends "target-workspace-unavailable"
-  ? Omit<R, "contractId"> & Readonly<{ targetContractId: R extends { contractId: infer Id } ? Id : never }>
-  : Kind extends "integration-failed"
-    ? Exclude<z.output<typeof integrationProblemSchema>, { kind: "integration-unsupported" }>
-    : R;
+type IntegrationFailure = Extract<IntegrationPreparationRefusal, { kind: "integration-failed" }>;
+type TargetWorkspaceReason = z.output<typeof targetWorkspaceReasonSchema>;
+type IntegrationReason = Exclude<z.output<typeof integrationProblemSchema>, { kind: "integration-unsupported" }>;
 
-/** Project a reason once at the native owner, retaining only independent subjects. */
-export function compactReason<R extends RawReason>(reason: R): CompactReason<R>;
-export function compactReason(reason: RawReason): CompactReason<RawReason> {
-  switch (reason.kind) {
-    case "target-workspace-unavailable":
-      return { kind: reason.kind, targetContractId: reason.contractId, reason: reason.reason };
-    case "integration-failed":
-      if (reason.reason === "conflict") {
-        if (reason.conflictPaths === undefined) throw new Error("integration conflict requires its witnessed paths");
-        return { kind: "integration-conflict", targetHead: reason.targetHead, conflictPaths: reason.conflictPaths };
-      }
-      return { kind: reason.reason, targetHead: reason.targetHead };
-    default:
-      return reason;
-  }
+/** Only the two reasons whose evidence changes at the public boundary. */
+export function compactReason(reason: TargetWorkspaceRefusal): TargetWorkspaceReason;
+export function compactReason(
+  reason: TargetWorkspaceRefusal | IntegrationFailure,
+): TargetWorkspaceReason | IntegrationReason;
+export function compactReason(
+  reason: TargetWorkspaceRefusal | IntegrationFailure,
+): TargetWorkspaceReason | IntegrationReason {
+  if (reason.kind === "target-workspace-unavailable")
+    return { kind: reason.kind, targetContractId: reason.contractId, reason: reason.reason };
+  if (reason.reason === "conflict")
+    return { kind: "integration-conflict", targetHead: reason.targetHead, conflictPaths: reason.conflictPaths };
+  return { kind: reason.reason, targetHead: reason.targetHead };
 }
 
-/** Delivery preparation judges only mechanical refusal; conflicts and checkout judgement never reach it. */
 export function compactPreparationReason(
-  reason: import("./operations.js").MechanicalPreparationRefusal,
-): PreparationReason {
-  return compactReason(reason);
+  reason: MechanicalPreparationRefusal,
+): z.output<typeof preparationReasonSchema> {
+  return reason.kind === "target-workspace-unavailable" || reason.kind === "integration-failed"
+    ? compactReason(reason)
+    : reason;
 }

@@ -286,6 +286,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/result-reasons.ts"),
         any("protocol/deliver.ts", ["prepareDelivery", "deliveryIntegrationSnapshots"]),
         any("verification/declaration.ts", ["VERIFIED", "verificationRequirement"]),
+        types("protocol/deliver.ts", ["MechanicalPreparationRefusal"]),
         any("protocol/outcome.ts", ["accepted"]),
         runtime("protocol/completion.ts", [
           "compactScope",
@@ -368,10 +369,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/operations.ts",
       allow: [
         ...protocolOwner.allow.filter((rule) => rule.target !== "git/**"),
-        any("git/integration.ts"),
-        any("git/target.ts"),
         runtime("git/identity.ts", ["contractIdSchema", "snapshotIdSchema", "changeIdSchema"]),
-        any("git/tender.ts"),
         any("git/observe.ts"),
         any("git/process.ts"),
         any("git/repository.ts"),
@@ -379,8 +377,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/scratch.ts"),
         any("git/workspace.ts"),
         any("git/private-state-seat.ts"),
-        types("git/target-placement.ts"),
-        runtime("git/target-placement.ts", ["checkoutNotFollowableRefusalSchema"]),
       ],
       deny: [any("core/facts/gate.ts")],
     },
@@ -517,6 +513,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [...contractOwner.allow, runtime("bounded-list.ts", ["lifecycleSelection"])],
       deny: contractOwner.deny,
     },
+    {
+      source: "library/contract-outcomes.ts",
+      allow: [...contractOwner.allow, types("protocol/outcome.ts", ["IntentOutcome"])],
+      deny: contractOwner.deny,
+    },
     { source: "library/contract*.ts", ...contractOwner },
     { source: "library/contract/**", ...contractOwner },
     {
@@ -563,8 +564,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         ...libraryOwner.allow,
         runtime("protocol/run.ts", ["protocolTerminalSchema"]),
-        types("protocol/completion.ts", ["Placement"]),
-        runtime("protocol/completion.ts", ["placementReasonSchema"]),
+        types("protocol/completion.ts", ["Placement", "placementReasonSchema"]),
       ],
       deny: libraryOwner.deny.filter((rule) => rule.target !== "protocol/run.ts"),
     },

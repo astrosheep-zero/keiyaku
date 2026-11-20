@@ -4,22 +4,27 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { contractId, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
 import { readPlaceRegister } from "../workspace-place.js";
-import { contractIdSchema, mintSnapshotId } from "./identity.js";
+import { mintSnapshotId } from "./identity.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import { commonGitDirectory, currentBranch, registeredWorktrees, worktreeGitDirectory } from "./repository.js";
 import { workspaceMergeStatePresent, worktreePath } from "./workspace.js";
 
 export type ContractDestination = Exclude<ContractTarget, string>;
-export const targetWorkspaceRefusalSchema = z
-  .object({
-    kind: z.literal("target-workspace-unavailable"),
-    contractId: contractIdSchema,
-    reason: z.enum(["unappointed", "missing", "association", "replaced", "attached", "uncommitted", "operation"]),
-  })
-  .strict()
-  .readonly();
-export type TargetWorkspaceRefusal = z.infer<typeof targetWorkspaceRefusalSchema>;
-type TargetWorkspaceReason = TargetWorkspaceRefusal["reason"];
+export const targetWorkspaceCauseSchema = z.enum([
+  "unappointed",
+  "missing",
+  "association",
+  "replaced",
+  "attached",
+  "uncommitted",
+  "operation",
+]);
+type TargetWorkspaceReason = z.output<typeof targetWorkspaceCauseSchema>;
+export type TargetWorkspaceRefusal = Readonly<{
+  kind: "target-workspace-unavailable";
+  contractId: ContractId;
+  reason: TargetWorkspaceReason;
+}>;
 type TargetResolution =
   | Readonly<{ kind: "resolved"; target: ContractDestination; path: string; head: SnapshotId }>
   | Readonly<{ kind: "refused"; refusal: TargetWorkspaceRefusal }>;

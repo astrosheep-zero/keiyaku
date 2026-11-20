@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { contractState } from "../core/facts/observation.js";
 import type { BindData, ContractHead, ContractId, ContractTarget, SnapshotId } from "../core/facts/types.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
@@ -11,12 +10,7 @@ import {
 } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import {
-  resolveContractTarget,
-  targetRef,
-  targetWorkspaceRefusalSchema,
-  type TargetWorkspaceRefusal,
-} from "../git/target.js";
+import { resolveContractTarget, targetRef, type TargetWorkspaceRefusal } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import {
   VERIFIED,
@@ -32,19 +26,6 @@ import type { ProtocolProgress } from "./progress.js";
 
 export type { BindRefusal } from "../core/verbs/bind.js";
 export type { BindTargetSelection };
-export const targetInputRefusalSchema = z.union([
-  z
-    .object({ kind: z.enum(["invalid-target", "target-missing", "unborn-head"]) })
-    .strict()
-    .readonly(),
-  targetWorkspaceRefusalSchema,
-]);
-type TargetInputRefusal = z.infer<typeof targetInputRefusalSchema>;
-export const forkSourceMovedRefusalSchema = z
-  .object({ kind: z.literal("fork-source-moved") })
-  .strict()
-  .readonly();
-type ForkSourceMovedRefusal = z.infer<typeof forkSourceMovedRefusalSchema>;
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;
@@ -64,7 +45,11 @@ type BindOperationInput = Readonly<{
   }>;
 }>;
 
-type BindFailure = TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal;
+type BindFailure =
+  | TargetWorkspaceRefusal
+  | VerificationDeclarationRefusal
+  | Readonly<{ kind: "target-missing" | "unborn-head" | "fork-source-moved" }>;
+export type BindOperationRefusal = BindRefusal | BindFailure | Readonly<{ kind: "invalid-target" }>;
 type BindPreparation = BindInput<BindFailure>["preparation"];
 type PreparedBind = Readonly<{
   preparation: BindPreparation;
@@ -123,7 +108,7 @@ async function prepareBind(
 
 export async function bindOperation(
   input: BindOperationInput,
-): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | BindFailure>> {
+): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindOperationRefusal>> {
   const selection =
     input.targetSelection.kind === "explicit"
       ? await selectExplicitTarget(input.scope, input.targetSelection.target)

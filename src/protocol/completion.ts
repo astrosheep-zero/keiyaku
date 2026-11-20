@@ -213,9 +213,10 @@ function placementConclusion(result: Exclude<PlacementAttempt, { kind: "accepted
   switch (result.kind) {
     case "refused": {
       const reason = result.refusal;
-      return reason.kind === "gates-unsatisfied"
-        ? { kind: reason.kind, unmet: unmetGateProblems(reason.unmet) }
-        : compactReason(reason);
+      if (reason.kind === "gates-unsatisfied") return { kind: reason.kind, unmet: unmetGateProblems(reason.unmet) };
+      return reason.kind === "target-workspace-unavailable" || reason.kind === "integration-failed"
+        ? compactReason(reason)
+        : reason;
     }
     case "placement-failed":
       return { kind: "failed", diagnostic: result.diagnostic };

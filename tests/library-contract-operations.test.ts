@@ -1,4 +1,4 @@
-import { present, accepted, assertRefused } from "./support/library-verbs.js";
+import { present, accepted } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -21,7 +21,8 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { Kei, Keis, Repo, type ContractDetail } from "../src/index.js";
+import { Kei, Keis, Keiyaku, Repo, type ContractDetail } from "../src/index.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { contractSummarySchema } from "../src/protocol/read/status.js";
 import {
   appointedWorktreePath,
@@ -436,11 +437,13 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
     const journal = await readRef(git, GIT_REF);
-    await assertRefused(() => contract.deliver(), {
-      kind: "integration-conflict",
-      targetHead,
-      conflictPaths: ["a.txt", "z.txt"],
+    const refused = await contract.deliver();
+    assert.deepEqual(refused, {
+      kind: "refused",
+      contractId: contract.id,
+      reason: { kind: "integration-conflict", targetHead, conflictPaths: ["a.txt", "z.txt"] },
     });
+    assertWireRoundTrip(Keiyaku.verbs.deliver.output, refused);
     const state = present(await contract.state());
     assert.equal(state.delivery, null);
     assert.equal(state.terminal, null);

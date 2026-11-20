@@ -9,12 +9,14 @@ import {
   planIntegration,
   reusableIntegrationSnapshot,
   worktreeChangeId,
+  type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import {
   captureTender,
   dirtyTenderRefusal,
   materializeTenderSnapshot,
   prepareDeliveryCommitMetadata,
+  type DirtyWorkspaceRefusal,
   type TenderCapture,
 } from "../git/tender.js";
 import {
@@ -61,13 +63,7 @@ import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attem
 import type { AttemptContext } from "../core/decide.js";
 import type { LeadingOutcome } from "./outcome.js";
 import { readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
-import type {
-  DeliverConflictRefusal,
-  DeliveryPreparationRefusal,
-  MechanicalPreparationRefusal,
-  MutationOperationInput,
-} from "./operations.js";
-import { timestamp } from "./operations.js";
+import { timestamp, type MutationOperationInput } from "./operations.js";
 
 /** Known prospective and delivered integrations, newest first, without giving Git producer vocabulary. */
 export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
@@ -109,13 +105,18 @@ type DeliverOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
+export type MechanicalPreparationRefusal =
+  | TargetWorkspaceRefusal
+  | DirtyWorkspaceRefusal
+  | IntegrationPreparationRefusal
+  | Readonly<{ kind: "worktree-missing" }>
+  | Readonly<{ kind: "target-missing" }>;
+type IntegrationConflictRefusal = Extract<IntegrationPreparationRefusal, { reason: "conflict" }>;
 type DeliveryFailure =
-  | DeliveryPreparationRefusal
+  | MechanicalPreparationRefusal
+  | Readonly<{ kind: "merge-state-present"; worktreePath: string }>
   | import("../verification/declaration.js").VerificationDeclarationRefusal;
-type DeliverOperationRefusal =
-  | Exclude<DeliverRefusal, { kind: "document-moved" }>
-  | DeliveryFailure
-  | DeliverConflictRefusal;
+type DeliverOperationRefusal = Exclude<DeliverRefusal, { kind: "document-moved" }> | DeliveryFailure;
 type DeliveryDecision = DeliverInput<DeliveryFailure>;
 type DeliveryResult =
   | Exclude<ProtocolResult<DeliverOperationRefusal>, AcceptedAdmission>
@@ -494,7 +495,7 @@ type ConflictProjection =
 async function projectConflict(
   input: DeliverOperationInput,
   handoff: ConflictHandoff,
-  conflict: DeliverConflictRefusal,
+  conflict: IntegrationConflictRefusal,
 ): Promise<ConflictProjection> {
   const { scope, contractId } = input;
   const { place, path, previousHead, handoffBase } = handoff;
@@ -552,19 +553,11 @@ async function attemptDelivery(
       attempt,
     });
   });
-  if (seated.kind !== "refused") return seated;
+  if (seated.kind !== "refused" || prepared?.handoff === undefined) return seated;
   const { refusal } = seated;
-  if (refusal.kind !== "integration-failed" || refusal.reason !== "conflict") return seated;
-  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
-  const conflict: DeliverConflictRefusal = {
-    kind: refusal.kind,
-    reason: refusal.reason,
-    targetHead: refusal.targetHead,
-    conflictPaths: refusal.conflictPaths,
-  };
-  return prepared?.handoff === undefined
-    ? { kind: "refused", refusal: conflict }
-    : await projectConflict(input, prepared.handoff, conflict);
+  return refusal.kind === "integration-failed" && refusal.reason === "conflict"
+    ? await projectConflict(input, prepared.handoff, refusal)
+    : seated;
 }
 
 export async function admitDeliveryOperation(

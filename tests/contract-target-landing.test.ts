@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, Repo, Settings } from "../src/index.js";
+import { Keis, Keiyaku, Repo, Settings } from "../src/index.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 import { cliJson } from "./support/cli-fixtures.js";
@@ -223,11 +224,11 @@ test("fork inherits the exact target incarnation and refuses a replacement", asy
   raw.run(["worktree", "remove", "--force", path]);
   raw.run(["worktree", "add", "--quiet", "--detach", path, head]);
   const refused = await contracts.bind({ forkOf: source.id });
-  assert.equal(refused.kind, "refused", JSON.stringify(refused));
-  if (refused.kind === "refused") {
-    assert.equal(refused.reason.kind, "target-workspace-unavailable");
-    if (refused.reason.kind === "target-workspace-unavailable") assert.equal(refused.reason.reason, "replaced");
-  }
+  assert.deepEqual(refused, {
+    kind: "refused",
+    reason: { kind: "target-workspace-unavailable", targetContractId: parentId, reason: "replaced" },
+  });
+  assertWireRoundTrip(Keiyaku.verbs.bind.output, refused);
 });
 
 test("explicit retarget recovers a child of an accepted or abandoned parent with fresh verification", async (t) => {

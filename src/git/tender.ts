@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
@@ -15,26 +14,11 @@ type TenderCaptureCoordinates = Readonly<{
   captureMergeState?: boolean;
 }>;
 
-export const worktreeMissingRefusalSchema = z
-  .object({ kind: z.literal("worktree-missing") })
-  .strict()
-  .readonly();
-type WorktreeMissingRefusal = z.infer<typeof worktreeMissingRefusalSchema>;
-export const dirtyWorkspaceRefusalSchema = z
-  .object({
-    kind: z.literal("dirty-workspace"),
-    paths: z
-      .array(z.string().refine((value) => value.trim() !== ""))
-      .readonly()
-      .exactOptional(),
-    submodules: z
-      .array(z.string().refine((value) => value.trim() !== ""))
-      .readonly()
-      .exactOptional(),
-  })
-  .strict()
-  .readonly();
-export type DirtyWorkspaceRefusal = z.infer<typeof dirtyWorkspaceRefusalSchema>;
+export type DirtyWorkspaceRefusal = Readonly<{
+  kind: "dirty-workspace";
+  paths?: readonly string[];
+  submodules?: readonly string[];
+}>;
 export type TenderCapture = WorkspaceTree & Readonly<{ mergeHead?: SnapshotId }>;
 
 async function workspaceExists(repository: GitRepository, path: string): Promise<boolean> {
@@ -54,7 +38,7 @@ function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates
 export async function captureTender(
   repository: GitRepository,
   input: TenderCaptureCoordinates,
-): Promise<Preparation<TenderCapture, WorktreeMissingRefusal>> {
+): Promise<Preparation<TenderCapture, Readonly<{ kind: "worktree-missing" }>>> {
   const workspace = workspaceFor(repository, input);
   if (workspace === undefined || !(await workspaceExists(repository, workspace))) {
     return { kind: "refused", refusal: { kind: "worktree-missing" } };
