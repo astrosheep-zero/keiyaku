@@ -380,17 +380,10 @@ export async function repairContractEffects(input: ReconcileInput) {
           () => acquireTargetPlacementFence(repository, targetName(target)),
           acc,
           async () => {
-            const append = (delta: ReconcileResult): void => {
+            await recoverTargetPlacement(repository, before, (delta) => {
               for (const effect of delta.effects) acc.recordEffect(effect);
               for (const lag of delta.lag) acc.recordLag(lag);
-            };
-            let streamed = false;
-            const result = await recoverTargetPlacement(repository, before, (delta) => {
-              streamed = true;
-              append(delta);
             });
-            // The existing follower returns an early target-incarnation refusal before it starts streaming.
-            if (!streamed) append(result);
           },
         );
       }

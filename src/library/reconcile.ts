@@ -3,13 +3,15 @@ import { z } from "zod";
 import { projectContractWorktree } from "../contract-worktree.js";
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
 import { contractIdSchema } from "../git/identity.js";
+import { observeContractJournals } from "../git/observe.js";
+import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
+import { cleanupTerminalContract, repairContractEffects, type ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { isOperationalFailure, isOperationalStop, executionStop } from "../protocol/progress.js";
-import { cleanupTerminalOperation, repairContractOperation, worldContractIds } from "../protocol/reconcile.js";
 import { settle } from "../settlement/settle.js";
+import { attestedVerificationSnapshots } from "../verification/declaration.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -109,8 +111,17 @@ async function reconcileContractWork(input: ReconcileOptions & { contractId: Con
     return;
   }
 
-  const phase = { ...input, progress: accumulator };
-  const repair = await repairContractOperation(phase);
+  const physical = {
+    repository: scope,
+    channel,
+    contractId,
+    hooks: input.hooks,
+    retryHooks: input.retryHooks,
+    attestedSnapshots: (state: ContractState) =>
+      state.attestations.flatMap(({ data }) => attestedVerificationSnapshots(data)),
+    onPhysical: (report: ReconcileResult) => accumulator.recordPhysical(contractId, report),
+  };
+  const repair = await repairContractEffects(physical);
   if (repair.state === undefined) return;
   scope.signal?.throwIfAborted();
   if (repair.workspace !== undefined) {
@@ -132,8 +143,8 @@ async function reconcileContractWork(input: ReconcileOptions & { contractId: Con
   });
   if (repair.state.terminal === null) return;
 
-  const cleanup = await cleanupTerminalOperation({
-    ...phase,
+  const cleanup = await cleanupTerminalContract({
+    ...physical,
     expectedHead: repair.state.head,
     handoffSafe: repair.handoffSafe,
   });
@@ -220,7 +231,8 @@ export async function completeReconcile(
 export async function completeRepoReconcile(input: ReconcileOptions): Promise<RepoReconcileReport> {
   let ids: readonly ContractId[];
   try {
-    ids = await worldContractIds(input);
+    const journals = await withGitReadObservation(input.scope, input.channel, observeContractJournals);
+    ids = [...journals.keys()];
   } catch (error) {
     if (!isOperationalFailure(error)) throw error;
     return { kind: "world-observation-failed", diagnostic: diagnostic(error) };

@@ -5,10 +5,10 @@ import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
+import { cleanupTerminalContract } from "../src/git/reconcile.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { abandonOperation } from "../src/protocol/abandon.js";
-import { cleanupTerminalOperation } from "../src/protocol/reconcile.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { placeRegisterPath, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
@@ -85,15 +85,14 @@ async function projectionFixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ terms: document() }));
-  const id = present(await bound.kei.state()).id;
+  const { id, head } = present(await bound.kei.state());
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
-  return { repository, repo, id, worktree };
+  return { repository, repo, id, head, worktree };
 }
 
 test("head movement spends repair once; stale cleanup cannot remove a newly terminal worktree", async () => {
-  const { repository, repo, id, worktree } = await projectionFixture();
+  const { repository, repo, id, head, worktree } = await projectionFixture();
   const scope = await repositoryAt(repository.path);
-  const head = present(await Keis.of(repo).kei({ id }).state()).head;
   const reads = join(scope.commonDirectory, "state-reads");
   const shim = [
     'if [ "$1 $2 $3 $4" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ]; then',
@@ -123,14 +122,15 @@ test("head movement spends repair once; stale cleanup cannot remove a newly term
   assert.equal(existsSync(worktree), true);
 
   const cleanup = await withGitDecodeChannel(scope, (channel) =>
-    cleanupTerminalOperation({
-      scope,
+    cleanupTerminalContract({
+      repository: scope,
       channel,
       contractId: id,
       expectedHead: head,
       handoffSafe: true,
       retryHooks: false,
       hooks: { create: [], destroy: [] },
+      attestedSnapshots: () => assert.fail("stale cleanup reached snapshot selection"),
     }),
   );
   assert.equal(cleanup.appointedPathAbsent, false);

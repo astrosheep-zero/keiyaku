@@ -9,7 +9,6 @@ const protocolOperations = [
   any("protocol/delivery-preview.ts"),
   any("protocol/bind.ts"),
   any("protocol/deliver.ts"),
-  any("protocol/reconcile.ts"),
   any("protocol/verify.ts"),
   any("protocol/review.ts"),
 ] as const;
