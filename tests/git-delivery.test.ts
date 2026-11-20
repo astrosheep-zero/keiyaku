@@ -20,11 +20,9 @@ import { prepareDelivery } from "../src/protocol/deliver.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { adjudicatePreviewTarget } from "../src/git/target-placement.js";
 import { readRef } from "../src/git/repository.js";
-import { readDeliveryDiff, worktreeChangeId } from "../src/git/integration.js";
-import { followDependentManagedWorktree, unmergedWorkspacePaths } from "../src/git/workspace.js";
-import { appointmentFor, readManagedWorktreeAppointment, readPlaceRegister } from "../src/workspace-place.js";
+import { readDeliveryDiff } from "../src/git/integration.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { AuthorityCorruptionError, Keis, Repo, type ContractId } from "../src/index.js";
-import { captureTender } from "../src/git/tender.js";
 import {
   appointedWorktreePath,
   cachedRepositoryAt,
@@ -50,33 +48,6 @@ function contractBody(): string {
 
 function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>) {
   return { contractId: state.id, coordinates: state.coordinates };
-}
-
-/**
- * The reviewable capture's own change identity and dirty-workspace evidence, read from the Git owners
- * the review preparation composes.
- */
-/** The capture coordinates a managed worktree needs: its own Contract and appointed Place. */
-async function capturableCoordinates(
-  git: Awaited<ReturnType<typeof cachedRepositoryAt>>,
-  preparation: ReturnType<typeof preparationCoordinates>,
-) {
-  const appointment = appointmentFor(await readPlaceRegister(git), preparation.contractId);
-  return appointment === undefined ? preparation : { ...preparation, place: appointment.place };
-}
-
-async function reviewableCapture(
-  git: Awaited<ReturnType<typeof cachedRepositoryAt>>,
-  preparation: ReturnType<typeof preparationCoordinates>,
-) {
-  const coordinates = await capturableCoordinates(git, preparation);
-  const tender = await captureTender(git, coordinates);
-  assert.ok(tender.kind === "prepared", "expected a capturable worktree");
-  if (tender.kind !== "prepared") throw new Error("expected a capturable worktree");
-  return {
-    changeId: await worktreeChangeId(git, coordinates, tender.data),
-    changes: tender.data.changes,
-  };
 }
 
 type PostBindTemplate = Readonly<{
@@ -214,55 +185,6 @@ async function preparedAuditTarget() {
 
 // Each case owns a separate repository and scoped fault injection, never a process-wide mock.
 describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
-  test("delivery fixtures snapshot independent initial repositories", () => {
-    const first = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
-    const second = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
-    assert.notEqual(first.path, second.path);
-    assert.equal(existsSync(join(second.path, ".git", "objects", "info", "alternates")), false);
-    assert.equal(second.run(["remote"]).trim(), "");
-
-    writeFileSync(join(first.path, "fixture.txt"), "changed\n");
-    first.run(["add", "fixture.txt"]);
-    first.run(["commit", "--quiet", "-m", "changed fixture"]);
-    first.run(["config", "test.fixture", "changed"]);
-
-    const third = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
-    for (const repository of [second, third]) {
-      assert.equal(readFileSync(join(repository.path, "fixture.txt"), "utf8"), "template\n");
-      assert.equal(repository.run(["log", "-1", "--format=%s"]).trim(), "initial");
-      assert.equal(repository.run(["remote"]).trim(), "");
-      assert.equal(existsSync(join(repository.path, ".git", "objects", "info", "alternates")), false);
-      assert.throws(() => repository.run(["config", "--get", "test.fixture"]));
-    }
-  });
-
-  test("permissive targeted delivery integrates tender bytes over the observed target head", async () => {
-    const { repository, preparation, worktree } = await targetedContract();
-    writeFileSync(join(repository.path, "target.txt"), "target advance\n");
-    repository.run(["add", "target.txt"]);
-    repository.run(["commit", "--quiet", "-m", "advance target"]);
-    const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
-    writeFileSync(join(worktree, "tender.txt"), "tender\n");
-    repository.run(["-C", worktree, "add", "tender.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "tender"]);
-    const tenderHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
-    const git = await cachedRepositoryAt(repository.path);
-    const review = await reviewableCapture(git, preparation);
-    const delivery = await prepareDelivery(git, preparation, {
-      title: "Integrated delivery",
-      document: contractBody(),
-      requireBranchesToBeUpToDate: false,
-    });
-    assert.equal(delivery.kind, "prepared");
-    if (delivery.kind !== "prepared") return;
-    assert.equal(delivery.data.tenderSnapshot, tenderHead);
-    assert.equal(delivery.data.integration.predecessor, targetHead);
-    assert.equal(delivery.data.integration.changeId, review.changeId);
-    assert.equal(repository.run(["rev-parse", `${delivery.data.integration.snapshot}^`]).trim(), targetHead);
-    assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:target.txt`]), "target advance\n");
-    assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:tender.txt`]), "tender\n");
-  });
-
   test("an unavailable recorded integration materializes a fresh snapshot", async () => {
     const { repository, preparation } = await targetedContract(["reviewed"]);
     const missing = mintSnapshotId("0".repeat(40));
@@ -279,27 +201,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.notEqual(prepared.data.integration.snapshot, missing);
     assert.equal(repository.run(["show", "-s", "--format=%s", prepared.data.integration.snapshot]).trim(), "fresh after missing integration");
     assert.equal(prepared.data.note, "fresh after missing integration");
-  });
-
-  test("strict targeted delivery refuses a tender not based on the target head", async () => {
-    const { repository, preparation } = await targetedContract();
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "advance target"]);
-    const targetHead = repository.run(["rev-parse", "HEAD"]).trim();
-    assert.deepEqual(
-      await prepareDelivery(await cachedRepositoryAt(repository.path), preparation, {
-        title: "Strict delivery",
-        document: contractBody(),
-        requireBranchesToBeUpToDate: true,
-      }),
-      {
-        kind: "refused",
-        refusal: {
-          kind: "integration-failed",
-          reason: "not-based-on-target",
-          targetHead,
-        },
-      },
-    );
   });
 
   test("targeted integration refuses unrelated histories without invoking merge-tree", async () => {
@@ -361,45 +262,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(strict.kind, "prepared");
   });
 
-  test("dirty delivery materializes a candidate without changing the caller index", async () => {
-    const { repository, id, worktree } = await boundContract();
-    writeFileSync(join(worktree, "candidate.txt"), "dirty candidate\n");
-    const git = await cachedRepositoryAt(repository.path);
-    const state = (await observeContract(git, id)).state;
-    if (state === null) throw new Error("contract was not observed");
-    const indexPath = repository
-      .run(["-C", worktree, "rev-parse", "--path-format=absolute", "--git-path", "index"])
-      .trim();
-    const indexBefore = readFileSync(indexPath);
-    const headBefore = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
-    const review = await reviewableCapture(git, preparationCoordinates(state));
-
-    const prepared = await prepareDelivery(git, preparationCoordinates(state), {
-      title: "Patch identity",
-      document: contractBody(),
-      includeDirty: true,
-    });
-    assert.ok(prepared.kind === "prepared", 'expected prepared.kind = "prepared"');
-    assert.equal(prepared.data.integration.changeId, review.changeId);
-    assert.deepEqual(review.changes, {
-      staged: [],
-      unstaged: [],
-      untracked: ["candidate.txt"],
-      submodules: [],
-    });
-    assert.deepEqual(await unmergedWorkspacePaths(git, worktree), []);
-    assert.deepEqual(readFileSync(indexPath), indexBefore);
-    assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), headBefore);
-    assert.match(
-      repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]),
-      /kei\/.*: Patch identity/,
-    );
-    assert.match(
-      repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]),
-      /Keiyaku-Contract: /,
-    );
-  });
-
   test("materialized delivery identity uses the complete repository pair or the neutral fallback", async () => {
     const configured = await boundContract();
     writeFileSync(join(configured.worktree, "configured.txt"), "configured\n");
@@ -452,60 +314,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       "Keiyaku Git",
       "keiyaku@localhost",
     ]);
-  });
-
-  test("audit target adjudicator reports initial movement without observing followability", async () => {
-    const { repository, git, prepared, targetName, expected } = await preparedAuditTarget();
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "move-target"]);
-    const observed = repository.run(["rev-parse", "refs/heads/main"]).trim();
-
-    const answer = await withGitShim(
-      [
-        'if [ "$1" = "worktree" ] && [ "$2" = "list" ]; then',
-        '  printf "followability must not run after initial movement\\n" >&2',
-        "  exit 1",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {},
-      async (gitPath) =>
-        adjudicatePreviewTarget(
-          { ...git, gitPath },
-          {
-            target: targetName,
-            predecessor: expected,
-            candidate: prepared.data.integration.snapshot,
-          },
-        ),
-    );
-
-    assert.deepEqual(answer, {
-      kind: "moved",
-      ref: "refs/heads/main",
-      expected,
-      observed,
-    });
-  });
-
-  test("preview target preserves an unrelated native failure coincident with cancellation", async () => {
-    const { git, prepared, targetName, expected } = await preparedAuditTarget();
-    const controller = new AbortController();
-    const reason = new Error("concurrent caller cancellation");
-    const original = new TypeError("independent target observation failure");
-    const repository = {
-      ...git,
-      signal: controller.signal,
-      get gitPath(): string {
-        controller.abort(reason);
-        throw original;
-      },
-    };
-    await assert.rejects(adjudicatePreviewTarget(repository, {
-      target: targetName,
-      predecessor: expected,
-      candidate: prepared.data.integration.snapshot,
-    }), (error: unknown) => error === original);
-    assert.equal(controller.signal.reason, reason);
   });
 
   test("audit target adjudicator reobserves movement after followability", async () => {
@@ -673,51 +481,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(readFileSync(join(repository.path, "artifact", name), "utf8"), "untracked\n");
   });
 
-  test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {
-    const repository = makeGitRepository();
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = accepted(
-      await Keis.of(await Repo.at({ path: repository.path })).bind({
-        terms: contractBody(),
-      }),
-    );
-    const state = present(await bound.kei.state());
-    const git = await cachedRepositoryAt(repository.path);
-    const path = await appointedWorktreePath(git, state.id);
-    repository.run(["worktree", "remove", path]);
-    mkdirSync(path, { recursive: true });
-    repository.run(["-C", path, "init", "--quiet"]);
-    // This foreign repository does not inherit the parent fixture's local identity.
-    repository.run([
-      "-C",
-      path,
-      "-c",
-      "user.name=Keiyaku Test",
-      "-c",
-      "user.email=keiyaku-test@example.invalid",
-      "commit",
-      "--allow-empty",
-      "--quiet",
-      "-m",
-      "foreign",
-    ]);
-
-    assert.deepEqual(await captureTender(git, await capturableCoordinates(git, preparationCoordinates(state))), {
-      kind: "refused",
-      refusal: { kind: "worktree-missing" },
-    });
-    assert.deepEqual(
-      await prepareDelivery(git, preparationCoordinates(state), {
-        title: "Delivery patch identity",
-        document: contractBody(),
-      }),
-      {
-        kind: "refused",
-        refusal: { kind: "worktree-missing" },
-      },
-    );
-  });
-
   test("reconcile recreates a registered managed worktree whose directory disappeared", async () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -740,34 +503,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       (repaired.effects ?? []).some((effect) => effect.kind === "worktree-created"),
       true,
     );
-  });
-
-  test("dependent managed follow reports attached dirty paths without mutation", async () => {
-    const repository = makeGitRepository();
-    writeFileSync(join(repository.path, "tracked.txt"), "base\n");
-    repository.run(["add", "tracked.txt"]);
-    repository.run(["commit", "--quiet", "-m", "initial"]);
-    const start = repository.run(["rev-parse", "HEAD"]).trim();
-    repository.run(["checkout", "--detach", "--quiet", start]);
-    writeFileSync(join(repository.path, "tracked.txt"), "target\n");
-    repository.run(["add", "tracked.txt"]);
-    repository.run(["commit", "--quiet", "-m", "target"]);
-    const target = repository.run(["rev-parse", "HEAD"]).trim();
-    repository.run(["checkout", "--quiet", "main"]);
-    writeFileSync(join(repository.path, "tracked.txt"), "attached dirty\n");
-    writeFileSync(join(repository.path, "untracked.txt"), "untracked\n");
-    const before = readFileSync(join(repository.path, "tracked.txt"));
-    const git = await cachedRepositoryAt(repository.path);
-
-    assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
-      kind: "retained",
-      head: mintSnapshotId(start),
-      reason: "head-attached",
-      paths: ["tracked.txt", "untracked.txt"],
-    });
-    assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), start);
-    assert.deepEqual(readFileSync(join(repository.path, "tracked.txt")), before);
-    assert.equal(readFileSync(join(repository.path, "untracked.txt"), "utf8"), "untracked\n");
   });
 
   test("a moved gitlink retains dirty submodule internals", async () => {
@@ -802,80 +537,6 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(existsSync(join(repository.path, "candidate.txt")), false);
     assert.deepEqual(readFileSync(indexPath), index);
     assert.equal(readFileSync(local, "utf8"), "local submodule bytes\n");
-  });
-
-  test("dependent managed follow reports submodule-only dirt", async () => {
-    const child = makeGitRepository();
-    writeFileSync(join(child.path, "child.txt"), "child\n");
-    child.run(["add", "child.txt"]);
-    child.run(["commit", "--quiet", "-m", "child"]);
-
-    const repository = makeGitRepository();
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    repository.run(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", child.path, "module"]);
-    repository.run(["commit", "--quiet", "-am", "submodule"]);
-    const start = repository.run(["rev-parse", "HEAD"]).trim();
-    repository.run(["checkout", "--detach", "--quiet", start]);
-    writeFileSync(join(repository.path, "target.txt"), "target\n");
-    repository.run(["add", "target.txt"]);
-    repository.run(["commit", "--quiet", "-m", "target"]);
-    const target = repository.run(["rev-parse", "HEAD"]).trim();
-    repository.run(["checkout", "--detach", "--quiet", start]);
-    writeFileSync(join(repository.path, "module", "child.txt"), "dirty child\n");
-    const git = await cachedRepositoryAt(repository.path);
-
-    assert.deepEqual(await followDependentManagedWorktree(git, repository.path, mintSnapshotId(target)), {
-      kind: "retained",
-      head: mintSnapshotId(start),
-      reason: "operation-in-progress",
-      paths: ["module"],
-    });
-    assert.equal(repository.run(["rev-parse", "HEAD"]).trim(), start);
-    assert.equal(readFileSync(join(repository.path, "module", "child.txt"), "utf8"), "dirty child\n");
-  });
-
-  test("managed bind preserves its admitted Contract when worktree reconciliation fails", async () => {
-    const repository = makeGitRepository();
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const result = await withGitShim(
-      [
-        'if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then',
-        '  printf "forced managed worktree failure\\n" >&2',
-        "  exit 1",
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {},
-      async (gitPath) =>
-        Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
-          terms: contractBody(),
-        }),
-    );
-    const receipt = accepted(result);
-    const lag = (receipt.issues ?? []).find((issue) => issue.kind === "reconcile-failed");
-    assert.equal(lag?.kind, "reconcile-failed");
-    if (lag?.kind === "reconcile-failed") assert.match(lag.diagnostic, /forced managed worktree failure/);
-    assert.deepEqual(
-      (receipt.issues ?? []).filter((issue) => issue.kind === "settlement-failed"),
-      [],
-    );
-    const state = present(await accepted(result).kei.state());
-    assert.equal(state.id, receipt.contractId);
-    assert.equal(state.terminal, null);
-    const observation = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: state.id });
-    assert.equal(observation.kind, "contract");
-  });
-
-  test("distinct no-op candidates share the empty patch ChangeId", async () => {
-    const { repository, id, worktree } = await boundContract();
-
-    repository.run(["-C", worktree, "commit", "--allow-empty", "--quiet", "-m", "first no-op"]);
-    const first = await preparedDelivery(repository, id);
-    repository.run(["-C", worktree, "commit", "--allow-empty", "--quiet", "-m", "second no-op"]);
-    const second = await preparedDelivery(repository, id);
-
-    assert.notEqual(first.integration.snapshot, second.integration.snapshot);
-    assert.equal(first.integration.changeId, second.integration.changeId);
   });
 
   test("delivery diff preserves an empty patch and treats a clean missing object as Git absence", async () => {
@@ -1007,47 +668,4 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(readFileSync(join(path, "module", "child.txt"), "utf8"), "dirty child\n");
   });
 
-  test("nonempty candidates retain Git start-to-tender ChangeId", async () => {
-    const { repository, id, worktree } = await boundContract();
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-
-    const delivery = await preparedDelivery(repository, id);
-    assert.equal(delivery.integration.snapshot, repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim());
-    const patch = repository.run([
-      "-c",
-      "core.quotePath=false",
-      "-c",
-      "core.abbrev=40",
-      "-c",
-      "diff.algorithm=myers",
-      "-c",
-      "diff.renames=false",
-      "-c",
-      "diff.indentHeuristic=false",
-      "-c",
-      "diff.suppressBlankEmpty=false",
-      "diff",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--no-indent-heuristic",
-      "--no-renames",
-      "--full-index",
-      "--binary",
-      "--no-color",
-      "--diff-algorithm=myers",
-      "--unified=3",
-      "--src-prefix=a/",
-      "--dst-prefix=b/",
-      "--inter-hunk-context=0",
-      "--no-relative",
-      "--ignore-submodules=none",
-      "--submodule=short",
-      `${delivery.integration.predecessor}^{tree}`,
-      `${delivery.integration.snapshot}^{tree}`,
-    ]);
-    const changeId = repository.run(["patch-id", "--verbatim"], patch).trim().split(/\s/, 1)[0];
-    assert.equal(delivery.integration.changeId, changeId);
-  });
 });

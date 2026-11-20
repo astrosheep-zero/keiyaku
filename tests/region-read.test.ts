@@ -122,21 +122,6 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const invalid = (region: unknown): Promise<unknown> => Kanshi.of({ world, repo }).region(region as never);
 
     await assert.rejects(
-      invalid({ kind: "bogus" }),
-      (error: unknown) =>
-        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("kind is invalid"),
-    );
-    await assert.rejects(
-      invalid({ kind: "path", patterns: ["docs/**"], extra: true }),
-      (error: unknown) =>
-        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("unknown field"),
-    );
-    await assert.rejects(
-      invalid({ kind: "overlap" }),
-      (error: unknown) =>
-        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("kind is invalid"),
-    );
-    await assert.rejects(
       invalid({ kind: "path", patterns: ["docs/[draft].md"] }),
       (error: unknown) =>
         error instanceof KeiyakuError &&

@@ -2,7 +2,6 @@ export const LOCAL_TEST_FILES = [
   "tests/amend-body.test.ts",
   "tests/amend-unchanged.test.ts",
   "tests/architecture.test.ts",
-  "tests/bounded-list-schema.test.ts",
   "tests/build-windows-launcher.test.ts",
   "tests/cli-akuma-render.test.ts",
   "tests/cli-contract-results.test.ts",

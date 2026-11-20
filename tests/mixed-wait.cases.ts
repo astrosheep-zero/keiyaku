@@ -23,7 +23,7 @@ import { KeiyakuError } from "../src/errors.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { bornBody, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
-import { withContractWaitBarrier, withContractWaitEpochs } from "./support/contract-wait.js";
+import { withContractWaitBarrier, withContractWaitEpochs, withWaitClock } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
@@ -493,7 +493,11 @@ test("unsettled Akumas repeatedly select a bounded current Turn without acquirin
       return prepare.call(this, sql);
     });
     try {
-      const result = await f.facet().wait({ selectors, completion: "all", for: "1200ms" });
+      const timeoutMs = 1200;
+      const result = await withWaitClock(t, timeoutMs, clock => clock.within(() =>
+        f.facet().wait({ selectors, completion: "all", for: `${timeoutMs}ms` }),
+      ), { advancePolls: true });
+      assert.equal(result.elapsedMs, timeoutMs);
       const worker = result.members.find(member => "akuma" in member);
       assert.ok(worker?.state === "running");
       assert.equal(worker.turn, `turn/${turn.sequence}`);

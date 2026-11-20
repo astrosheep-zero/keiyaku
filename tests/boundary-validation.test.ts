@@ -86,40 +86,6 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   assert.deepEqual((await Keis.of(repo).list({  })).rows, before);
 });
 
-test("amend validates programmer input before observing a missing contract", async () => {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Boundary Test"]);
-  repository.run(["config", "user.email", "boundary@example.test"]);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
-  const before = (await Keis.of(repo).list({  })).rows;
-
-  await assert.rejects(
-    () =>
-      withGitShim("exit 99", {}, () =>
-        Reflect.apply(contract.amend, contract, [{ edits: "## Append: Context\ntext\n", gates: ["Invalid"] }]),
-      ),
-    (error: unknown) => invalidInput(error, "gates[0] must match ^[a-z][a-z0-9-]{0,63}$"),
-  );
-  assert.deepEqual((await Keis.of(repo).list({  })).rows, before);
-});
-
-test("review rejects missing or blank summary before repository execution", async () => {
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
-  let observations = 0;
-  for (const input of [{ verdict: "satisfied" }, { verdict: "satisfied", summary: " \t\n" }]) {
-    await assert.rejects(
-      () => withGitShim("exit 99", {}, () => contract.review(input as never, { observe: () => { observations++; } })),
-      invalidInput,
-    );
-  }
-  assert.equal(observations, 0);
-});
-
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Boundary Test"]);

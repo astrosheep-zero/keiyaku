@@ -638,7 +638,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("akuma/selection-observation.ts", ["akumaCatalogueRowSchema", "akumaCatalogueSchema"]),
         types("akuma/projection.ts"),
         types("core/facts/types.ts"),
-        runtime("bounded-list.ts", ["boundedListSchema"]),
         runtime("git/identity.ts", ["contractIdSchema"]),
         types("identity/selector.ts"),
         runtime("identity/selector.ts", ["akumaAliasSchema"]),

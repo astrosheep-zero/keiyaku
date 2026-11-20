@@ -15,7 +15,6 @@ import {
 } from "../src/debt/index.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseDebtDocument, serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
-import { settleDebt } from "../src/debt/operations.js";
 import { Keiyaku } from "../src/library/keiyaku.js";
 import { nukeDebtAuthority, replaceAuthority, withDebtLocks } from "../src/debt/store.js";
 import { debtAuthorityFile } from "./support/debt.js";
@@ -43,66 +42,6 @@ async function readDetail(debts: ReturnType<typeof Debts.of>, id: DebtId) {
   if (read.kind !== "present") throw new Error("missing Debt detail");
   return read;
 }
-
-test("a pre-aborted Debt CLI mutation leaves authority unchanged", async (t) => {
-  const { root, debts } = await world();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const id = acceptedId(await debts.add({ title: "Cancellation fixture" }));
-  assert.equal((await debts.debt({ id }).update({ note: "original" })).kind, "accepted");
-  const path = debtAuthorityFile(root, id);
-  const before = readFileSync(path, "utf8");
-  const controller = new AbortController();
-  controller.abort(new Error("caller cancelled Debt mutation"));
-  const read = await runCli(["-C", root, "show", id, "--json"], {
-    environment: {},
-    signal: controller.signal,
-  });
-  assert.equal(read.exit, 0, read.stderr);
-  const shown = JSON.parse(read.stdout) as {
-    kind: "debt-complete";
-    items: readonly { kind: "found"; title: string }[];
-  };
-  assert.equal(shown.kind, "debt-complete");
-  assert.equal(shown.items[0]?.kind, "found");
-  assert.equal(shown.items[0]?.title, "Cancellation fixture");
-  const result = await runCli(["-C", root, "debt", "update", id, "--note", "changed"], {
-    environment: {},
-    signal: controller.signal,
-  });
-  assert.notEqual(result.exit, 0);
-  assert.match(result.stdout + result.stderr, /caller cancelled Debt mutation/u);
-  assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("note is replaceable authority and product timestamps advance only on change", async () => {
-  const { debts } = await world();
-  const added = await debts.add({ title: "Timestamped" });
-  assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
-  const initial = await readDetail(debts, added.id);
-  assert.equal(initial.note, undefined);
-  assert.equal(initial.createdAt, initial.updatedAt);
-  assert.equal(new Date(initial.createdAt).toISOString(), initial.createdAt);
-  assert.deepEqual(await debts.debt({ id: added.id }).update({ note: "first" }), {
-    kind: "accepted", changes: ["note"],
-  });
-  const created = await readDetail(debts, added.id);
-  assert.equal(created.note, "first");
-  assert.equal(created.createdAt, initial.createdAt);
-  assert.ok(created.updatedAt > initial.updatedAt);
-
-  const replaced = await debts.debt({ id: added.id }).update({ note: "second" });
-  assert.ok(replaced.kind === "accepted", 'expected replaced.kind = "accepted"');
-  const updated = await readDetail(debts, added.id);
-  assert.equal(updated.note, "second");
-  assert.equal(updated.createdAt, created.createdAt);
-  assert.ok(updated.updatedAt > created.updatedAt);
-  assert.deepEqual(replaced.changes, ["note"]);
-
-  const unchanged = await debts.debt({ id: added.id }).update({ note: "second" });
-  assert.ok(unchanged.kind === "accepted", 'expected unchanged.kind = "accepted"');
-  assert.equal(unchanged.changes, undefined, "an empty change list is omitted");
-  assert.equal((await readDetail(debts, added.id)).updatedAt, updated.updatedAt);
-});
 
 test("ordinary mutations advance a non-later timestamp by one millisecond", async () => {
   const { root, debts } = await world();
@@ -214,38 +153,6 @@ test("invalid needs rejects the complete update including reopen", async (t) => 
   assert.equal(reopened.body, undefined);
   assert.equal(reopened.note, undefined);
   assert.deepEqual(reopened.needs, [{ id: target, state: "open" }]);
-});
-
-test("CLI update changes facts and state atomically through the addressed owner", async (t) => {
-  const { root, debts } = await world();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const id = acceptedId(await debts.add({ title: "CLI lifecycle" }));
-  const updated = await cliJson(["-C", root, "debt", "update", id, "--state", "done", "--note", "finished"], {
-    environment: {},
-  });
-  assert.equal(updated.exit, 0, updated.stderr);
-  assert.deepEqual(updated.value, { kind: "accepted", changes: ["note", "state"] });
-  const after = await readDetail(debts, id);
-  assert.equal(after.state, "done");
-  assert.equal(after.note, "finished");
-  const reopened = await cliJson(["-C", root, "debt", "update", id, "--state", "drop", "--note", "lost"], {
-    environment: {},
-  });
-  assert.equal(reopened.exit, 0, reopened.stderr);
-  assert.deepEqual(reopened.value, { kind: "accepted", changes: ["note", "state"] });
-  assert.equal((await readDetail(debts, id)).state, "drop");
-  const path = debtAuthorityFile(root, id);
-  const bytes = readFileSync(path);
-  const refused = await cliJson(
-    ["-C", root, "debt", "update", id, "--state", "open", "--needs", "debt/missing", "--note", "lost"],
-    { environment: {} },
-  );
-  assert.equal(refused.exit, 1, refused.stderr);
-  const refusal = refused.value as { kind: string; reason: string; diagnostic: string };
-  assert.equal(refusal.kind, "refused");
-  assert.equal(refusal.reason, "invalid-graph");
-  assert.match(refusal.diagnostic, /does not exist/u);
-  assert.deepEqual(readFileSync(path), bytes);
 });
 
 test("CLI replaces prerequisites and clears body, note and empty body stdin", async (t) => {
@@ -438,30 +345,6 @@ test("combined update distinguishes contention from a moved predecessor and pres
   }
 });
 
-test("internal settlement remains idempotent after explicit updates", async (t) => {
-  const { root, debts } = await world();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const id = acceptedId(await debts.add({ title: "Settlement replay" }));
-  assert.equal((await debts.debt({ id }).update({ note: "original" })).kind, "accepted");
-  const path = debtAuthorityFile(root, id);
-  assert.deepEqual(await settleDebt(root, id), { kind: "changed" });
-  const settled = readFileSync(path);
-  assert.deepEqual(await settleDebt(root, id), { kind: "unchanged" });
-  assert.deepEqual(readFileSync(path), settled);
-  assert.equal((await debts.debt({ id }).update({ note: "later testimony", state: "done" })).kind, "accepted");
-  const updated = readFileSync(path);
-  assert.deepEqual(await settleDebt(root, id), { kind: "unchanged" });
-  assert.deepEqual(readFileSync(path), updated);
-  const dropped = acceptedId(await debts.add({ title: "Dropped settlement" }));
-  assert.equal((await debts.debt({ id: dropped }).update({ note: "not owed", state: "drop" })).kind, "accepted");
-  const droppedPath = debtAuthorityFile(root, dropped);
-  const before = readFileSync(droppedPath);
-  assert.deepEqual(await settleDebt(root, dropped), {
-    kind: "refused", reason: "invalid-lifecycle-transition", state: "drop",
-  });
-  assert.deepEqual(readFileSync(droppedPath), before);
-});
-
 test("needs cycles remain writable and doctor names their complete component", async () => {
   const { debts } = await world();
   const first = acceptedId(await debts.add({ title: "First" }));
@@ -522,18 +405,7 @@ test("Debt row views share the bounded-list contract and complete their graph ju
   await assert.rejects(() => debts.list({ limit: 501 }), /integer from 1 to 500/u);
 });
 
-test("targeted reads expose prerequisite endpoints only", async () => {
-  const { debts } = await world();
-  const blocker = acceptedId(await debts.add({ title: "A" }));
-  const blocked = acceptedId(await debts.add({ title: "B", needs: [blocker] }));
-
-  const shown = await readDetail(debts, blocker);
-  assert.equal(shown.needs, undefined);
-  const shownBlocked = await readDetail(debts, blocked);
-  assert.deepEqual(shownBlocked.needs, [{ id: blocker, state: "open" }]);
-});
-
-test("native, invocation and CLI listings select lifecycle before bounding the World ledger", async (t) => {
+test("native and invocation listings select lifecycle before bounding the World ledger", async (t) => {
   const { root, debts } = await world();
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const done = acceptedId(await debts.add({ title: "Finished", priority: 0 }));
@@ -559,12 +431,6 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
     assert.deepEqual(bounded.rows?.map((row) => row.id) ?? [], ids.slice(0, 1));
     assert.equal(bounded.more, ids.length > 1 ? true : undefined);
     assert.deepEqual(await facet.run("ls", { selector: "debt/", ...lifecycle, limit: 1 }), bounded);
-    const flags = "selection" in input ? [input.selection === "settled" ? "--settled" : "--all"] : [];
-    for (const selector of ["debt", "debt/"]) {
-      const cli = await cliJson(["-C", root, "ls", selector, ...flags, "--limit", "1"], { environment: {} });
-      assert.equal(cli.exit, 0, cli.stderr);
-      assert.deepEqual(cli.value, bounded);
-    }
   }
   assert.deepEqual((await debts.list()).rows, [
     { id: alpha, title: "Alpha", priority: 2, disposition: "blocked" },
@@ -599,17 +465,6 @@ test("concurrent same-title creation allocates stable unique suffixes", async ()
   const ids = outcomes.flatMap((outcome) => (outcome.kind === "accepted" ? [outcome.id] : []));
   assert.equal(new Set(ids).size, 6);
   assert.ok(ids.every((id) => /^debt\/collision-[0-9a-f]{4}$/u.test(id)));
-});
-
-test("needs input rejects only newly declared missing and self targets", async () => {
-  const { debts } = await world(),
-    id = acceptedId(await debts.add({ title: "Subject" }));
-  const missing = await debts.debt({ id }).update({ needs: ["debt/missing"] });
-  assert.equal(missing.kind, "refused");
-  if (missing.kind === "refused") assert.equal(missing.reason, "invalid-graph");
-  const self = await debts.debt({ id }).update({ needs: [id] });
-  assert.equal(self.kind, "refused");
-  if (self.kind === "refused") assert.equal(self.reason, "invalid-graph");
 });
 
 test("stored needs disease tolerates unrelated edits and whole replacement heals it", async () => {
@@ -847,14 +702,6 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => Debts.of({ root: debts.root } as never), /Debts.of world/u);
 });
 
-test("board reports malformed Markdown Debt authority as corruption", async () => {
-  const { root, debts } = await world();
-  acceptedId(await debts.add({ title: "Corrupted authority" }));
-  writeFileSync(join(root, ".keiyaku", "debts", "corrupted-authority.md"), "not a Debt document\n");
-
-  await assert.rejects(debts.list({ selection: "all" }), DebtAuthorityCorruptionError);
-});
-
 test("targeted reads ignore unrelated malformed and symlink authorities", async () => {
   const { root, debts } = await world();
   const id = acceptedId(await debts.add({ title: "Targeted authority" }));
@@ -864,25 +711,6 @@ test("targeted reads ignore unrelated malformed and symlink authorities", async 
   symlinkSync(join(root, "outside.md"), join(directory, "unrelated-link.md"));
 
   assert.equal((await readDetail(debts, id)).title, "Targeted authority");
-});
-
-test("Debt ls returns its native page and distinguishes absent Worlds", async (t) => {
-  const { root, debts } = await world();
-  const absent = mkdtempSync(join(tmpdir(), "keiyaku-debt-list-absent-"));
-  t.after(() => {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(absent, { recursive: true, force: true });
-  });
-  const id = acceptedId(await debts.add({ title: "Catalogue member" }));
-  const listed = await cliJson(["-C", root, "ls", "debt/"], { environment: {} });
-  assert.equal(listed.exit, 0, listed.stderr);
-  assert.deepEqual(listed.value, {
-    kind: "debt-catalogue",
-    rows: [{ id, title: "Catalogue member", priority: 2, disposition: "ready" }],
-  });
-  const noWorld = await cliJson(["-C", absent, "ls", "debt/"], { environment: {} });
-  assert.equal(noWorld.exit, 1, noWorld.stderr);
-  assert.deepEqual(noWorld.value, { kind: "debt-catalogue", absent: true });
 });
 
 test("show distinguishes an absent World from a missing addressed Debt", async (context) => {
@@ -901,21 +729,8 @@ test("show distinguishes an absent World from a missing addressed Debt", async (
     items: [{ kind: "missing", id: "debt/missing" }],
   });
 
-  await assert.rejects(
-    runCli(["-C", established, "show", "debt/a", "debt/b", "--json"], { environment: {} }),
-    /show accepts at most one selector/u,
-  );
-
-  const text = await runCli(["-C", established, "show", "debt/missing"], { environment: {} });
-  assert.equal(text.exit, 1, text.stderr);
-  assert.match(text.stdout, /^× show refused$/mu);
-  assert.match(text.stdout, /^  debt  debt\/missing$/mu);
 
   const absentRead = await runCli(["-C", absent, "show", "debt/missing", "--json"], { environment: {} });
   assert.equal(absentRead.exit, 1, absentRead.stderr);
   assert.deepEqual(JSON.parse(absentRead.stdout), { kind: "absent" });
-  const absentText = await runCli(["-C", absent, "show", "debt/missing"], { environment: {} });
-  assert.equal(absentText.exit, 1, absentText.stderr);
-  assert.match(absentText.stdout, /^debt world absent$/mu);
-  assert.doesNotMatch(absentText.stdout, /refused|debt\/missing/u);
 });

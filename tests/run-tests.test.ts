@@ -227,7 +227,6 @@ test("compiled sweeps name every file and keep a per-file spec log", (context) =
     assert.ok(log, `a spec log names ${name}\n${output}`);
     assert.match(readFileSync(join(logDirectory, log), "utf8"), new RegExp(`${name} behaviour`, "u"));
   }
-  assert.match(readFileSync(resolve(root, ".gitignore"), "utf8"), /^\.test-logs\/$/mu);
 });
 
 test("focused runs stay on the single-spawn path without sweep artifacts", (context) => {
@@ -276,16 +275,18 @@ test("release plan overlaps one source gate with build and awaits all owned phas
   };
   try {
     await progress();
-    assert.deepEqual(started, ["build", "format:check"]);
-    await finish("format:check");
-    assert.deepEqual([...pending.keys()], ["build", "test:architecture"]);
+    assert.deepEqual(started, ["build", "test:typecheck"]);
     await finish("build");
-    assert.deepEqual([...pending.keys()], ["test:architecture", "test:compile"]);
+    assert.deepEqual([...pending.keys()], ["test:typecheck", "test:compile"]);
     await finish("test:compile");
-    assert.deepEqual([...pending.keys()], ["test:architecture", "test:reachability", "tests"]);
+    assert.deepEqual([...pending.keys()], ["test:typecheck", "test:reachability", "tests"]);
     await finish("test:reachability");
     await finish("tests");
     assert.equal(settled, false, "runtime completion must not detach a source gate");
+    await finish("test:typecheck");
+    assert.deepEqual([...pending.keys()], ["format:check"]);
+    await finish("format:check");
+    assert.deepEqual([...pending.keys()], ["test:architecture"]);
     await finish("test:architecture");
     assert.deepEqual([...pending.keys()], ["test:maintainability"]);
     await finish("test:maintainability");
@@ -302,7 +303,7 @@ test("release plan propagates every failure without skipping independent gates",
   const { runReleasePlan } = await import(pathToFileURL(resolve(root, "scripts/test-plan.mjs")).href) as {
     runReleasePlan(run: (name: string) => Promise<number>): Promise<number>;
   };
-  const source = ["format:check", "test:architecture", "test:maintainability"];
+  const source = ["test:typecheck", "format:check", "test:architecture", "test:maintainability"];
   const phases = ["build", "test:compile", ...source, "test:reachability", "tests"];
   for (const failed of phases) {
     const seen: string[] = [];

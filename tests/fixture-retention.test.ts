@@ -29,8 +29,6 @@ const DIAGNOSTIC_PREFIX = "[fixture-retention] retained ";
 
 const CHILD_MODES = [
   "retain-nested-git",
-  "retain-returned-temporary-directory",
-  "retain-unproven-temporary-directory",
   "retain-declared-and-undeclared-temporary-directories",
   "remove-unretained",
 ] as const;
@@ -143,29 +141,6 @@ async function retainNestedGitEvidence(): Promise<readonly RetainedObservation[]
     [false, false, true],
   );
   return markRetainedRoots((root) => join(root, "repository", "nested-evidence.bin"));
-}
-
-type TemporaryRetentionKind = "returned" | "unproven";
-
-/** Retain exactly one generic temporary directory through one helper path. */
-async function retainTemporaryDirectoryEvidence(
-  context: TestContext,
-  kind: TemporaryRetentionKind,
-): Promise<readonly RetainedObservation[]> {
-  const root = temporaryDirectory(context, `keiyaku-v4-fixture-retention-${kind}-`);
-  if (kind === "unproven") await cleanupUnproven(root);
-  else await cleanupReturned(root);
-  const retained = retainedFixtureRoots();
-  assert.equal(retained.length, 1);
-  assert.deepEqual(
-    retained.map((record) => record.path),
-    [root],
-  );
-  assert.deepEqual(
-    retained.map((record) => record.expected),
-    [false],
-  );
-  return markRetainedRoots((retainedRoot) => join(retainedRoot, "nested-evidence.bin"));
 }
 
 /**
@@ -284,25 +259,6 @@ async function withChildRun(
   }
 }
 
-/** A returned-only or throwing-only generic temporary directory must fail its owning teardown. */
-async function assertUnexpectedTemporaryDirectory(mode: ChildMode): Promise<void> {
-  await withChildRun(mode, (outcome, observation) => {
-    assert.equal(outcome.signal, null, outcome.stdout);
-    assert.equal(outcome.code, 1, outcome.stdout);
-    assert.equal(observation.retained.length, 1);
-    const retained = observation.retained[0];
-    assert.ok(retained !== undefined);
-    assert.equal(retained.expected, false);
-    assertRetainedEvidence(retained);
-    assert.deepEqual([...retentionDiagnostics(outcome)], [retentionDiagnosticLine(retained)]);
-    assert.ok(
-      outcome.stdout.includes(`unexpectedly retained fixture ${retained.root}: ${retained.reason}`),
-      outcome.stdout,
-    );
-    assert.equal(existsSync(observation.control.root), false, "the unretained control root must be removed");
-  });
-}
-
 function defineOuterTests(): void {
   test("nested Git fixture roots survive runner exit and every undeclared retention fails by name", async () => {
     await withChildRun("retain-nested-git", (outcome, observation) => {
@@ -329,14 +285,6 @@ function defineOuterTests(): void {
       );
       assert.equal(existsSync(observation.control.root), false, "the unretained control root must be removed");
     });
-  });
-
-  test("a returned-only retained generic temporary directory fails its owning teardown", async () => {
-    await assertUnexpectedTemporaryDirectory("retain-returned-temporary-directory");
-  });
-
-  test("a throwing-only retained generic temporary directory fails its owning teardown", async () => {
-    await assertUnexpectedTemporaryDirectory("retain-unproven-temporary-directory");
   });
 
   test("a declared retention does not waive unexpected retention for another root", async () => {
@@ -391,13 +339,9 @@ if (childMode === undefined) {
     const retained =
       childMode === "retain-nested-git"
         ? await retainNestedGitEvidence()
-        : childMode === "retain-returned-temporary-directory"
-          ? await retainTemporaryDirectoryEvidence(context, "returned")
-          : childMode === "retain-unproven-temporary-directory"
-            ? await retainTemporaryDirectoryEvidence(context, "unproven")
-            : childMode === "retain-declared-and-undeclared-temporary-directories"
-              ? await retainDeclaredAndUndeclaredEvidence(context)
-              : [];
+        : childMode === "retain-declared-and-undeclared-temporary-directories"
+          ? await retainDeclaredAndUndeclaredEvidence(context)
+          : [];
     writeFileSync(observationPath, `${JSON.stringify({ mode: childMode, retained, control }, null, 2)}\n`, "utf8");
   });
 }

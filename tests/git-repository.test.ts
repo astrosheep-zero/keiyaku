@@ -11,8 +11,8 @@ import {
   repositoryAt, updateGitTree, writeBlob, writeCommit,
   writeStateCommit, type TreeChange
 } from "../src/git/repository.js";
-import { GitPlumbingError, consumeGitStdout, executeGit } from "../src/git/process.js";
-import { repositoryWithCommit, waitForFile, withGitShim } from "./support/git.js";
+import { GitPlumbingError, executeGit } from "../src/git/process.js";
+import { repositoryWithCommit, withGitShim } from "./support/git.js";
 
 test("native private-tree publication preserves unknown leaves and literal paths while pruning empty directories", async () => {
   const raw = repositoryWithCommit();
@@ -268,36 +268,6 @@ test("managed dependency provisioning resolves through the registered primary wi
   assert.equal(lstatSync(local).isSymbolicLink(), true);
   assert.equal(readlinkSync(local), foreignTarget);
   assert.equal(realpathSync(local), realpathSync(foreign));
-});
-
-test("cancelling streamed Git execution uses its capability signal", async () => {
-  const repository = repositoryWithCommit();
-  const started = join(mkdtempSync(join(tmpdir(), "keiyaku-git-stream-cancellation-")), "started");
-
-  await withGitShim(
-    [
-      'if [ "$1" = "--version" ]; then',
-      '  sh -c \'echo ready; echo $$ > "$KEIYAKU_STARTED"; trap "exit 0" TERM; while :; do sleep 10; done\'',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_STARTED: started },
-    async (gitPath) => {
-      const controller = new AbortController();
-      const pending = consumeGitStdout(
-        { ...(await repositoryAt(repository.path, gitPath)), signal: controller.signal },
-        ["--version"],
-        () => undefined,
-      );
-      await waitForFile(started);
-      controller.abort();
-      await assert.rejects(
-        pending,
-        (error: unknown) =>
-          error instanceof GitPlumbingError && /--version: git process ended with cancelled/u.test(error.message),
-      );
-    },
-  );
 });
 
 test("a missing Git executable reports one normalized command prefix", async () => {

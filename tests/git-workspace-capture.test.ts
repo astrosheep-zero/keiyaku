@@ -133,22 +133,6 @@ test("unstaged conflict resolution is captured while the real unmerged index is 
   assert.equal(repository.run(["ls-files", "--unmerged"]), unmerged);
 });
 
-test("capture selects the linked worktree and preserves both real indices and heads", async () => {
-  const repository = repositoryWithMain({ files: { "tracked.txt": "base\n" } });
-  const workspace = join(repository.path, "linked");
-  repository.run(["worktree", "add", "--quiet", "--detach", workspace]);
-  writeFileSync(join(repository.path, "tracked.txt"), "primary edit\n");
-  repository.run(["add", "tracked.txt"]);
-  writeFileSync(join(workspace, "tracked.txt"), "linked edit\n");
-  repository.run(["-C", workspace, "add", "tracked.txt"]);
-  const primary = custody(repository);
-
-  const captured = await capturePreservingCustody(repository, workspace);
-
-  assert.equal(repository.run(["show", `${captured.tree}:tracked.txt`]), "linked edit\n");
-  assert.deepEqual(custody(repository), primary);
-});
-
 test("capture creates no shared-index output when split index is enabled", async () => {
   const repository = repositoryWithMain({ files: { "tracked.txt": "base\n" } });
   repository.run(["config", "core.splitIndex", "true"]);

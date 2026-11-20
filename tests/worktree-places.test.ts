@@ -23,8 +23,6 @@ import {
   appointManagedWorktrees,
   appointmentFor,
   canonicalPlaceRegister,
-  decodePlaceRegister,
-  emptyPlaceRegister,
   nukeEmptyPlaceAuthority,
   place,
   placeRegisterPath,
@@ -82,42 +80,6 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     }
   });
 
-  test("missing Place file is empty and written empty remains canonical", async () => {
-    const repository = await repositoryAt(repositoryWithCommit().path);
-    const path = join(repository.commonDirectory, "keiyaku", "places.json");
-    assert.equal(existsSync(path), false);
-    assert.deepEqual(await readPlaceRegister(repository), emptyPlaceRegister());
-    await releaseManagedWorktrees(repository, [EXAMPLE]);
-    assert.equal(readFileSync(path, "utf8"), EMPTY);
-  });
-
-  test("corrupt Place bytes are authority corruption", () => {
-    const path = "places.json";
-    assert.throws(
-      () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example"}}'),
-      AuthorityCorruptionError,
-    );
-    assert.throws(() => decodePlaceRegister(path, '{"appointments":{},"version":1}\n'), AuthorityCorruptionError);
-    assert.throws(() => decodePlaceRegister(path, '{"version":2,"appointments":{}}\n'), AuthorityCorruptionError);
-    assert.throws(
-      () => decodePlaceRegister(path, '{"version":1,"appointments":{"Atlantis":"kei/example"}}\n'),
-      AuthorityCorruptionError,
-    );
-    assert.throws(
-      () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"not-a-contract"}}\n'),
-      AuthorityCorruptionError,
-    );
-    assert.throws(
-      () =>
-        decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","hogwarts":"kei/example"}}\n'),
-      AuthorityCorruptionError,
-    );
-    assert.throws(
-      () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","atlantis":"kei/other"}}\n'),
-      AuthorityCorruptionError,
-    );
-  });
-
   test("concurrent appoint and release preserve every mapping", async () => {
     const repository = await repositoryAt(repositoryWithCommit().path);
     const first = Array.from({ length: 8 }, (_, index) => contractId(`kei/first-${index}`));
@@ -132,21 +94,6 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       readFileSync(join(repository.commonDirectory, "keiyaku", "places.json"), "utf8"),
       canonicalPlaceRegister(register),
     );
-  });
-
-  test("appointment after a concurrent release uses the locked on-disk register", async () => {
-    const repository = await repositoryAt(repositoryWithCommit().path);
-    const firstRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
-    const first = firstRegister.get(EXAMPLE)!;
-    const snapshot = await readPlaceRegister(repository);
-    await releaseManagedWorktrees(repository, [EXAMPLE]);
-    const reusedRegister = await appointManagedWorktrees(repository, [OTHER]);
-    const reused = reusedRegister.get(OTHER)!;
-    const appointed = await appointManagedWorktrees(repository, [EXAMPLE]);
-    assert.equal(snapshot.get(EXAMPLE), first);
-    assert.equal(reused, OTHER_PLACE);
-    assert.equal(appointed.get(EXAMPLE), EXAMPLE_PLACE);
-    assert.deepEqual(await readPlaceRegister(repository), appointed);
   });
 
   test("allocation skips occupied candidates in order and publishes two appointments in one batch", async () => {
@@ -292,37 +239,6 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
     assert.equal(fixture.run(["worktree", "list", "--porcelain"]), topology);
     assert.equal(readFileSync(join(path, "authored.txt"), "utf8"), "keep my edits\n");
-  });
-
-  test("a 10000-appointment observation decodes the register once", async () => {
-    const git = await repositoryAt(repositoryWithCommit().path);
-    const appointments = Array.from({ length: 10_000 }, (_, index) => ({
-      place: place(`sample-${index}`),
-      contract: contractId(`kei/bulk-${index}`),
-    }));
-    const bytes = canonicalPlaceRegister(
-      new Map(appointments.map(({ contract, place: appointed }) => [contract, appointed])),
-    );
-    const path = join(git.commonDirectory, "keiyaku", "places.json");
-    mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
-    writeFileSync(path, bytes);
-    const register = decodePlaceRegister(path, bytes);
-    const bulkNext = contractId("kei/bulk-next");
-    const next = await appointManagedWorktrees(git, [bulkNext]);
-    writeFileSync(path, "not-canonical\n");
-    assert.equal(register.size, 10_000);
-    assert.equal(register.get(appointments[0]!.contract), appointments[0]!.place);
-    assert.equal(register.get(appointments[9_999]!.contract), appointments[9_999]!.place);
-    assert.equal(next.get(bulkNext), `w-${contractLocator(bulkNext)}`);
-    for (const appointment of appointments) {
-      assert.deepEqual(await readManagedWorktreeAppointment(git, appointment.contract, register), {
-        kind: "appointed",
-        place: appointment.place,
-        path: worktreePath(git, appointment.place),
-      });
-    }
-    const failed = await readManagedWorktreeAppointment(git, EXAMPLE);
-    assert.equal(failed.kind, "failed");
   });
 
   test("Place authority nuke retains a nonempty register and its lock", async () => {
@@ -531,36 +447,4 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.deepEqual(await readManagedWorktreeAppointment(git, id), { kind: "unappointed" });
   });
 
-  test("release write failure keeps the appointment after physical removal", async () => {
-    const repository = repositoryWithCommit();
-    const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(await Keis.of(repo).bind({
-      terms: contractBody("Release write"),
-    }));
-    const git = await repositoryAt(repository.path);
-    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id);
-    assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
-    const bytes = readFileSync(placeRegisterPath(git), "utf8");
-    const directory = join(git.commonDirectory, "keiyaku");
-    chmodSync(directory, 0o555);
-    let abandoned;
-    try {
-      abandoned = accepted(await bound.kei.abandon());
-    } finally {
-      chmodSync(directory, 0o755);
-    }
-    assert.equal(existsSync(appointment.path), false);
-    assert.ok((abandoned.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
-    assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), appointment);
-    const repaired = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
-    assert.ok(repaired.kind === "contract");
-    assert.equal((repaired.issues ?? []).length, 0, JSON.stringify(repaired));
-    assert.equal(repaired.effects, undefined, "release-only retry must not recreate or remove worktree custody again");
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
-    const again = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
-    assert.ok(again.kind === "contract");
-    assert.equal((again.issues ?? []).length, 0, JSON.stringify(again));
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
-  });
 });

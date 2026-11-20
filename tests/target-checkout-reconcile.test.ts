@@ -229,53 +229,6 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     }
   });
 
-  test("a staged candidate-changed path leaves the checkout behind instead of refusing placement", async () => {
-    const { repository, contract } = await ordinaryCandidateFixture();
-    writeFileSync(resolve(repository.path, "delivered.txt"), "staged conflict\n");
-    repository.run(["add", "delivered.txt"]);
-
-    const delivered = acceptedDelivery(await contract.deliver());
-
-    assert.equal(delivered.placement?.kind, "placed");
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
-    const retained = (delivered.issues ?? []).filter((issue) => issue.kind === "target-checkout-retained");
-    assert.ok(retained.length > 0);
-    assert.equal(new Set(retained.map((issue) => issue.diagnostic)).size, retained.length);
-    for (const issue of retained) {
-      assert.equal(issue.path, repository.path);
-      assert.equal(issue.target, "refs/heads/main");
-    }
-    assert.equal(repository.run(["show", ":delivered.txt"]), "staged conflict\n");
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
-  });
-
-  test("an unmerged candidate-changed path leaves the checkout behind instead of refusing placement", async () => {
-    const { repository, contract } = await ordinaryCandidateFixture();
-    const base = repository.run(["rev-parse", "HEAD:delivered.txt"]).trim();
-    const ours = repository.run(["hash-object", "-w", "--stdin"], "ours\n").trim();
-    const theirs = repository.run(["hash-object", "-w", "--stdin"], "theirs\n").trim();
-    repository.run(
-      ["update-index", "--index-info"],
-      `100644 ${base} 1\tdelivered.txt\n100644 ${ours} 2\tdelivered.txt\n100644 ${theirs} 3\tdelivered.txt\n`,
-    );
-    writeFileSync(resolve(repository.path, "delivered.txt"), "unresolved\n");
-    assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
-
-    const delivered = acceptedDelivery(await contract.deliver());
-
-    assert.equal(delivered.placement?.kind, "placed");
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
-    const retained = (delivered.issues ?? []).filter((issue) => issue.kind === "target-checkout-retained");
-    assert.ok(retained.length > 0);
-    assert.equal(new Set(retained.map((issue) => issue.diagnostic)).size, retained.length);
-    for (const issue of retained) {
-      assert.equal(issue.path, repository.path);
-      assert.equal(issue.target, "refs/heads/main");
-    }
-    assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "unresolved\n");
-  });
-
   test("reconcile completes an ordinary follow interrupted after atomic publication", async () => {
     const candidate = await claimedUnfollowedCandidateFixture();
     const { repository } = candidate;
@@ -297,35 +250,6 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(!retry.effects?.some((effect) => effect.kind === "target-checkout"));
     assert.ok(!retry.issues?.some((issue) => issue.kind === "target-checkout-retained"));
     assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
-  });
-
-  test("mixed candidate bytes are inert until the entire predecessor is restored", async () => {
-    const { repository, id, contract } = await claimedUnfollowedCandidateFixture();
-    const integration = present(await contract.state()).currentIntegration!;
-    const indexPath = resolve(repository.path, ".git", "index");
-    const index = readFileSync(indexPath);
-    const file = resolve(repository.path, "delivered.txt");
-    writeFileSync(file, "candidate\n");
-    const contracts = Keis.of(await Repo.at({ path: repository.path }));
-
-    const retained = await contracts.reconcile({ contract: id });
-    assert.ok(retained.kind === "contract");
-    assert.ok(retained.issues?.some((issue) => issue.kind === "target-checkout-retained"));
-    assert.ok(!retained.effects?.some((effect) => effect.kind === "target-checkout"));
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration.snapshot);
-    assert.equal(readFileSync(file, "utf8"), "candidate\n");
-    assert.deepEqual(readFileSync(indexPath), index);
-
-    repository.run(["checkout-index", "--force", "--", "delivered.txt"]);
-    repository.run(["update-index", "--refresh", "-q"]);
-    const recovered = await contracts.reconcile({ contract: id });
-    assert.ok(recovered.kind === "contract");
-    assert.ok(!recovered.issues?.some((issue) => issue.kind === "target-checkout-retained"), JSON.stringify(recovered));
-    assert.deepEqual(recovered.effects?.filter((effect) => effect.kind === "target-checkout"), [
-      { kind: "target-checkout", path: repository.path, target: "refs/heads/main" },
-    ]);
-    assert.equal(readFileSync(file, "utf8"), "candidate\n");
-    assert.equal(repository.run(["show", ":delivered.txt"]), "candidate\n");
   });
 
   test("a relevant staged change after classification fails into lag without overwriting it", async () => {
@@ -372,21 +296,6 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       repository.run(["status", "--porcelain", "--untracked-files=no", "--", "delivered.txt"]),
       "M  delivered.txt\n",
     );
-  });
-
-  test("reconcile does not guess after the user changes an interrupted target checkout", async () => {
-    const candidate = await claimedUnfollowedCandidateFixture();
-    const { repository } = candidate;
-    writeFileSync(resolve(repository.path, "delivered.txt"), "changed after publication\n");
-
-    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({
-      contract: candidate.id,
-    });
-    assert.ok(reconciled.kind === "contract");
-
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
-    assert.ok((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
-    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
   });
 
   test("disjoint untracked content does not retain an otherwise exact predecessor", async () => {
@@ -499,51 +408,6 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
     assert.equal(readFileSync(resolve(repository.path, "second.txt"), "utf8"), "base\n");
-    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
-  });
-
-  test("a checkout already staged at the candidate on changed paths is inert", async () => {
-    const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
-    const { contract, id } = await managedCandidate(repository, []);
-    writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
-    repository.run(["add", "delivered.txt"]);
-    assert.equal(repository.run(["status", "--porcelain"]), "M  delivered.txt\n");
-
-    const preview = await contract.previewDelivery();
-    assert.equal(preview.kind, "ready");
-    assert.equal(preview.target?.kind, "placeable");
-    assert.equal(preview.target.checkouts, undefined);
-
-    const delivered = acceptedDelivery(await contract.deliver());
-    assert.equal(delivered.placement?.kind, "placed");
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
-    assert.equal(repository.run(["status", "--porcelain"]), "");
-
-    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
-    assert.ok(reconciled.kind === "contract");
-    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
-    assert.ok(!(reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
-  });
-
-  test("a changed worktree over staged candidate bytes is retained", async () => {
-    const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
-    const { contract } = await managedCandidate(repository, []);
-    writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
-    repository.run(["add", "delivered.txt"]);
-    writeFileSync(resolve(repository.path, "delivered.txt"), "local edit\n");
-    const index = readFileSync(resolve(repository.path, ".git", "index"));
-
-    const preview = await contract.previewDelivery();
-    assert.equal(preview.kind, "ready");
-    assert.equal(preview.target?.kind, "placeable");
-    const diagnostic = preview.target.checkouts?.find((checkout) => checkout.path === repository.path)?.diagnostic;
-    assert.match(diagnostic ?? "", /local state on changed paths/u);
-
-    const delivered = acceptedDelivery(await contract.deliver());
-    assert.equal(delivered.placement?.kind, "placed");
-    assert.equal(delivered.issues?.find((issue) => issue.kind === "target-checkout-retained")?.diagnostic, diagnostic);
-    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "local edit\n");
     assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
   });
 

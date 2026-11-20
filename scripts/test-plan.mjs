@@ -18,7 +18,7 @@ export async function runReleasePlan(run) {
   const building = phase("build");
   const independent = (async () => {
     const results = [];
-    for (const name of ["format:check", "test:architecture", "test:maintainability"]) {
+    for (const name of ["test:typecheck", "format:check", "test:architecture", "test:maintainability"]) {
       results.push(await phase(name));
     }
     return results;

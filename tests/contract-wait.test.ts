@@ -7,10 +7,11 @@ import { Akumas, Kei, Keis, Repo, World, type ContractWaitResult, type Invocatio
 import { contractWaitNormalResultSchema } from "../src/library/contract-wait.js";
 import { assertWireConformance } from "./support/schema-parity.js";
 import { contractJournalPaths } from "../src/git/identity.js";
+import { GIT_REF } from "../src/git/read-observation.js";
 import { readGitPaths, repositoryAt, updateGitTree, writeCommit } from "../src/git/repository.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { bornLineageAkuma } from "./support/akuma-fixtures.js";
-import { withContractWaitBarrier } from "./support/contract-wait.js";
+import { withContractWaitBarrier, withContractWaitEpochs, withWaitClock } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
 import { accepted, document, managedCandidate, present, repositoryWithMain } from "./support/library-verbs.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
@@ -32,7 +33,7 @@ async function amend(handle: Kei, objective: string) {
 
 const changed = (result: ContractWaitResult): boolean[] => result.contracts.map((member) => member.changed === true);
 
-test("Contract waits witness their own journal changes and preserve plural progress", async () => {
+test("Contract waits witness their own journal changes and preserve plural progress", async (t) => {
   const { repository, repo, first, second } = await fixture();
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
@@ -58,16 +59,33 @@ test("Contract waits witness their own journal changes and preserve plural progr
     const anyResult = await any;
     assert.equal(anyResult.reason, "changed");
     assert.deepEqual(changed(anyResult), [false, true]);
-
-    barrier.reset();
-    const progress = Keis.of(observingRepo).wait({ contracts: [first.id, second.id], completion: "all", timeoutMs: 1800 });
-    await barrier.reads();
-    await amend(first.handle, "Another observed change.");
-    const deadline = await progress;
-    assert.equal(deadline.reason, "deadline");
-    assert.deepEqual(changed(deadline), [true, false]);
-    assertWireConformance(contractWaitNormalResultSchema, deadline);
   });
+
+  const deadline = await withContractWaitEpochs(repository.path, async ({ gitPath, observed }) => {
+    const observingRepo = await Repo.at({ path: repository.path, gitPath });
+    const epoch = () => repository.run(["rev-parse", GIT_REF]).trim();
+    const baseline = epoch();
+    const timeoutMs = 1800;
+    const controller = new AbortController();
+    return await withWaitClock(t, timeoutMs, async clock => {
+      const pending = clock.within(() => Keis.of(observingRepo).wait({
+        contracts: [first.id, second.id], completion: "all", timeoutMs, signal: controller.signal,
+      }));
+      try {
+        await observed(baseline, pending);
+        await amend(first.handle, "Another observed change.");
+        await observed(epoch(), pending);
+        clock.expire();
+        return await pending;
+      } finally {
+        controller.abort();
+        await pending.catch(() => {});
+      }
+    });
+  });
+  assert.equal(deadline.reason, "deadline");
+  assert.deepEqual(changed(deadline), [true, false]);
+  assertWireConformance(contractWaitNormalResultSchema, deadline);
   assert.equal((await first.handle.wait({ timeoutMs: 0 })).reason, "deadline");
   const missing = await Keis.of(repo).wait({ contracts: [first.id, "kei/not-present"], timeoutMs: 0 });
   assert.equal(missing.reason, "missing");

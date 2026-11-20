@@ -159,7 +159,13 @@ Cancellation requests termination only for work still owned by this attempt;
 it stops later owned phases and still awaits independently bounded retirement.
 It never erases a confirmed leading admission or its cleanup residue.
 
-## Repository Test Isolation
+## Repository Tests
+
+Release checks validate source types independently of the build, from the same
+locked dependency tree. Runtime tests need a successful build and test
+compilation; neither waits on a successful source check for correctness. The
+release result waits for every started phase and cannot succeed if any required
+phase failed.
 
 The repository test runner owns one fresh temporary fixture root for each
 invocation, replacing any inherited Square-ledger, process-home, and

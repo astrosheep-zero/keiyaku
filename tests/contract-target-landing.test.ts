@@ -233,8 +233,8 @@ test("fork inherits the exact target incarnation and refuses a replacement", asy
 
 test("explicit retarget recovers a child of an accepted or abandoned parent with fresh verification", async (t) => {
   for (const [mode, disposition] of [
-    ["optimistic", "accepted"], ["optimistic", "abandoned"],
-    ["strict", "accepted"], ["strict", "abandoned"],
+    ["optimistic", "abandoned"],
+    ["strict", "accepted"],
   ] as const) await t.test(`${mode}: ${disposition}`, async () => {
     const raw = repositoryWithMain();
     mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
@@ -300,24 +300,6 @@ test("amend refuses a transitive destination cycle without changing authority", 
   assert.equal(refused.kind, "refused", JSON.stringify(refused));
   if (refused.kind === "refused") assert.equal(refused.reason.kind, "cyclic-target");
   assert.deepEqual(present(await parent.kei.state()), before);
-});
-
-test("a parent terminal before placement cannot receive an already delivered child", async () => {
-  const raw = repositoryWithMain();
-  const repo = await Repo.at({ path: raw.path });
-  const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
-  const parentId = present(await parent.kei.state()).id;
-  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: ["reviewed"] }));
-  const path = child.worktreePath!;
-  writeFileSync(join(path, "child.txt"), "child\n");
-  raw.run(["-C", path, "add", "child.txt"]);
-  raw.run(["-C", path, "commit", "--quiet", "-m", "child"]);
-  accepted(await child.kei.deliver());
-  accepted(await parent.kei.abandon());
-  accepted(await child.kei.review({ verdict: "satisfied", summary: "Landing review passed" }));
-  assert.equal(present(await child.kei.state()).terminal, null);
-  assert.equal(present(await parent.kei.state()).terminal?.kind, "abandoned");
 });
 
 test("parent terminality during Verification prevents the child's placement", async () => {

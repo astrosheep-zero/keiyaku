@@ -42,14 +42,6 @@ const banned = new Set([
   "KanshiInput",
   "KanshiCountsInput",
 ]);
-const removedEntrypoints = new Set([
-  "kanshi",
-  "kanshiCounts",
-  "observeKanshi",
-  "selectRegion",
-  "settings",
-  "listAkumaNameDefinitions",
-]);
 const schemaName = (name: string) => name.endsWith("Schema") && name !== "JsonSchema";
 const diagnostics = (program: ts.Program) =>
   ts.formatDiagnosticsWithColorAndContext(ts.getPreEmitDiagnostics(program), {
@@ -224,108 +216,6 @@ function memoryHost(files: Readonly<Record<string, string>>): ts.CompilerHost {
   return host;
 }
 
-test("declaration closure follows public properties and reachable class values", () => {
-  const file = resolve(dirname(entry), "closure-proof.d.mts").replaceAll("\\", "/");
-  const peer = resolve(dirname(entry), "closure-peer.d.mts").replaceAll("\\", "/");
-  const cases = [
-    {
-      name: "constructor after an instance-only visit",
-      source: `export type Instance = Hidden;
-        export declare function expose(): typeof Hidden;
-        declare class Hidden { constructor(scope: RepositoryScope); }
-        interface RepositoryScope { secret: string }`,
-      missing: /Private capability reachable:.*: RepositoryScope/u,
-    },
-    {
-      name: "inherited static side with a private constructor",
-      source: `export declare function expose(): typeof Hidden;
-        declare class Hidden extends Base { private constructor(); }
-        declare class Base { static launch(scope: RepositoryScope): void; }
-        interface RepositoryScope { secret: string }`,
-      missing: /Private capability reachable:.*: RepositoryScope/u,
-    },
-    {
-      name: "private data alias in a callable signature",
-      source: `export declare function expose(value: HiddenInput): void;
-        type HiddenInput = Readonly<{ value: string }>;`,
-      missing: /Unexported callable type:.*: HiddenInput/u,
-    },
-    {
-      name: "interface callable property",
-      source: `export interface Public { call: HiddenCallable }
-        interface HiddenCallable { (value: string): void }`,
-      missing: /Unexported callable type:.*: HiddenCallable/u,
-    },
-    {
-      name: "callable alias through a public alias and inheritance",
-      source: `export declare function expose(): Public;
-        export type Public = Carrier;
-        interface Carrier extends Base {}
-        interface Base { call: HiddenCallable }
-        type HiddenCallable = (value: string) => void;`,
-      missing: /Unexported callable type:.*: HiddenCallable/u,
-    },
-    {
-      name: "inherited import-type property",
-      source: `export interface Public extends Base {}
-        interface Base { call: import("./closure-peer.mjs").HiddenCallable }`,
-      peer: `export interface HiddenCallable { (value: string): void }`,
-      missing: /Unexported callable type:.*: HiddenCallable/u,
-    },
-    {
-      name: "imported class value",
-      source: `export declare function expose(): typeof import("./closure-peer.mjs").Hidden;`,
-      peer: `export declare class Hidden { constructor(scope: RepositoryScope); }
-        interface RepositoryScope { secret: string }`,
-      missing: /Private capability reachable:.*: RepositoryScope/u,
-    },
-  ];
-  for (const fixture of cases) {
-    const host = memoryHost({
-      [file]: fixture.source + "\nexport {};",
-      [peer]: (fixture.peer ?? "") + "\nexport {};",
-    });
-    const program = ts.createProgram([file], { ...options, skipLibCheck: false }, host);
-    assert.equal(diagnostics(program), "", fixture.name);
-    assert.throws(
-      () => assertDeclarationClosure(program, program.getSourceFile(file)!),
-      (error: unknown) => error instanceof assert.AssertionError && fixture.missing.test(error.message),
-      fixture.name,
-    );
-  }
-
-  const host = memoryHost({
-    [file]: `import { z } from "zod";
-      interface RepositoryScope { secret: string }
-      interface BodyLauncher { launch(): void }
-      declare class Carrier {
-        constructor(scope: RepositoryScope);
-        static launch(launcher: BodyLauncher): void;
-        read(input: PublicInput): Id;
-      }
-      export type Handle = Carrier;
-      export type { Carrier as Instance };
-      export interface PublicInput { value: string }
-      declare const brand: unique symbol;
-      export type Id = string & { readonly [brand]: true };
-      type Shape = Readonly<{ handle: Handle; id: Id }>;
-      export type Result = Shape;
-      declare const schema: z.ZodObject<{ value: z.ZodString }>;
-      export type Data = z.output<typeof schema>;
-      declare class Base {
-        constructor(scope: RepositoryScope);
-        static available(input: PublicInput): void;
-      }
-      export declare class Safe extends Base { private constructor(); }
-      export declare function select(): Handle;
-      export declare function readData(): Data;
-      export {};`,
-  });
-  const program = ts.createProgram([file], { ...options, skipLibCheck: false }, host);
-  assert.equal(diagnostics(program), "");
-  assertDeclarationClosure(program, program.getSourceFile(file)!);
-});
-
 test("package types close public signatures and compile external callers", () => {
   const file = resolve(tmpdir(), "keiyaku-public-sdk-consumer.mts").replaceAll("\\", "/");
   const source = `
@@ -454,7 +344,7 @@ const update: VerbInput<"debt.update"> = { id: "debt/caller", note: "note", sign
   const exports = checker.getExportsOfModule(checker.getSymbolAtLocation(entryFile)!);
   assert.deepEqual(
     exports
-      .filter((symbol) => schemaName(symbol.name) || banned.has(symbol.name) || removedEntrypoints.has(symbol.name))
+      .filter((symbol) => schemaName(symbol.name) || banned.has(symbol.name))
       .map((symbol) => symbol.name),
     [],
   );

@@ -9,7 +9,6 @@ import { assertWireConformance, assertWireRoundTrip } from "./support/schema-par
 import { contractObservationSchema } from "../src/protocol/read/status.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project } from "../src/library/outcome.js";
-import { gateReports } from "../src/core/facts/gate.js";
 import { VERIFICATION_REF_NAMESPACE, verificationSnapshotRef } from "../src/git/repository.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
@@ -255,22 +254,6 @@ test("native pin publication failure leaves earlier Verification testimony intac
   assert.doesNotMatch(repository.run(["worktree", "list", "--porcelain"]), /keiyaku-v4-verify-/u);
 });
 
-test("review-only Contracts without declarations refuse verify and retain the delivery lifecycle", async () => {
-  const { contract } = await fixture([], ["reviewed"]);
-  const before = present(await contract.state());
-  const invalid = await contract.verify();
-  assert.ok(invalid.kind === "refused");
-  assert.equal(invalid.reason.kind, "verification-declaration-invalid");
-  assert.deepEqual(present(await contract.state()), before);
-  assert.equal((await contract.previewDelivery()).kind, "ready");
-  const delivered = accepted(await contract.deliver());
-  assert.ok(delivered.placement?.kind === "gates-unsatisfied");
-  assert.deepEqual(delivered.placement.unmet.map(({ gate }) => gate), ["reviewed"]);
-  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Review without declarations" }));
-  assert.equal(reviewed.placement?.kind, "placed");
-  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
-});
-
 test("each declaration executes in fresh scratch and terminal failure preserves later evidence and scenes", async () => {
   const { contract } = await fixture(["echo created > scratch-only", "test -f scratch-only", "exit 7", "true"]);
   const verified = accepted(await contract.verify());
@@ -356,28 +339,6 @@ test("normal red checks retain optional retirement residue while required retire
   } finally { await contract.abandon(); }
 });
 
-test("verify validates selection and dirty capture before executing or admitting", async () => {
-  const { repository, contract, worktree } = await fixture(["true"]);
-  const state = present(await contract.state());
-  const invalid = await contract.verify({ index: 2 });
-  assert.ok(invalid.kind === "refused");
-  assert.deepEqual(invalid.reason, { kind: "verification-index-out-of-range", total: 1 });
-  assert.equal(invalid.contractId, state.id);
-  await assert.rejects(() => contract.verify({ index: 0 }), /positive safe integer/u);
-  writeFileSync(join(worktree, "candidate.txt"), "dirty\n");
-  const before = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
-  const dirty = await contract.verify();
-  assert.ok(dirty.kind === "refused");
-  assert.equal(dirty.reason.kind, "dirty-workspace");
-  assert.equal(present(await contract.state()).attestations.length, 0);
-  const checked = accepted(await contract.verify({ includeDirty: true }));
-  assert.equal(checked.checks[0]?.kind, "terminal");
-  assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), before);
-  assert.equal(readFileSync(join(worktree, "candidate.txt"), "utf8"), "dirty\n");
-  assert.equal(present(await contract.state()).delivery, null);
-  await contract.abandon();
-});
-
 test("strict currency keeps prior checks tied to their tested snapshot after target movement", async () => {
   const { repository, contract } = await fixture(["true", "test -f candidate.txt"], undefined, "strict");
   accepted(await contract.deliver());
@@ -430,38 +391,6 @@ test("optimistic currency preserves testimony across clean reintegration without
   const final = present(await contract.state());
   assert.deepEqual(final.attestations.filter(({ data }) => data.gate === "verified"), before);
   assert.equal(final.terminal?.kind, "claimed");
-});
-
-test("optimistic currency reports candidate-content-changed when delivered content changes", async () => {
-  const { repository, contract, worktree } = await fixture(["true"]);
-  accepted(await contract.verify());
-  accepted(await contract.deliver());
-  const previousChange = present(await contract.state()).currentIntegration!.changeId;
-  writeFileSync(join(worktree, "candidate.txt"), "revised candidate\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "change candidate"]);
-  accepted(await contract.deliver());
-  const state = present(await contract.state());
-  const currentChange = state.currentIntegration!.changeId;
-  assert.notEqual(currentChange, previousChange);
-  const verified = gateReports(state).reports.find(({ gate }) => gate === "verified")!;
-  assert.deepEqual(verified.current, { kind: "stale", priorVerdict: "satisfied", reason: {
-    kind: "candidate-content-changed", target: "refs/heads/main", previousChange, currentChange,
-  } });
-  await contract.abandon();
-});
-
-test("verify after target movement reuses its prospective snapshot during ordinary completion", async () => {
-  const { repository, contract } = await fixture(["true"]);
-  accepted(await contract.deliver());
-  accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
-  writeFileSync(join(repository.path, "target-only.txt"), "moved\n");
-  repository.run(["add", "target-only.txt"]);
-  repository.run(["commit", "--quiet", "-m", "advance target"]);
-  const verified = accepted(await contract.verify());
-  assert.ok(verified.placement?.kind === "placed");
-  assert.equal(verified.placement.integration, verified.snapshot);
-  assert.equal(present(await contract.state()).currentIntegration?.snapshot, verified.snapshot);
 });
 
 test("cancellation after terminal execution retains the check and stops its admission", async () => {

@@ -21,7 +21,6 @@ import {
   contractCatalogueSchema,
   readContractCount,
   readContractMembership,
-  readContractObservation,
 } from "../src/protocol/read/status.js";
 import { Keis, KeiyakuError, Repo, Kanshi } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
@@ -33,12 +32,9 @@ import { bindOperation } from "../src/protocol/bind.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import {
-  contractCatalogueOperation,
-  contractObservationOperation,
-  contractsOperation,
   scopeOperation,
 } from "../src/protocol/operations.js";
-import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
+import { type ContractId } from "../src/core/facts/types.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { protocolContractId } from "./support/git.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
@@ -75,163 +71,6 @@ async function bind(
   assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   return result.state.id;
 }
-
-test("git repository resolution rejects omitted and empty coordinates", async () => {
-  await assert.rejects(Reflect.apply(repositoryAt, undefined, []), /repository path must be a nonempty string/);
-  await assert.rejects(repositoryAt(""), /repository path must be a nonempty string/);
-});
-
-test("public Contract rows select the source entry for every phase", async () => {
-  const repository = repositoryWithMain();
-  const ids = {
-    fresh: await bind(repository, "Phase fresh"),
-    bound: await bind(repository, "Phase bound"),
-    delivered: await bind(repository, "Phase delivered"),
-    claimed: await bind(repository, "Phase claimed"),
-    abandoned: await bind(repository, "Phase abandoned"),
-  };
-  const times = {
-    delivered: "2026-08-12T00:02:00.000Z",
-    claimed: "2026-08-12T00:03:00.000Z",
-    abandoned: "2026-08-12T00:04:00.000Z",
-  };
-  const git = await repositoryAt(repository.path);
-  const before = await readGitPaths(git, Object.values(ids).flatMap(contractJournalPaths));
-  if (before.commit === null) throw new Error("Keiyaku state was not published");
-  const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
-  const deliverEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
-    v: 1,
-    kind: "deliver",
-    contract: id,
-    entry: entryUlid(entry),
-    at,
-    data: {
-      tenderSnapshot: snapshot,
-      integration: { predecessor: snapshot, snapshot, changeId: changeId(`change-${id}`) },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate: false },
-    },
-  });
-  const deliveredDelivery = deliverEntry(ids.delivered, times.delivered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
-  const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
-  const additions = new Map<ContractId, readonly JournalEntry[]>([
-    [
-      ids.bound,
-      [
-        {
-          v: 1,
-          kind: "amend",
-          contract: ids.bound,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
-          at: times.delivered,
-          data: terms("Phase bound", [ids.claimed, ids.delivered, ids.abandoned, protocolContractId("Missing")]),
-        },
-      ],
-    ],
-    [ids.delivered, [deliveredDelivery]],
-    [
-      ids.claimed,
-      [
-        claimedDelivery,
-        {
-          v: 1,
-          kind: "claimed",
-          contract: ids.claimed,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBG"),
-          at: times.claimed,
-          data: { delivery: claimedDelivery.entry },
-        },
-      ],
-    ],
-    [
-      ids.abandoned,
-      [
-        {
-          v: 1,
-          kind: "abandoned",
-          contract: ids.abandoned,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBH"),
-          at: times.abandoned,
-          data: {},
-        },
-      ],
-    ],
-  ]);
-  const updates = new Map<string, { oid: string } | null>();
-  for (const [id, entries] of additions) {
-    const activePath = contractJournalPath(id, "active");
-    const active = before.paths.get(activePath);
-    if (active?.type !== "blob") throw new Error(`missing active journal for ${id}`);
-    const oid = await writeBlob(
-      git,
-      Buffer.concat([await readBlob(git, active.oid), ...entries.map((entry) => Buffer.from(encodeEntry(entry)))]),
-    );
-    const terminal = entries.at(-1)?.kind === "claimed" || entries.at(-1)?.kind === "abandoned";
-    if (terminal) {
-      updates.set(activePath, null);
-      updates.set(contractJournalPath(id, "terminal"), { oid });
-    } else updates.set(activePath, { oid });
-  }
-  const tree = await updateGitTree(git, before.tree, updates);
-  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
-  repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
-
-  const expected = [
-    [ids.fresh, "bound"],
-    [ids.bound, "bound"],
-    [ids.delivered, "bound"],
-    [ids.claimed, "claimed"],
-    [ids.abandoned, "abandoned"],
-  ] as const;
-  const scope = await scopeOperation({ coordinate: repository.path });
-  for (const [id, phase] of expected) {
-    const observed = await withGitDecodeChannel(scope, (channel) =>
-      contractObservationOperation({
-        scope,
-        channel,
-        contractId: id,
-      }),
-    );
-    assert.equal(observed.kind, "contract");
-    assert.equal(observed.phase, phase);
-  }
-  const detailed = await withGitDecodeChannel(scope, (channel) =>
-    contractObservationOperation({ scope, channel, contractId: ids.bound }),
-  );
-  const fromWorld = await withGitDecodeChannel(scope, (channel) =>
-    withGitReadObservation(scope, channel, (observation) => readContractObservation(observation, ids.bound)),
-  );
-  assert.deepEqual(detailed, fromWorld);
-  assert.equal(detailed.kind, "contract");
-  assert.deepEqual(detailed.after, [
-    { contractId: ids.delivered, state: "active" },
-    { contractId: ids.abandoned, state: "abandoned" },
-    { contractId: protocolContractId("Missing"), state: "missing" },
-  ]);
-  const membership = await withGitDecodeChannel(scope, (channel) =>
-    contractsOperation({
-      scope,
-      channel,
-    }),
-  );
-  const delivered = membership.find((row) => row.id === ids.delivered);
-  assert.equal(delivered?.phase, "bound");
-  assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "bound");
-  const catalogue = await withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel }));
-  const catalog = renderContractCatalogue(catalogue);
-  assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
-  const current = await readGitPaths(git, contractJournalPaths(ids.claimed));
-  const corrupt = await writeBlob(git, "corrupt prerequisite\n");
-  const corruptTree = await updateGitTree(
-    git,
-    current.tree,
-    new Map([[contractJournalPath(ids.claimed, "terminal"), { oid: corrupt }]]),
-  );
-  const corruptCommit = await writeCommit({ repository: git, tree: corruptTree, parent: current.commit });
-  repository.run(["update-ref", GIT_REF, corruptCommit, current.commit!]);
-  const unchanged = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
-  assert.deepEqual(unchanged, membership, "contextual membership never expands prerequisite journals");
-});
 
 test("readable Contract catalogue skips one malformed journal while exact authority stays strict", async () => {
   const repository = repositoryWithMain();

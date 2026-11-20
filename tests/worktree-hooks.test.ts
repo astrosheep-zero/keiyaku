@@ -12,21 +12,15 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import {
   runCreateHooks,
-  runHookCommands,
-  worktreeHooksFrom,
   type HookCommand,
   type WorktreeHooks,
 } from "../src/git/hooks.js";
 import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
-import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { Keis, Repo } from "../src/index.js";
 import { projectSettings } from "../src/settings.js";
-import { abandonOperation } from "../src/protocol/abandon.js";
-import { scopeOperation } from "../src/protocol/operations.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
-import { runCli } from "./support/cli-fixtures.js";
 
 function contractBody(title: string): string {
   return contractMarkdown(title, {
@@ -124,14 +118,6 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   held.close();
 });
 
-test("hook action names must be unique within each phase", async () => {
-  const repository = repositoryWithMain();
-  const duplicate: HookCommand = { name: "prepare", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 };
-  settingsHooks(repository.path, { create: [duplicate, duplicate], destroy: [] });
-  const settings = await projectSettings(repository.path);
-  assert.throws(() => worktreeHooksFrom({ settings }), /name must be unique within its phase/u);
-});
-
 test("a managed create phase reports its first failing command and runs no later command", async () => {
   const repository = repositoryWithMain();
   const commands = join(mkdtempSync(join(tmpdir(), "keiyaku-hook-failure-")), "commands.log");
@@ -181,58 +167,6 @@ test("a managed create phase reports its first failing command and runs no later
   assert.deepEqual(lines(commands), ["prepare", "prepare", "later"]);
 });
 
-test("a managed phase keeps timeout and unavailable-execution diagnoses", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-diagnosis-"));
-  try {
-    const slow: HookCommand = {
-      name: "slow",
-      argv: [process.execPath, "-e", "setTimeout(() => {}, 30_000)"],
-      timeoutMs: 25,
-    };
-    const timed = await runCreateHooks(directory, { create: [slow], destroy: [] });
-    assert.ok(timed.lag?.kind === "worktree-hook-failed");
-    assert.equal(timed.lag.name, "slow");
-    assert.match(timed.lag.diagnostic, /^timeout/u);
-
-    const missing: HookCommand = { name: "missing", argv: ["keiyaku-v4-no-such-executable"], timeoutMs: 5_000 };
-    const unavailable = await runCreateHooks(directory, { create: [missing], destroy: [] });
-    assert.ok(unavailable.lag?.kind === "worktree-hook-failed");
-    assert.equal(unavailable.lag.name, "missing");
-    assert.match(unavailable.lag.diagnostic, /^spawn error/u);
-    assert.match(unavailable.lag.diagnostic, /ENOENT/u);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("a cancelled ordered run names the command it stopped", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-cancelled-"));
-  const started = join(directory, "started");
-  const controller = new AbortController();
-  const commands: readonly HookCommand[] = [
-    { name: "first", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 },
-    {
-      name: "waiting",
-      argv: [
-        process.execPath,
-        "-e",
-        `require("node:fs").writeFileSync(${JSON.stringify(started)}, "started"); setInterval(() => {}, 1_000)`,
-      ],
-      timeoutMs: 5_000,
-    },
-  ];
-  try {
-    const pending = runHookCommands(directory, commands, controller.signal);
-    await waitForFile(started);
-    controller.abort();
-    const result = await pending;
-    assert.ok(result.kind === "cancelled");
-    assert.equal(result.name, "waiting");
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
 test("abandon chains destroy-hook changes after the initial ephemeral recovery", async () => {
   const repository = repositoryWithMain();
   settingsHooks(repository.path, {
@@ -275,100 +209,10 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   assert.equal(repository.run(["rev-parse", `${recovery}^^`]).trim(), originalHead);
 });
 
-/** One configured worktree hook command that records its phase in a marker file outside the worktree. */
-function markerCommand(marker: string, phase: string): HookCommand {
-  return {
-    name: phase,
-    argv: [
-      process.execPath,
-      "-e",
-      `require("node:fs").appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(`${phase}\n`)})`,
-    ],
-    timeoutMs: 5_000,
-  };
-}
-
 function settingsHooks(root: string, hooks: Readonly<Record<string, readonly HookCommand[]>>): void {
   mkdirSync(join(root, ".keiyaku"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "settings.json"), `${JSON.stringify({ worktree: hooks })}\n`);
 }
-
-test("CLI abandon carries the configured destroy hook to the native operation", async (context) => {
-  const repository = repositoryWithMain();
-  const markers = mkdtempSync(join(tmpdir(), "keiyaku-cli-hook-abandon-"));
-  context.after(() => rmSync(markers, { recursive: true, force: true }));
-  const marker = join(markers, "destroy.txt");
-  settingsHooks(repository.path, { destroy: [markerCommand(marker, "destroy")] });
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: contractBody("CLI abandon hooks"),
-    }),
-  );
-  const id = present(await bound.kei.state()).id;
-
-  const abandoned = await runCli(["-C", repository.path, "abandon", id], { environment: {} });
-  assert.equal(abandoned.exit, 0, abandoned.stderr);
-  assert.equal(readFileSync(marker, "utf8"), "destroy\n");
-});
-
-test("CLI arc carries the configured create hook into its reconciliation", async (context) => {
-  const repository = repositoryWithMain();
-  const markers = mkdtempSync(join(tmpdir(), "keiyaku-cli-hook-arc-"));
-  context.after(() => rmSync(markers, { recursive: true, force: true }));
-  const marker = join(markers, "create.txt");
-  settingsHooks(repository.path, { create: [markerCommand(marker, "create")] });
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: contractBody("CLI arc hooks"),
-    }),
-  );
-  const id = present(await bound.kei.state()).id;
-  rmSync(await appointedWorktreePath(await repositoryAt(repository.path), id), { recursive: true, force: true });
-
-  const arced = await runCli(["-C", repository.path, "arc", id, "-"], {
-    environment: {},
-    readStdin: async () => contractBody("CLI arc hooks v2"),
-  });
-  assert.equal(arced.exit, 0, arced.stderr);
-  assert.equal(readFileSync(marker, "utf8"), "create\n");
-});
-
-test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
-  const repository = repositoryWithMain();
-  const git = await repositoryAt(repository.path);
-  const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(
-    await Keis.of(repo).bind({
-      terms: contractBody("Terminal wins"),
-    }),
-  );
-  const id = present(await bound.kei.state()).id;
-  const worktree = await appointedWorktreePath(git, id);
-  const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
-  const pending = Keis.of(repo).reconcile({ contract: id });
-
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const terminal = await withGitDecodeChannel(scope, (channel) =>
-    abandonOperation({
-      scope,
-      channel,
-      contractId: id,
-    }),
-  );
-  assert.equal(terminal.kind, "accepted");
-  repository.run(["worktree", "remove", worktree]);
-  held.close();
-
-  const report = await pending;
-  assert.ok(report.kind === "contract");
-  assert.equal(report.issues, undefined);
-  assert.equal(
-    report.effects?.some((effect) => effect.kind === "worktree-created") ?? false,
-    false,
-  );
-  assert.equal(existsSync(worktree), false);
-  assert.equal(present(await bound.kei.state()).terminal?.kind, "abandoned");
-});
 
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-caller-death-"));

@@ -13,7 +13,6 @@ import {
   Kanshi,
 } from "../src/index.js";
 import {
-  debtAbsentSchema,
   debtMutationResultSchema as mutationSchema,
   debtListSchema as listSchema,
   debtReadyListSchema as readySchema,
@@ -52,11 +51,6 @@ import {
   kanshiResultSchema as resultSchema,
   kanshiObservationSchema as observationSchema,
 } from "../src/kanshi/index.js";
-
-test("Debt missing-world value has one strict owner schema", () => {
-  assertWireRoundTrip(debtAbsentSchema, { kind: "absent" });
-  assert.equal(debtAbsentSchema.safeParse({ kind: "absent", extra: true }).success, false);
-});
 
 test("Debt, Settings, World, region and reset schemas describe real wire results", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ambient-wire-"));

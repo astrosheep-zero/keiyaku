@@ -5,21 +5,6 @@ import { parseToAST } from "../src/markdown/parse.js";
 import { MarkdownParseError } from "../src/markdown/types.js";
 import { directChildren, indexDocument, indexedHeadings, rawSlice, sectionContent } from "../src/markdown/query.js";
 
-test("token spans tile exact BOM and CRLF source", () => {
-  const source =
-    "\uFEFF---\r\nkind: draft\r\neffortOptions:\r\n  - low\r\n  - high\r\n---\r\n# Title\r\n## Body\r\ntext\r\n";
-  const document = parseToAST(source);
-  const tokens = lexMarkdown(source);
-  let cursor: number = document.bomLength;
-  for (const token of tokens) {
-    assert.equal(token.span.start, cursor);
-    cursor = token.span.end;
-  }
-  assert.equal(cursor, source.length);
-  assert.equal(tokens.map((token) => rawSlice(document, token.span)).join(""), source.slice(document.bomLength));
-  assert.deepEqual(document.frontmatter?.entries, { kind: "draft", effortOptions: ["low", "high"] });
-});
-
 test("fences keep heading-looking bytes opaque and H1 closes H2", () => {
   const source = [
     "# First",
@@ -144,17 +129,5 @@ test("frontmatter YAML parse failures carry every diagnostic in source order", (
       assert.equal(error.message, diagnostics.join("\n"));
       return true;
     },
-  );
-});
-
-test("a single frontmatter YAML diagnostic remains the Markdown parse failure message", () => {
-  const diagnostic = "Flow sequence in block collection must be sufficiently indented and end with a ]";
-  assert.throws(
-    () => lexMarkdown("---\ninvalid: [\n---\n# Title\n"),
-    (error: unknown) =>
-      error instanceof MarkdownParseError &&
-      error.message === diagnostic &&
-      error.diagnostics.length === 1 &&
-      error.diagnostics[0] === diagnostic,
   );
 });

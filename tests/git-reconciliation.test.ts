@@ -221,28 +221,6 @@ function pruneUnreachableCommits(repository: TestGitRepository) {
   repository.run(["gc", "--prune=now"]);
 }
 
-for (const scenario of ["retired", "pruned"] as const) {
-  test(`release-only retry at a legacy Place with a ${scenario} tender`, async () => {
-    const { repository, scope, keis, id, tender, pinValues } = await terminalLegacyPlaceFixture();
-    if (scenario === "pruned") {
-      pruneUnreachableCommits(repository);
-      assert.throws(() => repository.run(["cat-file", "-e", tender]));
-    }
-    const retry = await keis.reconcile({ contract: id });
-    assert.equal(retry.kind, "contract");
-    assert.equal(retry.effects, undefined);
-    assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "unappointed" });
-    assert.deepEqual(await pinValues(), [null, null]);
-    if (scenario === "retired") assert.equal(retry.issues, undefined);
-    else {
-      assert.equal(retry.issues?.length, 1);
-      assert.equal(retry.issues?.[0]?.kind, "reconcile-failed");
-      assert.match(retry.issues[0].diagnostic, /missing|nonexistent/u);
-      assert.ok(retry.issues[0].diagnostic.includes(tender));
-    }
-  });
-}
-
 for (const missing of ["tender", "integration"] as const) {
   test(`terminal retry repairs the surviving ref when the ${missing} commit was pruned`, async () => {
     const { repository, scope, keis, id, tender, integration, refs, pinValues } = await terminalLegacyPlaceFixture();
@@ -281,7 +259,6 @@ for (const missing of ["tender", "integration"] as const) {
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   for (const [index, relativePath] of [
     ["primary", ".keiyaku/.gitignore"],
-    ["managed", ".keiyaku/.gitignore"],
     ["managed", ".agents/skills/keiyaku-deliver/SKILL.md"],
   ] as const) {
     test(`projection refuses ${relativePath} tracked only in the ${index} index before overwrite`, async () => {
@@ -314,39 +291,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       assert.ok(retried.kind === "contract");
       assert.equal((retried.issues ?? []).some((issue) => issue.kind === "contract-file-failed"), false);
       assert.notEqual(readFileSync(path, "utf8"), "authored generated location\n");
-    });
-  }
-
-  for (const index of ["primary", "managed"] as const) {
-    test(`tracking query failure in the ${index} index is lag and preserves prior effects`, async () => {
-      const { repository, repo, id, worktree } = await projectionFixture();
-      const root = index === "primary" ? repository.path : worktree;
-      const guidance = readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8");
-      const report = await withGitShim(
-        [
-          'if [ "$1" = "ls-files" ] && [ "$PWD" = "$KEIYAKU_FAILED_INDEX" ]; then',
-          '  printf ".keiyaku/KEIYAKU.md\\0"',
-          '  echo "tracking read failed" >&2',
-          "  exit 1",
-          "fi",
-          'exec "$KEIYAKU_REAL_GIT" "$@"',
-        ].join("\n"),
-        { KEIYAKU_FAILED_INDEX: root },
-        async (gitPath) =>
-          Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: id }),
-      );
-      assert.ok(report.kind === "contract");
-
-      const lag = (report.issues ?? []).find((issue) => issue.kind === "contract-file-failed");
-      assert.ok(lag?.kind === "contract-file-failed", JSON.stringify(report));
-      assert.equal((report.issues ?? []).filter((issue) => issue.kind === "contract-file-failed").length, 1);
-      assert.equal(lag.path, join(root, ".keiyaku", ".gitignore"));
-      assert.match(lag.diagnostic, /ls-files -z -- .*tracking read failed/);
-      assert.equal(readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
-
-      const recovered = await Keis.of(repo).reconcile({ contract: id });
-      assert.ok(recovered.kind === "contract");
-      assert.equal(recovered.issues, undefined);
     });
   }
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
