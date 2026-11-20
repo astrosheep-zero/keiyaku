@@ -34,7 +34,7 @@ type PluginRuntimeInput = Readonly<{
 }>;
 
 export type PluginRuntime = Readonly<{
-  emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
+  emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic, caller?: AbortSignal): Promise<void>;
   withWaitDeferrals<T>(
     input: PluginWaitDeferralInput,
     signal: AbortSignal | undefined,
@@ -372,6 +372,32 @@ async function closeWaitDeferral(
   );
 }
 
+type PluginActivation = Readonly<{ pluginId: string; activation: Promise<Attempt<z.infer<typeof instanceSchema>>> }>;
+
+async function emitToPlugin(
+  { pluginId, activation }: PluginActivation,
+  signal: PluginSignal,
+  deadline: number,
+  report: PluginDiagnostic | undefined,
+  caller: AbortSignal | undefined,
+): Promise<void> {
+  const result = await runBounded(
+    async (cancellation) => {
+      const activated = await activation;
+      cancellation.throwIfAborted();
+      if (activated.kind === "expired") throw timeoutError();
+      if (activated.kind === "completed") {
+        await activated.value.signals?.[signal.kind]?.(signal as never, cancellation);
+      }
+    },
+    deadline,
+    caller,
+  );
+  if (result.kind === "canceled")
+    reportPluginDiagnostic(report, pluginId, signal.kind, "dropped on producer control cancellation");
+  else attemptValue(result, report, pluginId, "signal");
+}
+
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   let runtime = PROCESS_RUNTIMES.get(input.world);
   if (runtime === undefined) {
@@ -396,24 +422,10 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   });
 
   return Object.freeze({
-    async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
+    async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report, caller?: AbortSignal) {
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
       await Promise.all(
-        activations.map(async ({ pluginId, activation }) => {
-          attemptValue(
-            await runBounded(async (cancellation) => {
-              const activated = await activation;
-              cancellation.throwIfAborted();
-              if (activated.kind === "expired") throw timeoutError();
-              if (activated.kind === "completed") {
-                await activated.value.signals?.[signal.kind]?.(signal as never, cancellation);
-              }
-            }, deadline),
-            reportDiagnostic,
-            pluginId,
-            "signal",
-          );
-        }),
+        activations.map((activation) => emitToPlugin(activation, signal, deadline, reportDiagnostic, caller)),
       );
     },
     async withWaitDeferrals<T>(

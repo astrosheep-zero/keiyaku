@@ -6,6 +6,7 @@ import {
   BodyControlledError,
   breakBody,
   drainPendingTells,
+  endTurn,
   heartExists,
   readHeart,
   recordCurrentModel,
@@ -16,6 +17,7 @@ import {
   type ResumeCoordinate,
   type Soul,
   type TellFact,
+  type TurnOutcome,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 import { keiyakuExecutionInstructions, type ExecutionAssociationReader } from "./execution-instructions.js";
@@ -86,10 +88,6 @@ export async function turnRecipe(
   };
 }
 
-export type DrivenTurn =
-  | (Extract<TurnResult, { kind: "answered" }> & Readonly<{ session?: ResumeCoordinate }>)
-  | Extract<TurnResult, { kind: "failed" }>;
-
 export type DriveTurnInput = Readonly<{
   paths: AkumaPaths;
   soul: Soul;
@@ -100,6 +98,7 @@ export type DriveTurnInput = Readonly<{
   world: import("../world.js").WorldRoot;
   executionAssociation?: ExecutionAssociationReader;
   turnStarted: Readonly<{ emit(turnSequence: number): Promise<void> }>;
+  turnOutcome: Readonly<{ emit(turnSequence: number, caller: AbortSignal): Promise<void> }>;
   now(): string;
 }>;
 
@@ -111,12 +110,31 @@ type TurnWriters = Readonly<{
   mayWrite(): boolean;
 }>;
 
-type Retirement = Readonly<{ kind: "retired" }> | Readonly<{ kind: "hung" }>;
 type TurnDriveResult =
-  | (DrivenTurn & Readonly<{ turnSequence: number }>)
-  | Readonly<{ kind: "stopped" }>
-  | Readonly<{ kind: "hung" }>
-  | Readonly<{ kind: "resume-unsupported" }>;
+  | Extract<TurnResult, { kind: "failed" }>
+  | Readonly<{ kind: "continue" | "stopped" | "hung" | "resume-unsupported" }>;
+type TerminalOutcome = Exclude<TurnOutcome, { kind: "canceled" }>;
+
+function outcomeForTell(
+  result: TurnResult,
+  session: ResumeCoordinate | undefined,
+  schemaJson?: string,
+): TerminalOutcome {
+  if (result.kind === "failed") return result;
+  if (session === undefined) return { kind: "failed", diagnostic: "Provider answered without a resumable session" };
+  const evidence = { ...result, session };
+  if (schemaJson === undefined) return evidence;
+  try {
+    JSON.parse(result.answer);
+  } catch (error) {
+    return { ...evidence, kind: "invalid-output", diagnostic: diagnostic(error) };
+  }
+  return { ...evidence, answerJson: result.answer };
+}
+
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * The runtime model one attempt has already observed. Equal observations
@@ -160,48 +178,43 @@ async function retireProviderCustody(
   input: DriveTurnInput,
   turnSequence: number,
   attempt: ProviderAttempt<Session>,
-): Promise<Retirement> {
-  const dispose = async (
-    operation: () => Promise<void>,
-  ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> => {
+): Promise<boolean> {
+  const dispose = async (operation: () => Promise<void>): Promise<void> => {
     const deadline = new AbortController();
     try {
       await Promise.race([
-        (async () => {
-          await operation();
-          await attempt.closed;
-        })(),
+        operation().then(() => attempt.closed),
         abortableDelay(CONTROL_RESPONSE_MS, deadline.signal).then(() => {
           throw new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`);
         }),
       ]);
-      return { kind: "retired" };
-    } catch (error: unknown) {
-      return { kind: "held", error };
     } finally {
       deadline.abort();
     }
   };
-  let outcome = await dispose(input.supervisor.forceSignal?.aborted ? attempt.forceDispose : attempt.abort);
-  if (outcome.kind === "retired") return outcome;
-  outcome = await dispose(attempt.forceDispose);
-  if (outcome.kind === "retired") return outcome;
-  if (await heartExists(input.paths)) {
-    const diagnostic = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-    const at = input.now();
-    try {
-      await input.supervisor.recordHung(diagnostic, at);
-      await appendActivity(input.paths, {
-        turnSequence,
-        event: encodeAgentEvent({ type: "note", text: `Provider custody was not retired: ${diagnostic}` }),
-        at,
-      });
-    } catch {
-      /* Undisposed provider custody still owns the leash. */
+  try {
+    await dispose(input.supervisor.forceSignal?.aborted ? attempt.forceDispose : attempt.abort).catch(() =>
+      dispose(attempt.forceDispose),
+    );
+    return true;
+  } catch (error) {
+    if (await heartExists(input.paths)) {
+      const cause = diagnostic(error);
+      const at = input.now();
+      try {
+        await input.supervisor.recordHung(cause, at);
+        await appendActivity(input.paths, {
+          turnSequence,
+          event: encodeAgentEvent({ type: "note", text: `Provider custody was not retired: ${cause}` }),
+          at,
+        });
+      } catch {
+        /* Undisposed provider custody still owns the leash. */
+      }
+      await breakBody(input.paths, { sequence: input.bodySequence, end: "broke-off", at: input.now() });
     }
-    await breakBody(input.paths, { sequence: input.bodySequence, end: "broke-off", at: input.now() });
+    return false;
   }
-  return { kind: "hung" };
 }
 
 async function pumpReceipts(writers: TurnWriters): Promise<void> {
@@ -257,7 +270,7 @@ type TurnSources = {
   heart: BodyControlSnapshot;
   tell: "live" | "turn-ended";
   completion: TurnResult;
-  closed: void;
+  closed: boolean;
   drained: void;
   "receipt-failure": void;
 };
@@ -297,8 +310,15 @@ function createTurnWakeups(signal: AbortSignal) {
         await new Promise<void>((resolve) => {
           waiter = resolve;
         });
-      const wake = queue.shift()!;
+      const first = queue[0]!;
+      // Retirement rejection cannot preempt admission or completion already ready to consume.
+      const native =
+        first.kind === "failed" && first.source === "closed"
+          ? queue.findIndex(({ kind }) => kind === "admission" || kind === "completion")
+          : -1;
+      const wake = native > 0 ? queue.splice(native, 1)[0]! : queue.shift()!;
       if (wake.kind === "failed") {
+        if (wake.source === "closed") return { kind: "closed", value: false };
         failedSource = wake.source;
         throw wake.error;
       }
@@ -321,7 +341,7 @@ function createTurnWakeups(signal: AbortSignal) {
   };
 }
 
-async function prepareTurn(input: DriveTurnInput, recipe: Pick<Soul, "cwd" | "options">) {
+async function prepareTurn(input: DriveTurnInput, recipe: Awaited<ReturnType<typeof turnRecipe>>) {
   const [opening] = input.launchTells;
   if (opening === undefined) throw new Error("Cannot start a Turn without an admitted Tell");
   const { initiator, schemaJson } = opening;
@@ -352,7 +372,7 @@ async function prepareTurn(input: DriveTurnInput, recipe: Pick<Soul, "cwd" | "op
     ...(runtimeInstructions === undefined ? {} : { runtimeInstructions }),
     ...schema,
   };
-  return { turnSequence, tellIds, providerInput };
+  return { turnSequence, tellIds, providerInput, recipe };
 }
 
 async function openAdmittedSession(
@@ -381,11 +401,11 @@ async function openAdmittedSession(
 
 async function consumeTurn(
   input: DriveTurnInput,
-  { turnSequence, tellIds, providerInput }: Awaited<ReturnType<typeof prepareTurn>>,
-  recipe: Awaited<ReturnType<typeof turnRecipe>>,
+  { turnSequence, tellIds, providerInput, recipe }: Awaited<ReturnType<typeof prepareTurn>>,
   heart: BodyControlSnapshot,
   wakeups: ReturnType<typeof createTurnWakeups>,
-): Promise<(DrivenTurn & { turnSequence: number }) | undefined> {
+  sealOutcome: (outcome: TerminalOutcome) => Promise<void>,
+): Promise<boolean> {
   const { supervisor } = input;
   const { mayWrite, closeWrites } = wakeups;
   let turnSession = recipe.session;
@@ -398,8 +418,9 @@ async function consumeTurn(
   let submitting = false;
   let eventsEnded = false;
   let result: TurnResult | undefined;
-  let closed = false;
+  let closed: boolean | undefined;
   let draining = false;
+  let committed = false;
   const submitIfReady = (): void => {
     if (writers === undefined || tellLive === undefined || submitting) return;
     const pending = drainPendingTells(heart.pending);
@@ -408,7 +429,7 @@ async function consumeTurn(
     wakeups.arm("tell", submitPendingLiveTells(writers, pending, attempted, tellLive));
   };
   const drainIfReady = (): void => {
-    if (draining || !eventsEnded || result === undefined || !closed || submitting || !mayWrite()) return;
+    if (draining || !eventsEnded || result === undefined || submitting || !mayWrite()) return;
     draining = true;
     wakeups.arm("drained", writeWitness.drain(closeWrites));
   };
@@ -433,7 +454,7 @@ async function consumeTurn(
         break;
       case "heart":
         heart = wake.value;
-        if (mayWrite()) wakeups.arm("heart", supervisor.next(heart));
+        wakeups.arm("heart", supervisor.next(heart));
         break;
       case "tell":
         submitting = false;
@@ -444,18 +465,19 @@ async function consumeTurn(
         tellLive = undefined;
         break;
       case "closed":
-        closed = true;
+        closed = wake.value;
+        if (committed || (!closed && result === undefined)) return closed;
+        // A rejected closure cannot fence ordered writes for a witnessed terminal.
         break;
-      case "drained": {
-        const outcome = result!; // Arming the drain requires a provider result.
-        return outcome.kind === "answered" && turnSession !== undefined
-          ? { ...outcome, turnSequence, session: turnSession }
-          : { ...outcome, turnSequence };
-      }
+      case "drained":
+        await sealOutcome(outcomeForTell(result!, turnSession, providerInput.schemaJson));
+        committed = true;
+        if (closed !== undefined) return closed;
+        break;
     }
     drainIfReady();
   }
-  return undefined;
+  return false;
 }
 
 export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult> {
@@ -463,8 +485,16 @@ export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult>
   if (supervisor.signal.aborted) return { kind: "stopped" };
   const wakeups = createTurnWakeups(supervisor.signal);
   let startingTurn: number | undefined;
-  let owned: { attempt: ProviderAttempt<Session>; turnSequence: number } | undefined;
+  let attempt: ProviderAttempt<Session> | undefined;
+  let retired = false;
+  let admissionAttempted = false;
   let ending: TurnDriveResult = { kind: "stopped" };
+  const commit = async (outcome: TerminalOutcome): Promise<void> => {
+    admissionAttempted = true;
+    await endTurn(input.paths, { turnSequence: startingTurn!, outcome, completedAt: input.now() });
+    await input.turnOutcome.emit(startingTurn!, supervisor.signal);
+    ending = outcome.kind === "answered" ? { kind: "continue" } : { kind: "failed", diagnostic: outcome.diagnostic };
+  };
   try {
     const recipe = await turnRecipe(input.paths, input.soul);
     const { session } = recipe;
@@ -474,37 +504,35 @@ export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult>
     const heart = supervisor.current();
     startingTurn = prepared.turnSequence;
     const { providerInput } = prepared;
-    const attempt =
+    attempt =
       session === undefined
         ? input.adapter.start({ ...providerInput, session: { kind: "fresh" } })
         : input.adapter.resume!({ ...providerInput, session: { kind: "resume", coordinate: session } });
-    owned = { attempt, turnSequence: startingTurn };
     wakeups.arm("admission", attempt.result);
-    wakeups.arm("closed", attempt.closed);
+    wakeups.arm(
+      "closed",
+      attempt.closed.then<boolean>(() => true),
+    );
     wakeups.arm("heart", supervisor.next(heart));
-    const outcome = await consumeTurn(input, prepared, recipe, heart, wakeups);
-    if (outcome !== undefined) return outcome;
+    retired = await consumeTurn(input, prepared, heart, wakeups, commit);
   } catch (error) {
     wakeups.closeWrites();
-    const diagnostic = error instanceof Error ? error.message : String(error);
-    if (owned === undefined && startingTurn !== undefined)
-      return { kind: "failed", turnSequence: startingTurn, diagnostic };
-    if (
-      wakeups.failedSource !== "heart" &&
-      !supervisor.signal.aborted &&
-      !(await heartExists(input.paths).catch(() => true))
-    )
-      supervisor.cancel("heart-gone");
-    if (owned === undefined) {
+    if (admissionAttempted && ending.kind === "stopped") throw error;
+    if (startingTurn === undefined) {
       if (supervisor.reason === "heart-gone") return ending;
       throw error;
     }
     if (error instanceof BodyControlledError) supervisor.cancel("control");
-    // Later control cannot turn an adjudicated failure into cancellation.
-    if (!supervisor.signal.aborted) ending = { kind: "failed", turnSequence: owned.turnSequence, diagnostic };
+    if (!supervisor.signal.aborted) {
+      if (wakeups.failedSource !== "heart" && !(await heartExists(input.paths).catch(() => true)))
+        supervisor.cancel("heart-gone");
+      else ending = { kind: "failed", diagnostic: diagnostic(error) };
+    }
   } finally {
     wakeups.stop();
+    if (attempt !== undefined && !retired && !(await retireProviderCustody(input, startingTurn!, attempt)))
+      ending = { kind: "hung" };
   }
-  const retirement = await retireProviderCustody(input, owned.turnSequence, owned.attempt);
-  return retirement.kind === "hung" ? retirement : ending;
+  if (!admissionAttempted && ending.kind === "failed") await commit(ending);
+  return ending;
 }

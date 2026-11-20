@@ -2,14 +2,13 @@ import { projectAkumaBirth } from "./caller.js";
 import { appendFile } from "node:fs/promises";
 import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
-import { driveTurn, type DrivenTurn } from "./turn-drive.js";
+import { driveTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
   BodyControlledError,
   breakBody,
   cancelBodyTurns,
   drainPendingTells,
-  endTurn,
   failOpenBoundTurns,
   finishBodyIfIdle,
   heartExists,
@@ -22,7 +21,6 @@ import {
   readTurnParticipants,
   type BodyEnd,
   type Soul,
-  type TurnOutcome,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import type { TellWake } from "./call-initial-tell.js";
@@ -72,7 +70,7 @@ async function putDownBody(
   paths: AkumaPaths,
   bodySequence: number,
   now: () => string,
-  turnOutcome?: TurnOutcomeEmitter,
+  turnOutcome?: TurnEmitter,
 ): Promise<void> {
   const settled = await cancelBodyTurns(paths, { bodySequence, at: now() });
   for (const sequence of settled.canceled) await turnOutcome?.emit(sequence);
@@ -83,7 +81,7 @@ async function putDownIfControlled(
   supervisor: BodySupervisor,
   bodySequence: number,
   now: () => string,
-  turnOutcome?: TurnOutcomeEmitter,
+  turnOutcome?: TurnEmitter,
 ): Promise<void> {
   if ((supervisor.reason === "control" || supervisor.reason === "launch") && (await heartExists(paths)))
     await putDownBody(paths, bodySequence, now, turnOutcome);
@@ -126,39 +124,6 @@ async function bornSoul(
   return { soul: born, created: result === "born" };
 }
 
-function outcomeForTell(
-  result: DrivenTurn,
-  schemaJson: string | undefined,
-): Exclude<TurnOutcome, { kind: "canceled" }> {
-  if (result.kind === "failed") return { kind: "failed", diagnostic: result.diagnostic };
-  const { answer, historyId, session } = result;
-  if (session === undefined) return { kind: "failed", diagnostic: "Provider answered without a resumable session" };
-  const evidence = { answer, session, ...(historyId === undefined ? {} : { historyId }) };
-  if (schemaJson === undefined) return { kind: "answered", ...evidence };
-  try {
-    JSON.parse(answer);
-  } catch (error) {
-    return {
-      kind: "invalid-output",
-      diagnostic: error instanceof Error ? error.message : "Answer is not valid JSON",
-      ...evidence,
-    };
-  }
-  return { kind: "answered", ...evidence, answerJson: answer };
-}
-
-async function persistTurn(
-  paths: AkumaPaths,
-  turnSequence: number,
-  result: DrivenTurn,
-  completedAt: string,
-): Promise<string | undefined> {
-  const turn = await readTurn(paths, turnSequence);
-  const outcome = outcomeForTell(result, turn?.schemaJson);
-  await endTurn(paths, { turnSequence, outcome, completedAt });
-  return outcome.kind === "answered" ? undefined : outcome.diagnostic;
-}
-
 function boundedDiagnostic(error: unknown): string {
   const text = diagnostic(error);
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
@@ -189,8 +154,8 @@ type BodyExecution = Readonly<{
   bodySequence: number;
   supervisor: BodySupervisor;
   runtime: BodyRuntime;
-  turnStarted: TurnStartedEmitter;
-  turnOutcome: TurnOutcomeEmitter;
+  turnStarted: TurnEmitter;
+  turnOutcome: TurnEmitter;
 }>;
 
 async function prepareBodyExecution(
@@ -244,13 +209,7 @@ async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promi
   return true;
 }
 
-type TurnStartedEmitter = Readonly<{
-  emit(turnSequence: number): Promise<void>;
-}>;
-
-type TurnOutcomeEmitter = Readonly<{
-  emit(turnSequence: number): Promise<void>;
-}>;
+type TurnEmitter = Readonly<{ emit(turnSequence: number, caller?: AbortSignal): Promise<void> }>;
 
 async function emitBodyBirth(launch: BodyLaunch, soul: Soul, world: WorldRoot, bodySequence: number): Promise<void> {
   await emitPluginSignal(pluginHost(launch, world, "birth"), {
@@ -263,7 +222,7 @@ async function emitBodyBirth(launch: BodyLaunch, soul: Soul, world: WorldRoot, b
   });
 }
 
-function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnStartedEmitter {
+function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnEmitter {
   return {
     async emit(turnSequence: number): Promise<void> {
       try {
@@ -282,30 +241,33 @@ function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
   };
 }
 
-function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnOutcomeEmitter {
+function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnEmitter {
   return {
-    async emit(turnSequence: number): Promise<void> {
+    async emit(turnSequence: number, producerControl?: AbortSignal): Promise<void> {
       try {
         const turn = await readTurn(launch.paths, turnSequence);
         if (turn?.end === undefined) throw new Error(`Committed Turn ${turnSequence} outcome is missing from Heart`);
         const outcome = turn.end.outcome;
         const participants = await readTurnParticipants(launch.paths, turnSequence);
-        await emitPluginSignal(pluginHost(launch, world, "turn outcome"), {
-          kind: "akuma.turn-outcome",
-          akumaId: soul.id,
-          bodySequence: turn.bodySequence,
-          turnSequence,
-          at: turn.end.completedAt,
-          ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
-          ...(participants.length === 0 ? {} : { participants }),
-          outcome:
-            outcome.kind === "answered"
-              ? { kind: "answered", text: outcome.answer }
-              : outcome.kind === "canceled"
-                ? { kind: "canceled" }
-                : { kind: "failed", reason: outcome.diagnostic },
-          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-        });
+        await emitPluginSignal(
+          { ...pluginHost(launch, world, "turn outcome"), producerControl },
+          {
+            kind: "akuma.turn-outcome",
+            akumaId: soul.id,
+            bodySequence: turn.bodySequence,
+            turnSequence,
+            at: turn.end.completedAt,
+            ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+            ...(participants.length === 0 ? {} : { participants }),
+            outcome:
+              outcome.kind === "answered"
+                ? { kind: "answered", text: outcome.answer }
+                : outcome.kind === "canceled"
+                  ? { kind: "canceled" }
+                  : { kind: "failed", reason: outcome.diagnostic },
+            ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+          },
+        );
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "turn outcome", error);
       }
@@ -378,33 +340,20 @@ async function runBodyTurns(input: BodyExecution): Promise<void> {
       ...(runtime.executionAssociation === undefined ? {} : { executionAssociation: runtime.executionAssociation }),
       now: runtime.now,
       turnStarted,
+      turnOutcome,
     });
-    if (result.kind === "hung") {
-      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, "Body hung with open bound Turns", runtime.now());
-      return;
+    if (result.kind === "continue") {
+      await supervisor.refresh();
+      continue;
     }
     if (result.kind === "stopped") {
       await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now, turnOutcome);
-      return;
-    }
-    if (result.kind === "resume-unsupported") {
-      await failOpenBoundTurnsIfPresent(
-        launch.paths,
-        bodySequence,
-        "resume-unsupported with open bound Turns",
-        runtime.now(),
-      );
+    } else if (result.kind !== "hung") {
+      const diagnostic = result.kind === "failed" ? result.diagnostic : "resume-unsupported with open bound Turns";
+      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, diagnostic, runtime.now());
       await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
-      return;
     }
-    const failure = await persistTurn(launch.paths, result.turnSequence, result, runtime.now());
-    await turnOutcome.emit(result.turnSequence);
-    if (failure !== undefined) {
-      await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, failure, runtime.now());
-      await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
-      return;
-    }
-    await supervisor.refresh();
+    return;
   }
 }
 
@@ -446,7 +395,7 @@ export async function driveAkumaBody(
   const leash = acquired;
   let bodySequence: number | undefined;
   let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
-  let emitTurnOutcome: TurnOutcomeEmitter | undefined;
+  let emitTurnOutcome: TurnEmitter | undefined;
   let supervisor: BodySupervisor | undefined;
   let hung = false;
   try {

@@ -59,10 +59,6 @@ function stalledEvents(pull: Promise<IteratorResult<AgentEvent>>): AsyncIterable
   return { [Symbol.asyncIterator]: () => ({ next: () => pull }) };
 }
 
-async function* narratedEvents(events: readonly AgentEvent[]): AsyncIterable<AgentEvent> {
-  yield* events;
-}
-
 type ProviderFixture = Readonly<{
   adapter: ProviderAdapter;
   submissions: Array<Readonly<{ id: string; text: string }>>;
@@ -100,8 +96,6 @@ function turnProvider(input: {
           admission: { fence: FENCE },
           events: input.events,
           completion,
-          abort: async () => closed.resolve(),
-          forceDispose: async () => closed.resolve(),
           tell: async (tell) => {
             submissions.push(tell);
             return { kind: "accepted", fence: FENCE };
@@ -149,6 +143,7 @@ function driveInput(fixture: TurnFixture, adapter: ProviderAdapter, supervisor: 
     supervisor,
     world: fixture.world,
     turnStarted: { emit: async () => undefined },
+    turnOutcome: { emit: async () => undefined },
     now: () => AT,
   };
 }
@@ -258,46 +253,54 @@ test("a Tell admitted mid-stall is submitted live once and recorded with its bin
   }
 });
 
-test("provider events are serialized in order and the answer waits for physical closure", async (context) => {
-  const fixture = await turnFixture(context, "kei-turn-wait-order-");
-  const supervisor = await fixture.control();
-  const closure = deferred<void>();
+test("the driver commits ordered evidence but cannot finish before closure", async (context) => {
+  const lastSession = { sessionId: "last-session" };
   const events: readonly AgentEvent[] = [
     { type: "session", coordinate: { sessionId: "first-session" } },
     { type: "assistant", text: "first" },
     { type: "note", text: "second" },
-    { type: "session", coordinate: { sessionId: "last-session" } },
+    { type: "session", coordinate: lastSession },
   ];
+  const fixture = await turnFixture(context, "kei-turn-wait-order-");
+  const supervisor = await fixture.control();
+  const closure = deferred<void>();
   const provider = turnProvider({
-    events: narratedEvents(events),
+    events: {
+      async *[Symbol.asyncIterator]() {
+        yield* events;
+      },
+    },
     completion: Promise.resolve({ kind: "answered", answer: "done" }),
     closure: closure.promise,
   });
-  let answered = false;
-  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor)).then((outcome) => {
-    answered = true;
-    return outcome;
+  let settled = false;
+  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor)).finally(() => {
+    settled = true;
   });
+  const rows = async () => (await activitySlice(fixture.paths)).rows;
   try {
-    await waitForCondition("the last provider event to persist", async () => {
-      const activity = (await activitySlice(fixture.paths)).rows.filter((fact) => fact.kind === "activity");
-      return activity.length === events.length;
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(answered, false, "event exhaustion and completion do not prove closure");
+    await waitForCondition(
+      "the committed ordered outcome",
+      async () => (await rows()).some((fact) => fact.kind === "turn-end"),
+      { budgetMs: 5_000, terminalState: () => (settled ? "driver settled" : null) },
+    );
+    assert.equal(settled, false, "committing the outcome does not prove closure");
     closure.resolve();
-    assert.deepEqual(await settlement, {
-      kind: "answered",
-      answer: "done",
-      turnSequence: 2,
-      session: { sessionId: "last-session" },
-    });
-    assert.deepEqual((await readHeart(fixture.paths)).latestSession?.coordinate, { sessionId: "last-session" });
-    const activity = (await activitySlice(fixture.paths)).rows.filter((fact) => fact.kind === "activity");
+    assert.equal((await settlement).kind, "continue");
+    const trace = await rows();
+    const ends = trace.filter((fact) => fact.kind === "turn-end");
     assert.deepEqual(
-      activity.map((fact) => fact.event),
+      ends.map((end) => end.outcome),
+      [{ kind: "answered", answer: "done", session: lastSession }],
+    );
+    const narration = trace
+      .filter((fact) => fact.kind === "activity")
+      .filter((fact) => fact.sequence < ends[0]!.sequence);
+    assert.deepEqual(
+      narration.map((fact) => fact.event),
       events,
     );
+    assert.deepEqual((await readHeart(fixture.paths)).latestSession?.coordinate, lastSession);
   } finally {
     closure.resolve();
     supervisor.cancel("control");
@@ -315,7 +318,7 @@ test("provider completion failure preserves its diagnostic and retires the stall
   try {
     await armedWait(pull);
     completion.reject(new Error("provider completion failed"));
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic: "provider completion failed", turnSequence: 2 });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic: "provider completion failed" });
     assert.equal(provider.aborts(), 1);
     assert.equal(pull.registrations, 1);
   } finally {
@@ -348,7 +351,7 @@ test("control during retirement does not erase an already observed provider fail
     await waitForCondition("BodySupervisor to observe the stop", () => supervisor.signal.aborted);
     assert.equal(settled, false, "abort acknowledgement is not closure proof");
     closure.resolve();
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 2 });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic });
   } finally {
     closure.resolve();
     supervisor.cancel("control");
@@ -375,10 +378,11 @@ test("a failed Heart read fails the stalled Turn and retires its provider", asyn
     const failure = await readHeart(fixture.paths).catch((error: unknown) => error);
     assert.ok(failure instanceof Error, "corrupt Heart must fail a direct read");
     const diagnostic = failure.message;
+    const failed = assert.rejects(settlement, { message: diagnostic });
     await waitForCondition("the failed observation to retire the provider", () => provider.aborts() === 1, {
       budgetMs: 5_000,
     });
-    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 2 });
+    await failed;
     assert.equal(supervisor.signal.aborted, false);
     assert.equal(pull.registrations, 1);
     assert.throws(() => supervisor.current(), { message: diagnostic });

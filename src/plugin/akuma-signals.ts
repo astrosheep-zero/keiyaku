@@ -12,6 +12,7 @@ type PluginSignalEmission = Readonly<{
   world: WorldRoot;
   settings?: Settings;
   reportDiagnostic: (message: string) => void;
+  producerControl?: AbortSignal | undefined;
 }>;
 
 /**
@@ -26,7 +27,7 @@ export async function emitPluginSignal(emission: PluginSignalEmission, signal: P
       ...(emission.settings === undefined ? {} : { settings: emission.settings }),
       reportDiagnostic: emission.reportDiagnostic,
     });
-    await runtime.emit(signal, emission.reportDiagnostic);
+    await runtime.emit(signal, emission.reportDiagnostic, emission.producerControl);
   } catch (error) {
     reportPluginDiagnostic(emission.reportDiagnostic, "runtime", "signal", error);
   }

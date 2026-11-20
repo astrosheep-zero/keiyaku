@@ -293,10 +293,16 @@ critical path.
 Every committed terminal Turn emits `akuma.turn-outcome` after durability,
 including later-Tell Turns. It carries Akuma/Turn identity, the answered, failed,
 or canceled outcome, and optional owner and audience. Cancellation carries no
-answer or failure reason. Signals expose no provider or continuation custody;
-plugins neither participate in providers, lifecycle verbs, inputs, or Settlement,
-nor make birth reversible, add pre-Body listeners, or create rollback or
-cross-process continuations.
+answer or failure reason. A native outcome's producing Body awaits its one
+bounded attempt before proceeding to another Turn. Body control cancellation
+ends the attempt immediately and cancels handler participation; the dropped
+participation is diagnostic only. This does not cancel plugin activation or
+other notifications, recall accepted external delivery, or create a duty to
+join noncooperative hook work. It changes neither the committed outcome nor
+the independent proof needed for provider retirement. Signals expose no
+provider or continuation custody; plugins neither participate in providers,
+lifecycle verbs, inputs, or Settlement, nor make birth reversible, add pre-Body
+listeners, or create rollback or cross-process continuations.
 
 Public Akuma observation emits `akuma.outcome-observed` when it establishes an
 exact retained answered, failed, or canceled outcome. Knowing it exists neither
