@@ -46,6 +46,7 @@ import {
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { admitIntent } from "../src/protocol/intent.js";
+import { mintAttempt } from "../src/protocol/attempt.js";
 import { admitPlacement } from "../src/protocol/placement.js";
 import { appointManagedWorktrees, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
@@ -613,7 +614,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(afterTerminal.paths.has(contractJournalPath(id, "terminal")), true);
   });
 
-  test("bind reobserves and atomically asserts target coordinates after Git movement", async () => {
+  test("bind's atomic target assertion spends its preparation and the fresh attempt admits the new target", async () => {
     const repository = repositoryWithHead();
     repository.run(["branch", "release"]);
     const git = await repositoryAt(repository.path);
@@ -643,10 +644,13 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         }),
     );
 
+    const id = protocolContractId("Moving target");
     assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
-    const state = (await observeContract(git, bound.value.contractId)).state;
-    assert.equal(state?.coordinates.start, moved);
-    assert.equal(bound.value.contractId, protocolContractId("Moving target"));
+    assert.equal(bound.value.contractId, id);
+    assert.equal((await observeContract(git, id)).state?.coordinates.start, moved);
+    const repeated = await bindOperation({ scope: git, contractId: id, terms: terms([]),
+      targetSelection: { kind: "explicit", target: "refs/heads/release" } });
+    assert.deepEqual(repeated, { kind: "refused", refusal: { kind: "contract-exists" } });
   });
 
   test("protocol bind admits one explicit identity and refuses a second use of it", async () => {
@@ -672,7 +676,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
   });
 
-  test("targetless bind reobserves a different HEAD OID after atomic verification fails", async () => {
+  test("targetless bind retries after a different HEAD OID fails the atomic assertion", async () => {
     const repository = repositoryWithHead();
     const predecessor = repository.run(["rev-parse", "HEAD"]).trim();
     const tree = repository.run(["rev-parse", `${predecessor}^{tree}`]).trim();
@@ -698,9 +702,10 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         }),
     );
 
+    const id = protocolContractId("Different OID checkout movement");
     assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
     assert.equal(repository.run(["symbolic-ref", "HEAD"]).trim(), "refs/heads/feature");
-    assert.equal((await observeContract(git, bound.value.contractId)).state?.coordinates.start, moved);
+    assert.equal((await observeContract(git, id)).state?.coordinates.start, moved);
   });
 
   test("public reconcile and admission observation retain canonical journal validation", async () => {
@@ -813,6 +818,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
           preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
         },
         decideDeliver<never>,
+        { attempt: mintAttempt() },
       ),
     );
     assert.equal(delivered.kind, "accepted");

@@ -12,7 +12,8 @@ import { contractJournal, observeContractsAt } from "../git/observe.js";
 import { VERIFIED, verificationRequirement, type VerificationDefinition } from "../verification/declaration.js";
 import { prepareDelivery, deliveryIntegrationSnapshots } from "./deliver.js";
 import { admitIntent } from "./intent.js";
-import type { ProtocolResult } from "./run.js";
+import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
+import { runBoundedAttempts, type ProtocolResult } from "./run.js";
 import type { DocumentDerivation, MechanicalPreparationRefusal, MutationOperationInput } from "./operations.js";
 import { timestamp } from "./operations.js";
 import { executionStop, type ContractCheckpoint } from "./progress.js";
@@ -191,31 +192,43 @@ function admitVerificationTestimony(
   data: AttestationData,
   { snapshot, cwd: anchor }: HeldVerificationSnapshot,
 ): Promise<ProtocolResult<VerificationAdmissionRefusal>> {
-  return admitIntent<AttestationInput, VerificationAdmissionRefusal>(
-    input.channel,
-    input.scope,
-    { contractId: input.contractId, at, preparation: { kind: "prepared", data } },
-    decideAttestation,
-    {
-      ...(input.progress === undefined ? {} : { progress: input.progress }),
-      prepareRefCompanion: async ({ journals }) => {
-        const state = contractJournal(journals, input.contractId).state;
-        const current = state?.attestations.findLast(
-          ({ data: prior }) =>
-            prior.gate === data.gate && prior.requirement === data.requirement && prior.subject === data.subject,
-        );
-        const reuse = current?.data.verdict === data.verdict && current.data.summary === data.summary;
-        const result = await associateVerificationSnapshot(input.scope, input.contractId, snapshot, { anchor, reuse });
-        if (result.kind === "companion") return result;
-        const refusal: VerificationAdmissionRefusal =
-          result.kind === "associated"
-            ? { kind: "verification-reuse" }
-            : result.kind === "publication-failed"
-              ? { kind: "retry", reason: result.kind, diagnostic: result.diagnostic }
-              : result;
-        return { kind: "refused", refusal };
-      },
-    },
+  return runBoundedAttempts<AttestationInput, AcceptedAdmission, VerificationAdmissionRefusal>(
+    mintAttempts({ entryCount: 1 }),
+    async () => ({
+      kind: "prepared",
+      prepared: { contractId: input.contractId, at, preparation: { kind: "prepared", data } },
+    }),
+    async (prepared, attempt) =>
+      await admitIntent<AttestationInput, VerificationAdmissionRefusal>(
+        input.channel,
+        input.scope,
+        prepared,
+        decideAttestation,
+        {
+          attempt,
+          ...(input.progress === undefined ? {} : { progress: input.progress }),
+          prepareRefCompanion: async ({ journals }) => {
+            const state = contractJournal(journals, input.contractId).state;
+            const current = state?.attestations.findLast(
+              ({ data: prior }) =>
+                prior.gate === data.gate && prior.requirement === data.requirement && prior.subject === data.subject,
+            );
+            const reuse = current?.data.verdict === data.verdict && current.data.summary === data.summary;
+            const result = await associateVerificationSnapshot(input.scope, input.contractId, snapshot, {
+              anchor,
+              reuse,
+            });
+            if (result.kind === "companion") return result;
+            const refusal: VerificationAdmissionRefusal =
+              result.kind === "associated"
+                ? { kind: "verification-reuse" }
+                : result.kind === "publication-failed"
+                  ? { kind: "retry", reason: result.kind, diagnostic: result.diagnostic }
+                  : result;
+            return { kind: "refused", refusal };
+          },
+        },
+      ),
   );
 }
 

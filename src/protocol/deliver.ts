@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { attestedVerificationSnapshots, VERIFIED } from "../verification/declaration.js";
-import { snapshotIdSchema } from "../git/identity.js";
+import { gitObjectIdForSnapshot, snapshotIdSchema } from "../git/identity.js";
 import { compactDelivery, type DeliveryIdentity } from "./result-leaves.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
@@ -18,49 +18,52 @@ import {
   type TenderCapture,
 } from "../git/tender.js";
 import {
-  checkoutDetachedSnapshot,
+  consumeConflictHandoff,
+  installConflictHandoffBase,
   observeConflictHandoff,
   recordConflictHandoff,
   retireConflictHandoff,
+  witnessConflictHandoff,
   workspaceMergeStatePresent,
   worktreePath,
   conflictRecovery,
+  type ConflictHandoffWitness,
 } from "../git/workspace.js";
 import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
-import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
-  externalPreparation,
+  preparationIsCurrent,
   privateStateSeatAttempt,
-  protocolSeatClose,
   runBoundedAttempts,
-  sameWorktreeWitness,
-  STALE_PRIVATE_STATE_PREPARATION,
-  type ContractStateWitness,
-  type WorktreeWitness,
+  spentPreparation,
+  type ObservedRef,
+  type ProtocolResult,
+  type SpentPreparation,
 } from "./run.js";
-import type { AttemptContext } from "../core/decide.js";
-import { contractState, targetContractRefusal } from "../core/facts/observation.js";
-import { resolveContractTarget } from "../git/target.js";
-import { acquireTargetPlacementFence } from "../git/target-placement.js";
+import type { PrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import { contractState, targetContractRefusal, type TargetContractRefusal } from "../core/facts/observation.js";
+import { resolveContractTarget, targetRef, type TargetWorkspaceRefusal } from "../git/target.js";
+import { acquireTargetPlacementFence, observeTargetHead } from "../git/target-placement.js";
+import { currentBranch, readRef } from "../git/repository.js";
+import type { GitRepository } from "../git/process.js";
 import type {
   ChangeId,
+  ContractHead,
   ContractId,
   ContractState,
+  ContractTarget,
   DeliverData,
   EntryUlid,
   JournalEntry,
   SnapshotId,
 } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
-import { admitDecidedOffer, mintAttempts } from "./attempt.js";
+import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
+import type { AttemptContext } from "../core/decide.js";
 import type { LeadingOutcome } from "./outcome.js";
-
 import { readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
-  AttemptDecision,
   DeliverConflictRefusal,
   DeliveryPreparationRefusal,
-  DocumentDerivation,
   MechanicalPreparationRefusal,
   MutationOperationInput,
 } from "./operations.js";
@@ -82,7 +85,6 @@ export type DeliverLeading = Readonly<{
   fact: EntryUlid;
 }>;
 type DeliverValue = DeliveryIdentity & Readonly<{ leading: DeliverLeading }>;
-type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
 export const materializedConflictSchema = z
   .object({
     kind: z.literal("integration-conflict-materialized"),
@@ -98,7 +100,7 @@ export type IntegrationConflictMaterialized = z.infer<typeof materializedConflic
 
 type DeliverOperationInput = MutationOperationInput &
   Readonly<{
-    deriveDocument: (state: ContractState) => DocumentDerivation;
+    deriveDocument: (state: ContractState) => import("./operations.js").DocumentDerivation;
     message?: string;
     requireBranchesToBeUpToDate: boolean;
     includeDirty: boolean;
@@ -107,66 +109,25 @@ type DeliverOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
-type DeliverOperationRefusal =
-  | Exclude<import("../core/verbs/deliver.js").DeliverRefusal, { kind: "document-moved" }>
-  | DeliveryPreparationRefusal
-  | import("./operations.js").DeliverConflictRefusal
-  | import("../verification/declaration.js").VerificationDeclarationRefusal;
-
-type IntegrationConflictRefusal = Extract<DeliverOperationRefusal, { kind: "integration-failed"; reason: "conflict" }>;
-
 type DeliveryFailure =
   | DeliveryPreparationRefusal
-  | import("../verification/declaration.js").VerificationDeclarationRefusal
-  | DeliverRefusal;
-type DeliveryTender = TenderCapture & Readonly<{ ownedHandoff: boolean }>;
-type DeliveryWorktreeWitness = WorktreeWitness & Pick<DeliveryTender, "ownedHandoff">;
+  | import("../verification/declaration.js").VerificationDeclarationRefusal;
+type DeliverOperationRefusal =
+  | Exclude<DeliverRefusal, { kind: "document-moved" }>
+  | DeliveryFailure
+  | DeliverConflictRefusal;
+type DeliveryDecision = DeliverInput<DeliveryFailure>;
+type DeliveryResult =
+  | Exclude<ProtocolResult<DeliverOperationRefusal>, AcceptedAdmission>
+  | (AcceptedAdmission & Readonly<{ value: DeliverValue }>);
 
-async function captureAuthorizedDeliveryTender(
-  repository: import("../git/process.js").GitRepository,
-  stage: Readonly<{
-    contractId: ContractId;
-    coordinates: ContractState["coordinates"];
-    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
-  }>,
-  includeDirty: boolean | undefined,
-): Promise<{ kind: "prepared"; data: DeliveryTender } | { kind: "refused"; refusal: MechanicalPreparationRefusal }> {
-  const { contractId, coordinates } = stage;
-  const place =
-    coordinates.workspace === "worktree"
-      ? stage.appointment === undefined
-        ? (await readPlaceRegister(repository)).get(contractId)
-        : stage.appointment.place
-      : undefined;
-  const tender = await captureTender(repository, {
-    contractId,
-    coordinates,
-    ...(place === undefined ? {} : { place }),
-    captureMergeState: true,
-  });
-  if (tender.kind === "refused") return tender;
-  if (
-    ((tender.data.dirty || tender.data.mergeHead !== undefined) && includeDirty !== true) ||
-    tender.data.changes.submodules.length > 0
-  ) {
-    return { kind: "refused", refusal: dirtyTenderRefusal(tender.data) };
-  }
-  const { head, mergeHead } = tender.data;
-  const ownedHandoff =
-    coordinates.target !== undefined &&
-    place !== undefined &&
-    mergeHead !== undefined &&
-    (
-      await observeConflictHandoff(
-        repository,
-        { contractId, place, workspace: worktreePath(repository, place) },
-        { head, mergeHead },
-      )
-    ).kind === "active";
-  return { kind: "prepared", data: { ...tender.data, ownedHandoff } };
-}
-
-type DeliveryPreparationInput = Readonly<{
+type DeliveryStage = Readonly<{
+  contractId: ContractId;
+  coordinates: ContractState["coordinates"];
+  recordedIntegrations?: readonly SnapshotId[];
+  appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
+}>;
+type DeliveryOptions = Readonly<{
   title: string;
   document: string;
   message?: string;
@@ -174,61 +135,66 @@ type DeliveryPreparationInput = Readonly<{
   includeDirty?: boolean;
   holdIntegration?: (snapshot: SnapshotId) => Promise<void>;
 }>;
+type DeliveryHints = Readonly<{
+  changeId?: ChangeId | undefined;
+  targetHead?: SnapshotId | null | undefined;
+}>;
+type DeliveryTender = TenderCapture & Readonly<{ ownedHandoff: boolean }>;
 
-async function prepareDeliveryWithWorktree(
-  repository: import("../git/process.js").GitRepository,
-  stage: Readonly<{
-    contractId: ContractId;
-    coordinates: ContractState["coordinates"];
-    recordedIntegrations?: readonly SnapshotId[];
-    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
-  }>,
-  input: DeliveryPreparationInput,
-  captured?: DeliveryTender,
+function unauthorizedTender(tender: TenderCapture, includeDirty?: boolean): boolean {
+  return (
+    ((tender.dirty || tender.mergeHead !== undefined) && includeDirty !== true) || tender.changes.submodules.length > 0
+  );
+}
+
+async function prepareCapturedDelivery(
+  repository: GitRepository,
+  stage: DeliveryStage,
+  input: DeliveryOptions,
+  tender: DeliveryTender,
+  hints: DeliveryHints = {},
 ): Promise<
-  | { kind: "prepared"; data: DeliverData; worktree: DeliveryWorktreeWitness }
-  | { kind: "refused"; refusal: MechanicalPreparationRefusal }
+  | { kind: "prepared"; data: DeliverData }
+  | { kind: "refused"; refusal: MechanicalPreparationRefusal; tenderSnapshot: SnapshotId }
 > {
   const { contractId, coordinates } = stage;
-  const tender =
-    captured === undefined
-      ? await captureAuthorizedDeliveryTender(repository, stage, input.includeDirty)
-      : { kind: "prepared" as const, data: captured };
-  if (tender.kind === "refused") return tender;
+  let { changeId, targetHead } = hints;
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
   const targetless = coordinates.target === undefined;
   const { holdIntegration } = input;
   const holdTenderEarly = holdIntegration !== undefined && targetless;
   // Decide reuse before minting or pinning when the tender could itself be the integration.
-  const reuse = (tree: TenderCapture["tree"], predecessor: SnapshotId) =>
+  const reuse = (tree: typeof tender.tree, predecessor: SnapshotId) =>
     reusableIntegrationSnapshot(
       repository,
       tree,
-      targetless && tender.data.dirty ? tender.data.head : predecessor,
+      targetless && tender.dirty ? tender.head : predecessor,
       stage.recordedIntegrations ?? [],
     );
   const existingTargetlessIntegration = async () =>
-    (await reuse(tender.data.tree, coordinates.start)) ??
-    (tender.data.dirty || tender.data.mergeHead !== undefined ? undefined : tender.data.head);
+    (await reuse(tender.tree, coordinates.start)) ??
+    (tender.dirty || tender.mergeHead !== undefined ? undefined : tender.head);
   const earlyIntegration = holdTenderEarly ? await existingTargetlessIntegration() : undefined;
   if (earlyIntegration !== undefined) await holdIntegration?.(earlyIntegration);
   const commit = await prepareDeliveryCommitMetadata(repository, {
     contractId,
     title: input.title,
     document: input.document,
-    at: tender.data.at,
+    at: tender.at,
     ...(input.message === undefined ? {} : { message: input.message }),
   });
-  const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, commit);
+  const tenderSnapshot = await materializeTenderSnapshot(repository, tender, commit);
   if (holdTenderEarly && earlyIntegration === undefined) await holdIntegration(tenderSnapshot);
   const integration = await planIntegration(
     repository,
     { coordinates },
-    { ...tender.data, head: tender.data.ownedHandoff ? tenderSnapshot : tender.data.head },
+    { ...tender, head: tender.ownedHandoff ? tenderSnapshot : tender.head },
     requireBranchesToBeUpToDate,
+    targetHead,
   );
-  if (integration.kind === "refused") return integration;
-  const changeId = await worktreeChangeId(repository, { coordinates }, tender.data);
+  if (integration.kind === "refused") return { ...integration, tenderSnapshot };
+  changeId ??= await worktreeChangeId(repository, stage, tender);
+  // A targetless dirty integration is the captured tender, whose sole parent is the worktree head.
   const reusedIntegration = holdTenderEarly
     ? earlyIntegration
     : await reuse(integration.data.tree, integration.data.predecessor);
@@ -243,356 +209,269 @@ async function prepareDeliveryWithWorktree(
     data: {
       ...(input.message === undefined ? {} : { note: input.message }),
       tenderSnapshot,
-      integration: {
-        predecessor: integration.data.predecessor,
-        snapshot: integrationSnapshot,
-        changeId,
-      },
+      integration: { predecessor: integration.data.predecessor, snapshot: integrationSnapshot, changeId },
       method: "squash",
       policy: { requireBranchesToBeUpToDate },
     },
-    worktree: worktreeWitness(tender.data, changeId),
   };
 }
 
 export async function prepareDelivery(
-  repository: import("../git/process.js").GitRepository,
-  stage: Readonly<{
-    contractId: ContractId;
-    coordinates: ContractState["coordinates"];
-    recordedIntegrations?: readonly SnapshotId[];
-    appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
-  }>,
-  input: DeliveryPreparationInput,
+  repository: GitRepository,
+  stage: DeliveryStage,
+  input: DeliveryOptions,
 ): Promise<{ kind: "prepared"; data: DeliverData } | { kind: "refused"; refusal: MechanicalPreparationRefusal }> {
-  const prepared = await prepareDeliveryWithWorktree(repository, stage, input);
-  return prepared.kind === "refused" ? prepared : { kind: "prepared", data: prepared.data };
+  const { contractId, coordinates } = stage;
+  const place =
+    coordinates.workspace === "worktree"
+      ? (stage.appointment?.place ?? (await readPlaceRegister(repository)).get(contractId))
+      : undefined;
+  const tender = await captureTender(repository, {
+    contractId,
+    coordinates,
+    captureMergeState: true,
+    ...(place === undefined ? {} : { place }),
+  });
+  if (tender.kind === "refused") return tender;
+  if (unauthorizedTender(tender.data, input.includeDirty))
+    return { kind: "refused", refusal: dirtyTenderRefusal(tender.data) };
+  const { head, mergeHead } = tender.data;
+  const ownedHandoff =
+    coordinates.target !== undefined &&
+    place !== undefined &&
+    mergeHead !== undefined &&
+    (
+      await observeConflictHandoff(
+        repository,
+        { contractId, place, workspace: worktreePath(repository, place) },
+        { head, mergeHead },
+      )
+    ).kind === "active";
+  const prepared = await prepareCapturedDelivery(repository, stage, input, { ...tender.data, ownedHandoff });
+  return prepared.kind === "refused" ? { kind: "refused", refusal: prepared.refusal } : prepared;
 }
+
+type ConflictHandoff = Readonly<{
+  place: string;
+  path: string;
+  previousHead: SnapshotId;
+  handoffBase: SnapshotId;
+}>;
+
+type DeliveryInvocationCapture = Readonly<{
+  tender: DeliveryTender;
+  place: string;
+  path: string;
+  handoff?: ConflictHandoffWitness;
+}>;
+
+type CapturedDeliveryPreparation = Readonly<{
+  preparation: DeliveryDecision["preparation"];
+  reuse?: true;
+  handoff?: ConflictHandoff;
+}>;
 
 /**
- * Physical delivery work prepared outside custody. It is never authority: every state-derived part
- * (document, preparation choice) is recomputed from the fresh in-custody Contract, and the carried
- * artifacts stay usable only while the witness and the physical worktree still hold.
+ * Capture the invocation's immutable worktree bytes once, outside custody. Later fresh attempts
+ * reuse these exact bytes and never recapture the mutable worktree.
  */
-type DeliveryArtifacts =
-  | Readonly<{ kind: "defer" }>
-  | Readonly<{ kind: "reuse"; worktree: DeliveryWorktreeWitness }>
-  | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
-  | Readonly<{ kind: "mechanical"; data: DeliverData; worktree: DeliveryWorktreeWitness }>;
-
-type ExternalDeliveryPreparation =
-  | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "artifacts"; witness: ContractStateWitness; artifacts: DeliveryArtifacts }>;
-
-type AssembledDelivery =
-  | Readonly<{ kind: "stale" }>
-  | Readonly<{
-      kind: "assembled";
-      state: ContractState | null;
-      derivation?: DocumentDerivation;
-      preparation?: DeliverInput<DeliveryFailure>["preparation"];
-      reuse?: boolean;
-    }>;
-
-function deliveryPreparationInput(input: DeliverOperationInput, derivation: DocumentDerivation) {
-  return {
-    title: derivation.title,
-    document: derivation.bytes,
-    ...(input.message === undefined ? {} : { message: input.message }),
-    requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-    includeDirty: input.includeDirty,
-  };
-}
-
-async function recaptureDeliveryWorktree(
+async function captureDeliveryInvocation(
   input: DeliverOperationInput,
   state: ContractState,
-): Promise<DeliveryWorktreeWitness | undefined> {
-  const tender = await captureAuthorizedDeliveryTender(
-    input.scope,
-    { contractId: state.id, coordinates: state.coordinates },
-    input.includeDirty,
-  );
-  if (tender.kind === "refused") return undefined;
-  return worktreeWitness(
-    tender.data,
-    await worktreeChangeId(input.scope, { coordinates: state.coordinates }, tender.data),
-  );
-}
-
-async function mechanicalDeliveryPreparation(
-  input: DeliverOperationInput,
-  state: ContractState,
-  derivation: DocumentDerivation,
-  journal: readonly JournalEntry[],
-  captured?: DeliveryTender,
-): Promise<
-  | Extract<DeliverInput<DeliveryFailure>["preparation"], { kind: "refused" }>
-  | Readonly<{
-      kind: "prepared";
-      document: DocumentDerivation["document"];
-      data: DeliverData;
-      worktree: DeliveryWorktreeWitness;
-    }>
-> {
-  const prepared = await prepareDeliveryWithWorktree(
-    input.scope,
-    {
-      contractId: state.id,
-      coordinates: state.coordinates,
-      recordedIntegrations: deliveryIntegrationSnapshots(journal),
-    },
-    deliveryPreparationInput(input, derivation),
-    captured,
-  );
-  if (prepared.kind === "refused") {
-    return { kind: "refused", document: derivation.document, refusal: prepared.refusal };
-  }
-  return {
-    kind: "prepared",
-    document: derivation.document,
-    data: prepared.data,
-    worktree: prepared.worktree,
-  };
-}
-
-function worktreeWitness(tender: DeliveryTender, changeId: ChangeId): DeliveryWorktreeWitness {
-  return {
-    tree: tender.tree,
-    head: tender.head,
-    ownedHandoff: tender.ownedHandoff,
-    ...(tender.mergeHead === undefined ? {} : { mergeHead: tender.mergeHead }),
-    dirty: tender.dirty,
-    changeId,
-  };
-}
-
-/**
- * Repeatable physical delivery work outside the publication seat: locate the appointed worktree from
- * one non-authoritative private-state read, capture its bytes, and materialize the prepared artifacts.
- */
-async function prepareExternalDelivery(input: DeliverOperationInput): Promise<ExternalDeliveryPreparation> {
-  return await externalPreparation(input, (observation, state) => prepareDeliveryArtifacts(input, observation, state));
-}
-
-async function prepareDeliveryArtifacts(
-  input: DeliverOperationInput,
-  observation: ContractReadView,
-  state: ContractState,
-): Promise<DeliveryArtifacts> {
-  const derivation = input.deriveDocument(state);
-  if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused") return { kind: "defer" };
-  if (input.materializeConflict === true && state.terminal === null) return { kind: "defer" };
-  const captured = await captureAuthorizedDeliveryTender(
-    input.scope,
-    { contractId: state.id, coordinates: state.coordinates },
-    input.includeDirty,
-  );
+): Promise<DeliveryInvocationCapture | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>> {
+  const { scope, contractId } = input;
+  const { coordinates } = state;
+  const place = coordinates.workspace === "worktree" ? (await readPlaceRegister(scope)).get(contractId) : undefined;
+  if (place === undefined) return { kind: "refused", refusal: { kind: "worktree-missing" } };
+  const captured = await captureTender(scope, { contractId, coordinates, place, captureMergeState: true });
   if (captured.kind === "refused") return { kind: "refused", refusal: captured.refusal };
-  const worktree = worktreeWitness(
-    captured.data,
-    await worktreeChangeId(input.scope, { coordinates: state.coordinates }, captured.data),
-  );
-  if (reusesCurrentCandidate(input, state, worktree.changeId)) {
-    return { kind: "reuse", worktree };
+  let tender: DeliveryTender = { ...captured.data, ownedHandoff: false };
+  const path = worktreePath(scope, place);
+  if (input.materializeConflict) {
+    const retirement = await retireConflictHandoff(scope, {
+      contractId,
+      place,
+      workspace: path,
+      consumeUnconsumed: true,
+    });
+    if (retirement.kind === "retained" || (await workspaceMergeStatePresent(scope, path))) {
+      return { kind: "refused", refusal: { kind: "merge-state-present", worktreePath: path } };
+    }
+    // Retirement changes operation metadata only; the captured tree and change identity still apply.
+    const { mergeHead: _retired, ...withoutMerge } = captured.data;
+    tender = { ...withoutMerge, ownedHandoff: false };
   }
-  const prepared = await mechanicalDeliveryPreparation(
-    input,
-    state,
-    derivation,
-    contractJournal(observation.journals, state.id).entries,
-    captured.data,
-  );
-  return prepared.kind === "prepared"
-    ? {
-        kind: "mechanical",
-        data: prepared.data,
-        worktree: prepared.worktree,
-      }
-    : { kind: "refused", refusal: prepared.refusal };
-}
-
-/**
- * Assemble the in-custody decision input from the fresh Contract. State-derived choices are recomputed
- * here; artifacts the fresh state cannot justify are spent, which restarts the whole preparation.
- */
-async function assembleDeliveryAttempt(
-  input: DeliverOperationInput,
-  observation: ContractReadView,
-  external: ExternalDeliveryPreparation,
-): Promise<AssembledDelivery> {
-  const state = contractState(observation.decision, input.contractId);
-  if (external.kind === "unavailable") {
-    return state === null
-      ? { kind: "assembled", state: null, preparation: { kind: "unavailable" } }
-      : { kind: "stale" };
+  if (unauthorizedTender(tender, input.includeDirty)) {
+    return { kind: "refused", refusal: dirtyTenderRefusal(tender) };
   }
-  if (state === null) return { kind: "stale" };
-  if (external.witness.head !== state.head) return { kind: "stale" };
-  const derivation = input.deriveDocument(state);
-  if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused") {
-    return {
-      kind: "assembled",
-      state,
-      derivation,
-      preparation: { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal },
-    };
-  }
-  const artifacts = external.artifacts;
-  if (artifacts.kind === "defer")
-    return await completeDeferredDelivery(
-      input,
-      state,
-      derivation,
-      contractJournal(observation.journals, state.id).entries,
-    );
-  if (artifacts.kind === "refused") {
-    return {
-      kind: "assembled",
-      state,
-      derivation,
-      preparation: { kind: "refused", document: derivation.document, refusal: artifacts.refusal },
-    };
-  }
-  const freshWorktree = await recaptureDeliveryWorktree(input, state);
-  if (
-    artifacts.worktree.ownedHandoff !== freshWorktree?.ownedHandoff ||
-    !sameWorktreeWitness(artifacts.worktree, freshWorktree)
-  ) {
-    return { kind: "stale" };
-  }
-  if (artifacts.kind === "reuse") {
-    return reusesCurrentCandidate(input, state, artifacts.worktree.changeId)
-      ? { kind: "assembled", state, derivation, reuse: true }
-      : { kind: "stale" };
-  }
+  const { head, mergeHead } = tender;
+  const ownership =
+    coordinates.target !== undefined && mergeHead !== undefined
+      ? await witnessConflictHandoff(scope, { contractId, place, workspace: path }, { head, mergeHead })
+      : ({ kind: "unowned" } as const);
   return {
-    kind: "assembled",
-    state,
-    derivation,
-    preparation: { kind: "prepared", document: derivation.document, data: artifacts.data },
+    tender: { ...tender, ownedHandoff: ownership.kind === "owned" },
+    place,
+    path,
+    ...(ownership.kind === "owned" && ownership.witness !== undefined ? { handoff: ownership.witness } : {}),
   };
 }
 
-/**
- * Complete a preparation the outside phase could not settle. A requested conflict materialization
- * must retire its owned handoff and then capture the worktree that follows, so it only runs under
- * this custody; an unchanged candidate may still be reused before that materialization.
- */
-async function completeDeferredDelivery(
+/** Prepare one attempt's decision data from the immutable invocation capture and fresh authority. */
+async function prepareCapturedDeliveryAttempt(
   input: DeliverOperationInput,
   state: ContractState,
-  derivation: DocumentDerivation,
+  captured: DeliveryInvocationCapture,
   journal: readonly JournalEntry[],
-): Promise<AssembledDelivery> {
-  if (input.materializeConflict !== true || state.terminal !== null) return { kind: "assembled", state, derivation };
-  const worktree = await recaptureDeliveryWorktree(input, state);
-  if (worktree !== undefined && reusesCurrentCandidate(input, state, worktree.changeId)) {
-    return { kind: "assembled", state, derivation, reuse: true };
+  targetHead: SnapshotId | null | undefined,
+): Promise<CapturedDeliveryPreparation> {
+  const { scope, contractId } = input;
+  const { coordinates } = state;
+  const { title, bytes: document, document: key, verification } = input.deriveDocument(state);
+  const refuse = (refusal: DeliveryFailure) => ({ preparation: { kind: "refused" as const, document: key, refusal } });
+  if (state.terms.gates.includes(VERIFIED) && verification.kind === "refused") return refuse(verification.refusal);
+  const { tender } = captured;
+  let changeId: ChangeId | undefined;
+  if (!input.overwrite && state.delivery !== null) {
+    changeId = await worktreeChangeId(scope, { coordinates }, tender);
+    if (state.delivery.data.integration.changeId === changeId) {
+      return { preparation: { kind: "unavailable" }, reuse: true };
+    }
   }
-  const materialization = await materializationMergeStateRefusal(input);
-  if (materialization !== undefined) {
-    return {
-      kind: "assembled",
-      state,
-      derivation,
-      preparation: { kind: "refused", document: derivation.document, refusal: materialization },
-    };
-  }
-  const prepared = await mechanicalDeliveryPreparation(input, state, derivation, journal);
-  return {
-    kind: "assembled",
-    state,
-    derivation,
-    preparation:
-      prepared.kind === "prepared"
-        ? { kind: "prepared", document: derivation.document, data: prepared.data }
-        : prepared,
-  };
-}
-
-function reusesCurrentCandidate(input: DeliverOperationInput, state: ContractState, changeId: ChangeId): boolean {
-  return (
-    input.overwrite !== true &&
-    state.terminal === null &&
-    state.delivery !== null &&
-    state.delivery.data.integration.changeId === changeId
+  const prepared = await prepareCapturedDelivery(
+    scope,
+    { contractId, coordinates, recordedIntegrations: deliveryIntegrationSnapshots(journal) },
+    {
+      title,
+      document,
+      requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
+      ...(input.message === undefined ? {} : { message: input.message }),
+    },
+    tender,
+    { changeId, targetHead },
   );
+  if (prepared.kind === "prepared") return { preparation: { ...prepared, document: key } };
+  const result = refuse(prepared.refusal);
+  if (
+    !input.materializeConflict ||
+    prepared.refusal.kind !== "integration-failed" ||
+    prepared.refusal.reason !== "conflict"
+  )
+    return result;
+  return {
+    ...result,
+    handoff: {
+      place: captured.place,
+      path: captured.path,
+      previousHead: tender.head,
+      handoffBase: prepared.tenderSnapshot,
+    },
+  };
 }
 
 /** Accept a delivery whose current candidate is already admitted, without admitting it again. */
-function currentCandidateDeliveryDecision(
+function reuseDelivery(
   input: DeliverOperationInput,
   observation: ContractReadView,
-  assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined {
-  const state = assembled.state;
-  if (state === null || assembled.derivation === undefined || assembled.reuse !== true) return undefined;
+  state: ContractState,
+): DeliveryResult {
   const record = contractJournal(observation.journals, input.contractId);
   const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
-  if (delivery?.kind !== "deliver") throw new Error("current delivery is missing its journal fact");
+  if (delivery?.kind !== "deliver" || state.delivery === null) {
+    throw new Error("current delivery is missing its journal fact");
+  }
   input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries }, delivery);
   const leading: DeliverLeading = { kind: "already-admitted", fact: delivery.entry };
   const value = compactDelivery(
-    { ...state.delivery!.data, integration: state.currentIntegration ?? state.delivery!.data.integration },
+    { ...state.delivery.data, integration: state.currentIntegration ?? state.delivery.data.integration },
     true,
   );
   return { kind: "accepted", facts: [], state, journal: record.entries, value: { ...value, leading } };
 }
 
-async function validateDeliveryTarget(
-  input: DeliverOperationInput,
+/** Judge a terminal Contract's target before deciding whether it can reuse its delivery. */
+async function terminalTargetRefusal(
+  scope: GitRepository,
   observation: ContractReadView,
-  assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined> {
-  const target = assembled.state?.coordinates.target;
-  const targetRefusal = targetContractRefusal(observation.decision, target);
-  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
+  target: ContractTarget | undefined,
+): Promise<TargetContractRefusal | TargetWorkspaceRefusal | undefined> {
+  const refusal = targetContractRefusal(observation.decision, target);
+  if (refusal !== undefined) return refusal;
   if (target === undefined || typeof target === "string") return undefined;
-  const resolved = await resolveContractTarget(input.scope, target.contractId, target);
-  if (resolved.kind === "refused") return resolved;
-  if (
-    assembled.preparation?.kind === "prepared" &&
-    resolved.head !== assembled.preparation.data.integration.predecessor
-  )
-    return STALE_PRIVATE_STATE_PREPARATION;
-  return undefined;
+  const resolved = await resolveContractTarget(scope, target.contractId, target);
+  return resolved.kind === "refused" ? resolved.refusal : undefined;
 }
 
-async function decideAndAdmitDelivery(
+type DeliveryAdmission = Readonly<{
+  seat: PrivateStatePublicationSeat;
+  observation: ContractReadView;
+  capture: DeliveryInvocationCapture | undefined;
+  prepared: CapturedDeliveryPreparation | undefined;
+  expectedRef: ObservedRef | undefined;
+  attempt: AttemptContext;
+}>;
+
+/** Reuse an already-admitted candidate for a terminal-or-reusable frozen preparation. */
+async function reusableCapturedDelivery(
   input: DeliverOperationInput,
-  attempt: AttemptContext,
-  seat: PrivateStatePublicationSeat,
   observation: ContractReadView,
-  assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
-  const targetCheck = await validateDeliveryTarget(input, observation, assembled);
-  if (targetCheck !== undefined) return targetCheck;
-  const current = currentCandidateDeliveryDecision(input, observation, assembled);
-  if (current !== undefined) return current;
-  const preparation = assembled.preparation ?? STALE_PRIVATE_STATE_PREPARATION;
-  if (preparation.kind === "stale") return preparation;
+  prepared: CapturedDeliveryPreparation | undefined,
+): Promise<DeliveryResult | undefined> {
+  const state = contractState(observation.decision, input.contractId);
+  if (state?.terminal !== null) return undefined;
+  const refusal = await terminalTargetRefusal(input.scope, observation, state.coordinates.target);
+  if (refusal !== undefined) return { kind: "refused", refusal };
+  return prepared?.reuse ? reuseDelivery(input, observation, state) : undefined;
+}
+
+async function admitCapturedDelivery(
+  input: DeliverOperationInput,
+  { seat, observation, capture, prepared, expectedRef, attempt }: DeliveryAdmission,
+): Promise<DeliveryResult | SpentPreparation> {
+  const { scope, contractId } = input;
+  const reusable = await reusableCapturedDelivery(input, observation, prepared);
+  if (reusable !== undefined) return reusable;
+  const state = contractState(observation.decision, contractId);
+  const preparation = prepared?.preparation ?? { kind: "unavailable" };
   const decision = decideDeliver({
-    input: {
-      contractId: input.contractId,
-      at: timestamp(),
-      preparation,
-    },
+    input: { contractId, at: timestamp(), preparation },
     attempt,
     observation: observation.decision,
   });
   if (decision.kind === "refused") {
     return decision.refusal.kind === "document-moved"
-      ? STALE_PRIVATE_STATE_PREPARATION
+      ? spentPreparation
       : { kind: "refused", refusal: decision.refusal };
   }
   if (preparation.kind !== "prepared") throw new Error("offered delivery is missing its mechanical preparation");
-  const admission = await admitDecidedOffer({ ...input, seat, observation, attempt, offer: decision.offer });
+  const handoff = capture?.handoff;
+  const admission = await admitDecidedOffer({
+    ...input,
+    seat,
+    observation,
+    attempt,
+    offer: decision.offer,
+    assertions: expectedRef?.oid == null ? [] : [{ ref: expectedRef.ref, oid: expectedRef.oid }],
+    ...(capture === undefined || handoff === undefined
+      ? {}
+      : {
+          prepareRefCompanion: async () => {
+            const result = await consumeConflictHandoff(
+              scope,
+              { contractId, place: capture.place, workspace: capture.path },
+              handoff,
+            );
+            return result.kind === "skip"
+              ? { kind: "none" as const }
+              : { kind: "companion" as const, update: result.update };
+          },
+        }),
+  });
   if (admission.kind !== "accepted") return admission;
-  const deliverFact = admission.facts.find((fact) => fact.contract === input.contractId && fact.kind === "deliver");
-  if (deliverFact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");
-  const previousContentId = assembled.state?.delivery?.data.integration.changeId;
-  const leading: DeliverLeading = { kind: "admitted-now", fact: deliverFact.entry };
+  const fact = admission.facts.find((entry) => entry.contract === contractId && entry.kind === "deliver");
+  if (fact === undefined) throw new Error("confirmed delivery requires its own receipt");
+  const previousContentId = state?.delivery?.data.integration.changeId;
+  const leading: DeliverLeading = { kind: "admitted-now", fact: fact.entry };
   const value = compactDelivery(
     preparation.data,
     false,
@@ -601,162 +480,157 @@ async function decideAndAdmitDelivery(
   return { ...admission, value: { ...value, leading } };
 }
 
-/**
- * One delivery attempt: the repeatable physical preparation happens outside custody, then a single
- * in-custody observation, witness validation, assembly, decision, and atomic publication.
- */
-async function deliverAttempt(
+type PreparedDelivery = Readonly<{
+  expectedHead: ContractHead | null;
+  expectedRef?: ObservedRef;
+  prepared: CapturedDeliveryPreparation | undefined;
+}>;
+
+type ConflictProjection =
+  | Readonly<{ kind: "refused"; refusal: DeliverOperationRefusal }>
+  | IntegrationConflictMaterialized
+  | SpentPreparation;
+
+async function projectConflict(
   input: DeliverOperationInput,
-  attempt: AttemptContext,
-): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
-  const external = await prepareExternalDelivery(input);
-  return await privateStateSeatAttempt(
-    input.scope,
-    async (seat) => {
-      const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
-      const assembled = await assembleDeliveryAttempt(input, observation, external);
-      if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
-      return await decideAndAdmitDelivery(input, attempt, seat, observation, assembled);
-    },
-    protocolSeatClose,
-  );
-}
-
-function isIntegrationConflict(refusal: DeliverOperationRefusal): refusal is IntegrationConflictRefusal {
-  return refusal.kind === "integration-failed" && refusal.reason === "conflict";
-}
-
-function conflictDeliverRefusal(refusal: IntegrationConflictRefusal): DeliverConflictRefusal {
-  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
-  return {
-    kind: "integration-failed",
-    reason: "conflict",
-    targetHead: refusal.targetHead,
-    conflictPaths: refusal.conflictPaths,
-  };
-}
-
-async function appointedDeliverWorkspace(
-  input: DeliverOperationInput,
-): Promise<
-  | Readonly<{ workspace: AppointedWorkspace; coordinates: ContractState["coordinates"]; state: ContractState }>
-  | { kind: "refused"; refusal: DeliveryPreparationRefusal }
-> {
-  const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(observation.decision, input.contractId);
-  if (state === null) return { kind: "refused", refusal: { kind: "worktree-missing" } };
-  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
-  if (place === undefined) {
-    return { kind: "refused", refusal: { kind: "worktree-missing" } };
+  handoff: ConflictHandoff,
+  conflict: DeliverConflictRefusal,
+): Promise<ConflictProjection> {
+  const { scope, contractId } = input;
+  const { place, path, previousHead, handoffBase } = handoff;
+  if (await workspaceMergeStatePresent(scope, path)) {
+    return { kind: "refused", refusal: { kind: "merge-state-present", worktreePath: path } };
   }
-  return {
-    workspace: { kind: "worktree", path: worktreePath(input.scope, place) },
-    coordinates: state.coordinates,
-    state,
-  };
-}
-
-async function materializationMergeStateRefusal(
-  input: DeliverOperationInput,
-): Promise<DeliveryPreparationRefusal | undefined> {
-  const appointed = await appointedDeliverWorkspace(input);
-  if ("kind" in appointed) return appointed.refusal;
-  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
-  if (place === undefined) return { kind: "worktree-missing" };
-  const retirement = await retireConflictHandoff(input.scope, {
-    contractId: input.contractId,
-    place,
-    workspace: appointed.workspace.path,
-    consume: true,
-  });
-  if (retirement.kind === "retained") return { kind: "merge-state-present", worktreePath: appointed.workspace.path };
-  return await mergeStatePresentRefusal(input, appointed.workspace);
-}
-
-async function mergeStatePresentRefusal(
-  input: DeliverOperationInput,
-  workspace: AppointedWorkspace,
-): Promise<Extract<DeliveryPreparationRefusal, { kind: "merge-state-present" }> | undefined> {
-  if (!(await workspaceMergeStatePresent(input.scope, workspace.path))) return undefined;
-  return { kind: "merge-state-present", worktreePath: workspace.path };
-}
-
-async function materializeDeliverConflict(
-  input: DeliverOperationInput,
-  refusal: IntegrationConflictRefusal,
-): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
-  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
-  const appointed = await appointedDeliverWorkspace(input);
-  if ("kind" in appointed) return appointed;
-  const { workspace, coordinates } = appointed;
-  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
-  if (place === undefined) return { kind: "refused", refusal: { kind: "worktree-missing" } };
-  const mergeState = await mergeStatePresentRefusal(input, workspace);
-  if (mergeState !== undefined) return { kind: "refused", refusal: mergeState };
-  const tender = await captureTender(input.scope, {
-    contractId: input.contractId,
-    coordinates,
-    place,
-  });
-  if (tender.kind === "refused") return tender;
-  if (tender.data.changes.submodules.length > 0 || (tender.data.dirty && input.includeDirty !== true)) {
-    return { kind: "refused", refusal: dirtyTenderRefusal(tender.data) };
+  if (
+    (await currentBranch(scope, path)) !== null ||
+    (await readRef({ ...scope, effectiveCwd: path }, "HEAD")) !== gitObjectIdForSnapshot(previousHead)
+  ) {
+    return spentPreparation;
   }
-  let handoffHead = tender.data.head;
-  if (tender.data.dirty) {
-    const derivation = input.deriveDocument(appointed.state);
-    const commit = await prepareDeliveryCommitMetadata(input.scope, {
-      contractId: input.contractId,
-      title: derivation.title,
-      document: derivation.bytes,
-      at: tender.data.at,
-      ...(input.message === undefined ? {} : { message: input.message }),
-    });
-    handoffHead = await materializeTenderSnapshot(input.scope, tender.data, commit);
-    await checkoutDetachedSnapshot(input.scope, workspace.path, handoffHead);
-  }
-  await recordConflictHandoff(input.scope, {
-    contractId: input.contractId,
+  if (previousHead !== handoffBase) await installConflictHandoffBase(scope, path, previousHead, handoffBase);
+  await recordConflictHandoff(scope, {
+    contractId,
     place,
-    workspace: workspace.path,
-    head: handoffHead,
-    mergeHead: refusal.targetHead,
+    workspace: path,
+    head: handoffBase,
+    mergeHead: conflict.targetHead,
   });
-  await materializeJudgedConflict(input.scope, workspace.path, refusal.targetHead);
+  if (!(await materializeJudgedConflict(scope, path, conflict.targetHead))) {
+    // The native merge refused before creating a live operation. Retire the reservation through the
+    // same handoff owner that recovers receipts without operations, and report the judged conflict
+    // without claiming a materialization that did not happen.
+    await retireConflictHandoff(scope, { contractId, place, workspace: path, consumeUnconsumed: true });
+    return { kind: "refused", refusal: conflict };
+  }
   return {
     kind: "integration-conflict-materialized",
-    targetHead: refusal.targetHead,
-    conflictPaths: refusal.conflictPaths,
-    workspace,
-    handoffBase: handoffHead,
+    targetHead: conflict.targetHead,
+    conflictPaths: conflict.conflictPaths,
+    workspace: { kind: "worktree", path },
+    handoffBase,
     recovery: conflictRecovery,
   };
 }
 
-async function finishDeliverRefusal(
+async function attemptDelivery(
   input: DeliverOperationInput,
-  refusal: DeliverOperationRefusal,
-): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
-  if (!isIntegrationConflict(refusal)) return { kind: "refused", refusal };
-  if (input.materializeConflict !== true) return { kind: "refused", refusal: conflictDeliverRefusal(refusal) };
-  return await materializeDeliverConflict(input, refusal);
+  capture: DeliveryInvocationCapture | undefined,
+  { expectedHead, expectedRef, prepared }: PreparedDelivery,
+  attempt: AttemptContext,
+): Promise<DeliveryResult | IntegrationConflictMaterialized | SpentPreparation> {
+  const { scope, channel, contractId } = input;
+  const seated = await privateStateSeatAttempt<DeliveryResult | SpentPreparation>(scope, async (seat) => {
+    const observation = await observeContractsAt(scope, channel, [contractId]);
+    if (!(await preparationIsCurrent(scope, observation, contractId, expectedHead, expectedRef)))
+      return spentPreparation;
+    return await admitCapturedDelivery(input, {
+      seat,
+      observation,
+      capture,
+      prepared,
+      expectedRef,
+      attempt,
+    });
+  });
+  if (seated.kind !== "refused") return seated;
+  const { refusal } = seated;
+  if (refusal.kind !== "integration-failed" || refusal.reason !== "conflict") return seated;
+  if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
+  const conflict: DeliverConflictRefusal = {
+    kind: refusal.kind,
+    reason: refusal.reason,
+    targetHead: refusal.targetHead,
+    conflictPaths: refusal.conflictPaths,
+  };
+  return prepared?.handoff === undefined
+    ? { kind: "refused", refusal: conflict }
+    : await projectConflict(input, prepared.handoff, conflict);
 }
 
 export async function admitDeliveryOperation(
   input: DeliverOperationInput,
 ): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
-  const incoming = input.materializeConflict
-    ? await acquireTargetPlacementFence(input.scope, input.contractId)
-    : undefined;
+  const { scope, channel, contractId } = input;
+  const incoming = input.materializeConflict ? await acquireTargetPlacementFence(scope, contractId) : undefined;
   try {
+    const initial = await observeContractsAt(scope, channel, [contractId]);
+    const initialState = contractState(initial.decision, contractId);
+    const captured =
+      initialState === null || initialState.terminal !== null
+        ? undefined
+        : await captureDeliveryInvocation(input, initialState);
+    if (captured !== undefined && "kind" in captured) return captured;
+    const capture: DeliveryInvocationCapture | undefined = captured;
     const result = await runBoundedAttempts<
-      Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }>,
+      PreparedDelivery,
+      DeliveryResult | IntegrationConflictMaterialized,
       DeliverOperationRefusal
-    >(mintAttempts({ entryCount: 1 }), (attempt) => deliverAttempt(input, attempt));
-    if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
-    if (result.kind !== "accepted") return { kind: "retry", reason: result };
-    input.progress?.recordResidue(input.contractId, result);
-    return result;
+    >(
+      mintAttempts({ entryCount: 1 }),
+      async () => {
+        const before = await observeContractsAt(scope, channel, [contractId]);
+        const state = contractState(before.decision, contractId);
+        const target = state?.terminal === null ? state.coordinates.target : undefined;
+        const targetHead = target === undefined ? undefined : await observeTargetHead(scope, target);
+        const expectedRef =
+          target === undefined || targetHead === undefined
+            ? undefined
+            : { ref: targetRef(target), oid: targetHead === null ? null : gitObjectIdForSnapshot(targetHead) };
+        if (state === null || state.terminal !== null) {
+          return {
+            kind: "prepared",
+            prepared: {
+              expectedHead: state?.head ?? null,
+              ...(expectedRef === undefined ? {} : { expectedRef }),
+              prepared: undefined,
+            },
+          };
+        }
+        if (capture === undefined) return spentPreparation;
+        const prepared = await prepareCapturedDeliveryAttempt(
+          input,
+          state,
+          capture,
+          contractJournal(before.journals, contractId).entries,
+          targetHead,
+        );
+        return {
+          kind: "prepared",
+          prepared: {
+            expectedHead: state.head,
+            ...(expectedRef === undefined ? {} : { expectedRef }),
+            prepared,
+          },
+        };
+      },
+      async (prepared, attempt) => await attemptDelivery(input, capture, prepared, attempt),
+    );
+    if (result.kind === "accepted") {
+      input.progress?.recordResidue(contractId, result);
+      return result;
+    }
+    if (result.kind === "refused" || result.kind === "integration-conflict-materialized") return result;
+    return { kind: "retry", reason: result };
   } finally {
     incoming?.close();
   }

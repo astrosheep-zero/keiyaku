@@ -10,7 +10,7 @@ import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { singletonRequirement } from "../src/verification/declaration.js";
 import { gate, type ContractId } from "../src/core/facts/types.js";
-import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
+import { admitDecidedOffer, mintAttempt } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsAt } from "../src/git/observe.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
@@ -143,13 +143,14 @@ async function admitClaimWithoutFollow(
         },
       },
       decideAttestation<never>,
+      { attempt: mintAttempt() },
     );
     assert.equal(attested.kind, "accepted");
 
     const admitted = (
       await withPrivateStatePublicationSeat(git, async (seat) => {
         const observation = await observeContractsAt(git, channel, [contractId]);
-        const attempt = mintAttempts({ entryCount: 2 })[0]!;
+        const attempt = mintAttempt(2);
         const decision = decidePlacement({
           input: { contractId, at: new Date().toISOString() },
           attempt,

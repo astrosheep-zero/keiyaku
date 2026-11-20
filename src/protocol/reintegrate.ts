@@ -1,15 +1,16 @@
 import type { ProtocolProgress } from "./progress.js";
-import { contractState, targetContractRefusal } from "../core/facts/observation.js";
+import { contractState } from "../core/facts/observation.js";
 import {
   targetName,
   sameTarget,
+  type ContractHead,
   type ContractId,
   type ContractState,
   type ContractTarget,
   type ReintegratedData,
   type SnapshotId,
 } from "../core/facts/types.js";
-import { resolveContractTarget, targetRef, type TargetWorkspaceRefusal } from "../git/target.js";
+import { resolveContractTarget, targetRef, targetRepository, type TargetWorkspaceRefusal } from "../git/target.js";
 import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
 import {
   materializeReintegrationSnapshot,
@@ -18,25 +19,23 @@ import {
   reusableIntegrationSnapshot,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
-import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import { mintSnapshotId } from "../git/identity.js";
+import { readRef } from "../git/repository.js";
+import { contractJournal, observeContractsAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { GitRefAssertion } from "../git/repository.js";
-import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type AttemptTerminal } from "./attempt.js";
+import { admitIntent } from "./intent.js";
 import { timestamp } from "./operations.js";
 import { deliveryIntegrationSnapshots } from "./deliver.js";
-import {
-  externalPreparation,
-  protocolSeatClose,
-  STALE_PRIVATE_STATE_PREPARATION,
-  type ContractStateWitness,
-  type ProtocolTerminal,
-} from "./run.js";
+import { runBoundedAttempts, spentPreparation, type ObservedRef, type ProtocolTerminal } from "./run.js";
 import { runUnderTargetPlacementFence, type PlacementExecutionFailure } from "./placement.js";
+import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
 
-type TargetMissing = Readonly<{ kind: "target-missing" }>;
-type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal | TargetWorkspaceRefusal;
+type ReintegrationRefusal =
+  | ReintegrateRefusal
+  | Readonly<{ kind: "target-missing" }>
+  | IntegrationPreparationRefusal
+  | TargetWorkspaceRefusal;
 export type ReintegrationResult =
   | (AcceptedAdmission & Readonly<{ value: ReintegratedData }>)
   | Readonly<{ kind: "refused"; refusal: ReintegrationRefusal }>
@@ -51,159 +50,96 @@ type ReintegrationInput = Readonly<{
   progress?: ProtocolProgress;
 }>;
 
-type ReintegrationAttempt =
-  | Exclude<ReintegrationResult, PlacementExecutionFailure>
-  | AttemptTerminal
-  | Readonly<{ kind: "redecide" }>
-  | typeof STALE_PRIVATE_STATE_PREPARATION;
+type ReintegrationPreparation = ReintegrateInput<ReintegrationRefusal>["preparation"];
+type PreparedReintegration = Readonly<{
+  expectedHead: ContractHead | null;
+  expectedRef?: ObservedRef;
+  preparation: ReintegrationPreparation;
+}>;
 
-/** What one seat-external integration plan proves about the target ref it was planned against. */
-type ReintegrationArtifacts =
-  | Readonly<{ kind: "defer" }>
-  | Readonly<{ kind: "refused"; refusal: ReintegrationRefusal }>
-  | Readonly<{
-      kind: "prepared";
-      data: Extract<ReintegrateInput<ReintegrationRefusal>["preparation"], { kind: "prepared" }>["data"];
-      assertion: GitRefAssertion;
-    }>;
-
-type ExternalReintegrationPreparation =
-  | Readonly<{ kind: "unavailable" }>
-  | Readonly<{ kind: "artifacts"; witness: ContractStateWitness; artifacts: ReintegrationArtifacts }>;
-
-/** Plan and materialize the target-specific reintegration artifacts outside the publication seat. */
-async function prepareExternalReintegration(input: ReintegrationInput): Promise<ExternalReintegrationPreparation> {
-  return await externalPreparation({ ...input, scope: input.repository }, (observation, state) =>
-    planReintegrationArtifacts(
-      input,
-      state,
-      deliveryIntegrationSnapshots(contractJournal(observation.journals, state.id).entries),
-    ),
-  );
-}
-
-async function planReintegrationArtifacts(
-  input: ReintegrationInput,
-  state: ContractState,
+async function prepareReintegration(
+  repository: GitRepository,
+  state: ContractState | null,
   recordedIntegrations: readonly SnapshotId[],
-): Promise<ReintegrationArtifacts> {
-  if (state.delivery === null || state.currentIntegration === null) return { kind: "defer" };
+  targetHead: SnapshotId | null | undefined,
+): Promise<ReintegrationPreparation> {
+  if (state === null) return { kind: "refused", refusal: { kind: "contract-missing" } };
+  if (state.terminal !== null) return { kind: "refused", refusal: { kind: "terminal" } };
+  if (state.delivery === null) return { kind: "refused", refusal: { kind: "delivery-missing" } };
   const planned = await planIntegration(
-    input.repository,
+    repository,
     { coordinates: state.coordinates },
-    await persistedTender(input.repository, state.delivery.data.tenderSnapshot),
+    await persistedTender(repository, state.delivery.data.tenderSnapshot),
     state.delivery.data.policy.requireBranchesToBeUpToDate,
+    targetHead,
   );
-  if (planned.kind === "refused") return { kind: "refused", refusal: planned.refusal };
+  if (planned.kind === "refused") return planned;
+  const { tree, predecessor } = planned.data;
   const snapshot =
-    (await reusableIntegrationSnapshot(
-      input.repository,
-      planned.data.tree,
-      planned.data.predecessor,
-      recordedIntegrations,
-    )) ??
-    (await materializeReintegrationSnapshot(
-      input.repository,
-      planned.data.tree,
-      planned.data.predecessor,
-      state.delivery.data.integration.snapshot,
-    ));
-  return {
-    kind: "prepared",
-    data: { predecessor: planned.data.predecessor, snapshot },
-    assertion: { ref: targetRef(input.target), oid: planned.data.predecessor },
-  };
-}
-
-type AssembledReintegration =
-  | Readonly<{ kind: "unavailable"; refusal: ReintegrationRefusal }>
-  | Extract<ReintegrationArtifacts, { kind: "refused" | "prepared" }>
-  | typeof STALE_PRIVATE_STATE_PREPARATION;
-
-/** Assemble the decision input from the fresh Contract; spent artifacts restart the whole cycle. */
-function assembleReintegrationAttempt(
-  input: ReintegrationInput,
-  observation: ContractReadView,
-  external: ExternalReintegrationPreparation,
-): AssembledReintegration {
-  const state = contractState(observation.decision, input.contractId);
-  if (state === null) {
-    return external.kind === "unavailable"
-      ? { kind: "unavailable", refusal: { kind: "contract-missing" } }
-      : STALE_PRIVATE_STATE_PREPARATION;
-  }
-  if (external.kind === "unavailable") return STALE_PRIVATE_STATE_PREPARATION;
-  if (external.witness.head !== state.head || !sameTarget(state.coordinates.target, input.target))
-    return STALE_PRIVATE_STATE_PREPARATION;
-  if (state.delivery === null || state.currentIntegration === null) {
-    return { kind: "unavailable", refusal: { kind: "delivery-missing" } };
-  }
-  return external.artifacts.kind === "defer" ? STALE_PRIVATE_STATE_PREPARATION : external.artifacts;
-}
-
-async function runReintegration(
-  input: ReintegrationInput,
-): Promise<Exclude<ReintegrationResult, PlacementExecutionFailure>> {
-  const attempts = mintAttempts({ entryCount: 1 });
-  for (let index = 0; index < attempts.length; index += 1) {
-    const attempt = attempts[index]!;
-    const external = await prepareExternalReintegration(input);
-    const result = protocolSeatClose<ReintegrationAttempt>(
-      await withPrivateStatePublicationSeat<ReintegrationAttempt>(input.repository, async (seat) => {
-        const observation = await observeContractsAt(input.repository, input.channel, [input.contractId]);
-        const assembled = assembleReintegrationAttempt(input, observation, external);
-        if (assembled.kind === "stale") return assembled;
-        const state = contractState(observation.decision, input.contractId);
-        if (state !== null) {
-          const refusal = targetContractRefusal(observation.decision, state.coordinates.target);
-          if (refusal !== undefined) return { kind: "refused", refusal };
-        }
-        if (typeof input.target !== "string") {
-          const resolved = await resolveContractTarget(input.repository, input.target.contractId, input.target);
-          if (resolved.kind === "refused") return resolved;
-          if (assembled.kind === "prepared" && resolved.head !== assembled.data.predecessor)
-            return STALE_PRIVATE_STATE_PREPARATION;
-        }
-        const preparation: ReintegrateInput<ReintegrationRefusal>["preparation"] =
-          assembled.kind === "unavailable" ? { kind: "refused", refusal: assembled.refusal } : assembled;
-        const decision = decideReintegrate({
-          input: {
-            contractId: input.contractId,
-            at: timestamp(),
-            preparation,
-          },
-          attempt,
-          observation: observation.decision,
-        });
-        if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-        const admitted = await admitDecidedOffer({
-          ...input,
-          scope: input.repository,
-          seat,
-          observation,
-          attempt,
-          offer: decision.offer,
-          ...(assembled.kind === "prepared" ? { assertions: [assembled.assertion] } : {}),
-        });
-        if (admitted.kind === "accepted") {
-          if (assembled.kind !== "prepared") throw new Error("accepted reintegration has no preparation");
-          return { ...admitted, value: assembled.data };
-        }
-        return admitted;
-      }),
-    );
-    if (result.kind === "accepted" || result.kind === "refused") return result;
-    if (result.kind === "stale" || result.kind === "redecide") continue;
-    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
-    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
-  }
-  return { kind: "retry", reason: { kind: "exhausted" } };
+    (await reusableIntegrationSnapshot(repository, tree, predecessor, recordedIntegrations)) ??
+    (await materializeReintegrationSnapshot(repository, tree, predecessor, state.delivery.data.integration.snapshot));
+  return { kind: "prepared", data: { predecessor, snapshot } };
 }
 
 export async function reintegrateOperation(input: ReintegrationInput): Promise<ReintegrationResult> {
-  return await runUnderTargetPlacementFence(
-    input.repository,
-    targetName(input.target),
-    async () => await runReintegration(input),
-  );
+  const { repository, channel, contractId, target, progress } = input;
+  return await runUnderTargetPlacementFence(repository, targetName(target), async () => {
+    const result = await runBoundedAttempts<
+      PreparedReintegration,
+      AcceptedAdmission & Readonly<{ value: ReintegratedData }>,
+      ReintegrationRefusal
+    >(
+      mintAttempts({ entryCount: 1 }),
+      async () => {
+        const before = await observeContractsAt(repository, channel, [contractId]);
+        const state = contractState(before.decision, contractId);
+        if (state?.terminal === null && !sameTarget(state.coordinates.target, target)) return spentPreparation;
+        const ref = targetRef(target);
+        const oid =
+          state?.terminal === null && state.delivery !== null
+            ? await readRef(targetRepository(repository, target), ref)
+            : undefined;
+        const expectedRef = oid === undefined ? undefined : { ref, oid };
+        const targetHead = typeof oid === "string" ? mintSnapshotId(oid) : oid;
+        const preparation = await prepareReintegration(
+          repository,
+          state,
+          deliveryIntegrationSnapshots(contractJournal(before.journals, contractId).entries),
+          targetHead,
+        );
+        return {
+          kind: "prepared",
+          prepared: {
+            expectedHead: state?.head ?? null,
+            ...(expectedRef === undefined ? {} : { expectedRef }),
+            preparation,
+          },
+        };
+      },
+      async (prepared, attempt) => {
+        const admitted = await admitIntent(
+          channel,
+          repository,
+          { contractId, at: timestamp(), preparation: prepared.preparation },
+          decideReintegrate<ReintegrationRefusal>,
+          {
+            attempt,
+            expectedHead: prepared.expectedHead,
+            ...(prepared.expectedRef === undefined ? {} : { expectedRef: prepared.expectedRef }),
+            ...(progress === undefined ? {} : { progress }),
+            validateAdmission: async () => {
+              if (typeof target === "string") return undefined;
+              const resolved = await resolveContractTarget(repository, target.contractId, target);
+              return resolved.kind === "refused" ? resolved.refusal : undefined;
+            },
+          },
+        );
+        if (admitted.kind !== "accepted") return admitted;
+        if (prepared.preparation.kind !== "prepared") throw new Error("accepted reintegration has no preparation");
+        return { ...admitted, value: prepared.preparation.data };
+      },
+    );
+    if (result.kind === "accepted" || result.kind === "refused") return result;
+    return { kind: "retry", reason: result };
+  });
 }

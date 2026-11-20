@@ -144,7 +144,7 @@ function crossProcessAmend(
 // Each case owns a separate repository and scoped fault injection, never a process-wide mock.
 describe("library-concurrency-placement isolated repositories", { concurrency: 4 }, () => {
 
-  test("same-Contract cross-process amends decide from the queued fresh state", async () => {
+  test("same-Contract cross-process amends refuse the retired source after a fresh attempt", async () => {
     const repository = repositoryWithMain();
     const contract = await bind(repository);
     const source = (present(await contract.state())).terms;
@@ -167,7 +167,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
     try {
       assert.deepEqual(await Promise.all(workers.map(({ ready }) => ready)), [source.document.key, source.document.key]);
       await Promise.race([
-        Promise.any(workers.map(({ contended }) => contended)),
+        Promise.all(workers.map(({ contended }) => contended)),
         Promise.all(workers.map(({ completed }) => completed)).then(() => {
           throw new Error("cross-process amends completed without private-state seat contention");
         }),

@@ -52,11 +52,13 @@ terminate. Independent operation and cleanup failures both remain observable.
 Cooperating private-state writers share one repository-local publication seat.
 It coordinates writers but does not decide acceptance: atomic compare-and-swap
 and exact durable read-back remain the only currentness and unknown-outcome
-judges. Repeatable, state-independent preparation (physical capture and pure
-derivation) happens outside custody and carries only artifacts and currentness
-witnesses. Fresh observation, witness validation, state-dependent preparation,
-decision, companionship, atomic admission, and exact read-back then happen in one
-seat-custody cycle.
+judges. Worktree capture and immutable integration and placement preparation
+stay outside custody, so user filters and hooks cannot stall unrelated writers.
+Under custody, the addressed journal head and any selected mutable reference
+must still match what the preparation observed, including observed absence.
+Custody retains fresh authority, bounded physical safeguards, decision,
+companionship, atomic admission, and exact read-back. Checkout following and
+conflict projection stay outside it.
 
 Target placement and workspace appointment keep their own outer custody
 boundaries. Waiting to acquire the seat has a default bound and never a held
@@ -76,8 +78,11 @@ updates may accompany a journal admission, but Git neither decodes them nor
 knows their product meaning. A partial publication is corruption. When an
 outcome is uncertain, only durable read-back can prove the intended admission;
 Git never rebuilds or replays an old offer, parses Git prose, or silently adopts
-newer terms or targets. Coordinate movement demands a fresh semantic attempt;
-an unchanged rejected publication is a typed failure.
+newer terms or targets. Movement of the addressed journal head or an expected
+reference spends only that preparation: the bounded owner retires the attempt
+and prepares again from fresh observation outside custody, with a fresh attempt
+identity and no replayed offer. An unchanged rejected publication remains a
+typed failure.
 
 Confirmed Git reset removes state authority before regenerable topology. It is
 local to Git custody, leaves foreign data alone, and provides no backup, trash,
@@ -147,14 +152,18 @@ prove no live attempt owns.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's
-checkout; it does not authorize dirty submodule internals. A captured merge
-keeps its parents in the tender; target planning uses the committed workspace
-head for ancestry, augmented only by the captured parent of a proved live
-Keiyaku handoff, and the captured tree for content. When conflict
-materialization is explicitly requested with that authorization, it preserves
-the captured bytes as the handoff base before projecting the judged conflict.
-Review can observe
-ordinary dirty work without gaining delivery authority. The candidate's
+checkout; it does not authorize dirty submodule internals. Dirty authorization
+and review observations describe the invocation's single immutable capture, not
+later live bytes. A later edit is neither included in the captured result nor
+overwritten in order to make the checkout match it, and a fresh internal attempt
+reuses that capture rather than recapturing the mutable worktree. A captured
+merge keeps its parents in the tender; target planning uses the committed
+workspace head for ancestry, augmented only by the captured parent of a proved
+live Keiyaku handoff, and the captured tree for content. When conflict
+materialization is explicitly requested with dirty authorization, Git preserves
+the captured bytes as the handoff base and must not overwrite later edits to
+project the judged conflict. Review can observe ordinary dirty work without
+gaining delivery authority. The candidate's
 worktree-content identity changes only with the captured content, not target
 movement, reintegration, or diff presentation. A judged conflict changes no
 authority unless the caller explicitly asks Git to project that conflict into
@@ -163,7 +172,10 @@ second conflict judgment.
 
 Conflict materialization has separate private Git custody. Keiyaku records its
 receipt before projecting the merge, and only a live operation that presents
-the matching unretired receipt is Keiyaku-owned. Equivalent parents, trees,
+the matching unretired receipt is Keiyaku-owned. A projection the native merge
+refuses before establishing that operation retires the reservation through the
+same handoff owner and reports the judged conflict without claiming a
+materialization that never happened. Equivalent parents, trees,
 index entries, and worktree bytes never establish ownership. The receipt binds
 the materialization to its Contract appointment and live workspace identity;
 its carrier and field layout remain private Git mechanics. An unmatched record
@@ -245,13 +257,17 @@ explicit appointment and never derives, scans, adopts, or persists a worktree
 coordinate from Contract identity. Its cleanliness and target-lag observations
 are transient, frozen with the relevant target, and never journal facts.
 
-A durable delivery consumes its matching materialized handoff. Its later
-retirement changes only the proved merge-operation metadata: it preserves the
-real index, including staged versus unstaged distinctions, and every worktree
-byte. Retrying that physical effect is safe; an explicit rematerialization may
-perform the same proved retirement before making a new judged projection.
-Foreign Git state, generic Git-operation recovery, automatic commits, and
-index- or worktree-rewriting cleanup remain outside Keiyaku's authority.
+A durable delivery consumes its matching materialized handoff by transitioning
+its exact receipt to durable consumed custody atomically with admission; that
+proof still names the live operation. Its later retirement changes only the
+proved merge-operation metadata: it preserves the real index, including staged
+versus unstaged distinctions, and every worktree byte, and removes the consumed
+receipt only after that matching effect or a confirmed orphan. A later
+reconciliation can replay that retirement after restart. Retrying the physical
+effect is safe; an explicit rematerialization may perform the same proved
+retirement before making a new judged projection. Foreign Git state, generic
+Git-operation recovery, automatic commits, and index- or worktree-rewriting
+cleanup remain outside Keiyaku's authority.
 
 Terminal cleanup removes a managed worktree only when its bytes and head are
 sealed by the Contract's recorded custody. Unsealed accepted bytes are retained.

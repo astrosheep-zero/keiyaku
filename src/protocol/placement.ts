@@ -2,10 +2,18 @@ import type { ProtocolProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import { sameTarget, targetName, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
+import {
+  sameTarget,
+  targetName,
+  type ContractId,
+  type ContractState,
+  type ContractTarget,
+  type SnapshotId,
+} from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContractsAt } from "../git/observe.js";
-import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
+import { targetRef } from "../git/target.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
@@ -16,14 +24,15 @@ import {
   recoverTargetPlacement,
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
-import { resolveContractTarget } from "../git/target.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import {
-  prepareProtocolAttempt,
-  protocolSeatClose,
-  runProtocol,
+  preparationIsCurrent,
+  privateStateSeatAttempt,
+  runBoundedAttempts,
+  spentPreparation,
+  type ObservedRef,
   type ProtocolResult,
-  type RunProtocolInput,
+  type SpentPreparation,
 } from "./run.js";
 
 export type PlacementExecutionFailure = Readonly<{
@@ -64,12 +73,11 @@ export type PlacementProtocolResult<ExtraRefusal = never> =
   | PlacementExecutionFailure;
 
 type PlacementProtocolInput = Readonly<{ contractId: ContractId; at: string }>;
-type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
+type PlacementAdmissionInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   target: ContractTarget | undefined;
   placement: PlacementProtocolInput;
-  onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>;
   progress?: ProtocolProgress;
 }>;
 
@@ -88,65 +96,112 @@ function expectedPlacementFailure(error: unknown): PlacementExecutionFailure {
   return { kind: "placement-failed", diagnostic: expectedOperationalDiagnostic(error) };
 }
 
-async function runFencedPlacement(
+async function targetMovement(
   repository: GitRepository,
-  input: PlacementProtocolInput,
-  protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal>,
-): Promise<PlacementProtocolResult> {
-  for (const [index, attempt] of protocol.attempts.entries()) {
-    const result = protocolSeatClose(
-      await withPrivateStatePublicationSeat(repository, async (seat) => {
-        const prepared = await prepareProtocolAttempt(protocol, attempt);
-        if (prepared.kind !== "offered") return prepared;
-        const movement = prepared.offer.target;
-        if (movement === undefined) throw new Error("targeted placement offer is missing its target movement");
-        const { target, expectedOid, newOid } = movement;
-        const destination =
-          typeof target === "string" ? undefined : await resolveContractTarget(repository, target.contractId, target);
-        if (destination?.kind === "refused") return destination;
-        const observed = destination?.head ?? (await observeTargetHead(repository, target));
-        if (observed !== expectedOid)
-          return {
-            kind: "target-moved" as const,
-            target: targetName(target),
-            expected: expectedOid,
-            observed,
-            observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, newOid),
-          };
-        return await admitDecidedOffer({
-          ...protocol,
-          scope: repository,
-          contractId: input.contractId,
-          seat,
-          observation: prepared.observation,
-          attempt: prepared.attempt,
-          offer: prepared.offer,
-        });
-      }),
-    );
-    if (result.kind === "redecide" || result.kind === "stale") continue;
-    if (result.kind === "collision" && index + 1 < protocol.attempts.length) continue;
-    if (result.kind !== "accepted") return result;
-    const { currentIntegration, coordinates } = result.state;
-    if (currentIntegration === null || coordinates.target === undefined)
-      throw new Error("accepted targeted placement has no integration movement");
-    protocol.progress?.recordCompletion(input.contractId, {
-      integration: currentIntegration.snapshot,
-      predecessor: currentIntegration.predecessor,
-      target: targetName(coordinates.target),
-    });
-    const report = (physical: ReconcileResult) =>
-      protocol.progress?.recordPlacementPhysical(input.contractId, physical);
-    try {
-      return { ...result, physical: await recoverTargetPlacement(repository, result.state, report) };
-    } catch (error) {
-      if (isPlacementCancellation(repository, error)) throw error;
-      const physical = reconcileEffectFailure(error);
-      report(physical);
-      return { ...result, physical };
-    }
+  target: ContractTarget | undefined,
+  integration: ContractState["currentIntegration"],
+  observed: SnapshotId | null | undefined,
+): Promise<TargetMovedStop | undefined> {
+  if (observed === undefined || target === undefined || integration === null || observed === integration.predecessor)
+    return undefined;
+  return {
+    kind: "target-moved",
+    target: targetName(target),
+    expected: integration.predecessor,
+    observed,
+    observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, integration.snapshot),
+  };
+}
+
+type PreparedPlacement = Readonly<{
+  expectedHead: import("../core/facts/types.js").ContractHead | null;
+  expectedRef?: ObservedRef;
+  moved: TargetMovedStop | undefined;
+}>;
+
+async function preparePlacementAttempt(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  contractId: ContractId,
+  target: ContractTarget | undefined,
+): Promise<Readonly<{ kind: "prepared"; prepared: PreparedPlacement }> | SpentPreparation> {
+  const before = await observeContractsAt(repository, channel, [contractId]);
+  const state = contractState(before.decision, contractId);
+  if (state?.terminal === null && !sameTarget(state.coordinates.target, target)) return spentPreparation;
+  const integration = state?.terminal === null ? state.currentIntegration : null;
+  const observed =
+    target === undefined || integration === null ? undefined : await observeTargetHead(repository, target);
+  const expectedRef =
+    observed === undefined || target === undefined
+      ? undefined
+      : { ref: targetRef(target), oid: observed === null ? null : gitObjectIdForSnapshot(observed) };
+  const moved = await targetMovement(repository, target, integration, observed);
+  return {
+    kind: "prepared",
+    prepared: { expectedHead: state?.head ?? null, ...(expectedRef === undefined ? {} : { expectedRef }), moved },
+  };
+}
+
+async function runPlacement(input: PlacementAdmissionInput): Promise<PlacementProtocolResult> {
+  const { repository, channel, target, placement, progress } = input;
+  const { contractId } = placement;
+  const result = await runBoundedAttempts<
+    PreparedPlacement,
+    AcceptedAdmission | TargetMovedStop,
+    PlacementRefusal | TargetPlacementRefusal
+  >(
+    mintAttempts({ entryCount: 1 }),
+    async () => await preparePlacementAttempt(repository, channel, contractId, target),
+    async (prepared, attempt) =>
+      await privateStateSeatAttempt<Exclude<PlacementProtocolResult, PlacementExecutionFailure> | SpentPreparation>(
+        repository,
+        async (seat) => {
+          const observation = await observeContractsAt(repository, channel, [contractId], { after: true });
+          if (
+            !(await preparationIsCurrent(
+              repository,
+              observation,
+              contractId,
+              prepared.expectedHead,
+              prepared.expectedRef,
+            ))
+          ) {
+            return spentPreparation;
+          }
+          const decision = decidePlacement({ input: placement, observation: observation.decision, attempt });
+          if (decision.kind === "refused") return decision;
+          const { offer } = decision;
+          if (offer.target !== undefined && prepared.moved !== undefined) return prepared.moved;
+          return await admitDecidedOffer({
+            scope: repository,
+            channel,
+            contractId,
+            seat,
+            observation,
+            attempt,
+            offer,
+            ...(progress === undefined ? {} : { progress }),
+          });
+        },
+      ),
+  );
+  if (result.kind !== "accepted") return result;
+  const { currentIntegration, coordinates } = result.state;
+  if (coordinates.target === undefined || currentIntegration === null) return result;
+  progress?.recordCompletion(contractId, {
+    integration: currentIntegration.snapshot,
+    predecessor: currentIntegration.predecessor,
+    target: targetName(coordinates.target),
+  });
+  const report = (physical: ReconcileResult) => progress?.recordPlacementPhysical(contractId, physical);
+  try {
+    return { ...result, physical: await recoverTargetPlacement(repository, result.state, report) };
+  } catch (error) {
+    if (isPlacementCancellation(repository, error)) throw error;
+    const physical = reconcileEffectFailure(error);
+    report(physical);
+    return { ...result, physical };
   }
-  return { kind: "exhausted" };
 }
 
 function isPlacementCancellation(repository: GitRepository, error: unknown): boolean {
@@ -205,43 +260,14 @@ export async function runUnderTargetPlacementFence<T>(
   return result;
 }
 
-function isDeliveryMissing(result: PlacementProtocolResult): boolean {
-  return result.kind === "refused" && result.refusal.kind === "delivery-missing";
-}
-
 /** Run the sole placement adjudicator inside the target's physical fence. */
-export async function admitPlacement<ExtraRefusal = never>(
-  admission: PlacementAdmissionInput<ExtraRefusal>,
-): Promise<PlacementProtocolResult<ExtraRefusal>> {
-  const { channel, repository, target, placement: input, onDeliveryMissing } = admission;
-  const attempts = mintAttempts({ entryCount: 1 });
-  const protocol: RunProtocolInput<PlacementProtocolInput, PlacementRefusal | TargetPlacementRefusal> = {
-    input,
-    channel,
-    repository,
-    contracts: [input.contractId],
-    attempts,
-    decide: decidePlacement,
-    preparation: {
-      external: () => ({ kind: "prepared", prepared: input }),
-      assemble: (observation) =>
-        sameTarget(contractState(observation.decision, input.contractId)?.coordinates.target, target)
-          ? { kind: "prepared", input }
-          : { kind: "stale" },
-    },
-    ...(admission.progress === undefined ? {} : { progress: admission.progress }),
-    observe: (observedRepository, observedChannel, contracts) =>
-      observeContractsAt(observedRepository, observedChannel, contracts, { after: true }),
-  };
-  if (target === undefined) return await runProtocol(protocol);
+export async function admitPlacement(input: PlacementAdmissionInput): Promise<PlacementProtocolResult> {
+  const { repository, target } = input;
+  if (target === undefined) return await runPlacement(input);
   return await runUnderTargetPlacementFence(
     repository,
     targetName(target),
-    async () => {
-      const result = await runFencedPlacement(repository, input, protocol);
-      if (onDeliveryMissing === undefined || !isDeliveryMissing(result)) return result;
-      return (await onDeliveryMissing()) ?? result;
-    },
+    () => runPlacement(input),
     (result, error) =>
       result.kind === "accepted"
         ? { ...result, physical: reconcileEffectFailure(error, result.physical) }

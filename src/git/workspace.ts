@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -12,6 +13,7 @@ import {
   readRefs,
   worktreeGitDirectory,
   writeBlob,
+  type GitRefUpdate,
 } from "./repository.js";
 import type { GitReadObservation } from "./read-observation.js";
 import type { ContractWorkspaceLocation } from "../workspace-place.js";
@@ -31,19 +33,22 @@ export type WorkspaceTree = Readonly<{
   at: string;
   dirty: boolean;
   changes: WorkspaceChanges;
+  unmergedPaths: readonly string[];
 }>;
 
 export function worktreePath(repository: GitRepository, place: string): string {
   return resolve(repository.primaryWorktree, ...WORKTREE_DIRECTORY, place);
 }
 
-/** Check out a captured candidate tree in the appointed detached worktree. */
-export async function checkoutDetachedSnapshot(
+/** Install the captured handoff base without overwriting live worktree bytes. */
+export async function installConflictHandoffBase(
   repository: GitRepository,
   workspace: string,
+  previous: SnapshotId,
   snapshot: SnapshotId,
 ): Promise<void> {
-  await executeGit(repository, ["-C", workspace, "checkout", "--quiet", "--force", "--detach", gitObjectId(snapshot)]);
+  await executeGit(repository, ["-C", workspace, "update-ref", "--no-deref", "HEAD", snapshot, previous]);
+  await executeGit(repository, ["-C", workspace, "read-tree", snapshot]);
 }
 
 type DependentWorktreeFollow =
@@ -230,11 +235,6 @@ async function workspaceStatus(repository: GitRepository, workspace: string): Pr
   };
 }
 
-async function workspaceChanges(repository: GitRepository, workspace: string): Promise<WorkspaceChanges> {
-  const { unmergedPaths: _unmergedPaths, ...changes } = await workspaceStatus(repository, workspace);
-  return changes;
-}
-
 /** Observe MERGE_HEAD in an appointed workspace, or undefined when absent. */
 export async function workspaceMergeHead(
   repository: GitRepository,
@@ -396,9 +396,10 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
   const tree = gitObjectId(identities[1], "workspace tree");
   const at = identities[2];
   if (Number.isNaN(Date.parse(at))) throw new Error("workspace HEAD has an invalid committer timestamp");
-  const changes = await workspaceChanges(repository, workspace);
+  const { unmergedPaths, ...changes } = await workspaceStatus(repository, workspace);
   const dirty = changes.staged.length > 0 || changes.unstaged.length > 0 || changes.untracked.length > 0;
-  if (!dirty) return { tree, head, at, dirty, changes };
+  const capture = { head, at, dirty, changes, unmergedPaths };
+  if (!dirty) return { tree, ...capture };
 
   return await withPrivateGitIndex(async (environment) => {
     await executeGit(
@@ -427,10 +428,7 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
           .trim(),
         "workspace tree",
       ),
-      head,
-      at,
-      dirty,
-      changes,
+      ...capture,
     };
   });
 }
@@ -445,6 +443,9 @@ type HandoffReceipt = Readonly<{
   workspace: string;
   head: SnapshotId;
   mergeHead: SnapshotId;
+  consumed: boolean;
+  /** Opaque identity of this one issuance; older receipts predate it. */
+  issuance?: string;
 }>;
 type StoredHandoffReceipt = Readonly<{ receipt: HandoffReceipt; ref: string; oid: string }>;
 
@@ -458,7 +459,7 @@ export type ConflictHandoff = Readonly<{ base: SnapshotId; mergeHead: SnapshotId
 
 type HandoffRetirement =
   | Readonly<{ kind: "absent" | "active" | "orphan-retired" | "retired" }>
-  | Readonly<{ kind: "retained"; reason: "receipt-mismatch" | "operation-in-progress" }>;
+  | Readonly<{ kind: "retained"; reason: "receipt-mismatch" | "operation-in-progress"; consumed: boolean }>;
 
 function receiptFor(value: unknown): HandoffReceipt {
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -470,7 +471,9 @@ function receiptFor(value: unknown): HandoffReceipt {
     typeof record.place !== "string" ||
     typeof record.workspace !== "string" ||
     typeof record.head !== "string" ||
-    typeof record.mergeHead !== "string"
+    typeof record.mergeHead !== "string" ||
+    (record.issuance !== undefined && (typeof record.issuance !== "string" || record.issuance.length === 0)) ||
+    (record.consumed !== undefined && record.consumed !== true)
   ) {
     throw new Error("handoff receipt is malformed");
   }
@@ -481,7 +484,22 @@ function receiptFor(value: unknown): HandoffReceipt {
     workspace: resolve(record.workspace),
     head: mintSnapshotId(record.head),
     mergeHead: mintSnapshotId(record.mergeHead),
+    consumed: record.consumed === true,
+    ...(record.issuance === undefined ? {} : { issuance: record.issuance }),
   };
+}
+
+function handoffReceiptBytes(receipt: HandoffReceipt, consumed: boolean): string {
+  return `${JSON.stringify({
+    version: receipt.version,
+    contractId: receipt.contractId,
+    place: receipt.place,
+    workspace: receipt.workspace,
+    head: receipt.head,
+    mergeHead: receipt.mergeHead,
+    ...(receipt.issuance === undefined ? {} : { issuance: receipt.issuance }),
+    ...(consumed ? { consumed: true } : {}),
+  })}\n`;
 }
 
 function receiptMatches(receipt: HandoffReceipt, coordinate: HandoffReceiptCoordinate): boolean {
@@ -528,8 +546,10 @@ export async function recordConflictHandoff(
     workspace: resolve(input.workspace),
     head: input.head,
     mergeHead: input.mergeHead,
+    consumed: false,
+    issuance: randomUUID(),
   };
-  const oid = await writeBlob(repository, `${JSON.stringify(receipt)}\n`);
+  const oid = await writeBlob(repository, handoffReceiptBytes(receipt, false));
   await executeGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
 }
 
@@ -572,17 +592,23 @@ export async function observeConflictHandoff(
   if (stored === null) return { kind: "absent" };
   const { receipt } = stored;
   if (!receiptMatches(receipt, input)) {
-    return { kind: "retained", reason: "receipt-mismatch" };
+    return { kind: "retained", reason: "receipt-mismatch", consumed: receipt.consumed };
   }
   const gitDirectory = await worktreeGitDirectory(repository, input.workspace);
   const operation = await workspaceOperationState(repository, input.workspace, gitDirectory);
-  if (operation.other) return { kind: "retained", reason: "operation-in-progress" };
+  if (operation.other) return { kind: "retained", reason: "operation-in-progress", consumed: receipt.consumed };
   const [head, mergeHead] = await Promise.all([
     workspaceRevision(repository, input.workspace, "HEAD"),
     workspaceRevision(repository, input.workspace, "MERGE_HEAD"),
   ]);
   if (mergeHead === null) {
-    if (operation.unmerged) return { kind: "retained", reason: "operation-in-progress" };
+    // A consumed receipt proves its own admission, and an absent merge operation means the matching
+    // effect is settled. `merge --quit` removes MERGE_HEAD and leaves the caller's unstaged-resolution
+    // index entries in place, so that retained user state may not block deleting our own consumed
+    // receipt; an unconsumed receipt keeps its operation-in-progress reading, and any foreign
+    // operation marker still retains this one.
+    if (operation.unmerged && !receipt.consumed)
+      return { kind: "retained", reason: "operation-in-progress", consumed: receipt.consumed };
     return { kind: "orphan", stored };
   }
   if (
@@ -590,13 +616,13 @@ export async function observeConflictHandoff(
     mergeHead !== receipt.mergeHead ||
     (captured !== undefined && (captured.head !== head || captured.mergeHead !== mergeHead))
   )
-    return { kind: "retained", reason: "receipt-mismatch" };
+    return { kind: "retained", reason: "receipt-mismatch", consumed: receipt.consumed };
   return { kind: "active", stored };
 }
 
 export async function retireConflictHandoff(
   repository: GitRepository,
-  input: HandoffReceiptCoordinate & Readonly<{ consume: boolean }>,
+  input: HandoffReceiptCoordinate & Readonly<{ consumeUnconsumed: boolean }>,
 ): Promise<HandoffRetirement> {
   const observed = await observeConflictHandoff(repository, input);
   if (observed.kind === "absent" || observed.kind === "retained") return observed;
@@ -604,8 +630,63 @@ export async function retireConflictHandoff(
     await removeHandoffReceipt(repository, observed.stored);
     return { kind: "orphan-retired" };
   }
-  if (!input.consume) return { kind: "active" };
+  if (!observed.stored.receipt.consumed && !input.consumeUnconsumed) return { kind: "active" };
   await executeGit(repository, ["-C", input.workspace, "merge", "--quit"]);
   await removeHandoffReceipt(repository, observed.stored);
   return { kind: "retired" };
+}
+
+export type ConflictHandoffWitness = Readonly<{
+  ref: string;
+  oid: string;
+  consumedOid: string;
+  head: SnapshotId;
+  mergeHead: SnapshotId;
+}>;
+
+export type ConflictHandoffOwnership =
+  | Readonly<{ kind: "unowned" }>
+  | Readonly<{ kind: "owned"; witness?: ConflictHandoffWitness }>;
+
+/**
+ * Prove the captured operation is this Contract's own handoff and, while it is still unconsumed,
+ * materialize the exact consumed receipt that admission publishes atomically.
+ */
+export async function witnessConflictHandoff(
+  repository: GitRepository,
+  input: HandoffReceiptCoordinate,
+  captured: Readonly<{ head: SnapshotId; mergeHead: SnapshotId }>,
+): Promise<ConflictHandoffOwnership> {
+  const observed = await observeConflictHandoff(repository, input, captured);
+  if (observed.kind !== "active") return { kind: "unowned" };
+  const { receipt, ref, oid } = observed.stored;
+  if (receipt.consumed) return { kind: "owned" };
+  const consumedOid = await writeBlob(repository, handoffReceiptBytes(receipt, true));
+  return { kind: "owned", witness: { ref, oid, consumedOid, head: captured.head, mergeHead: captured.mergeHead } };
+}
+
+/**
+ * Re-prove one captured unconsumed receipt as the live operation it witnessed and prepare the
+ * atomic transition to its durable consumed proof. Publication by the admitting delivery consumes it.
+ */
+export async function consumeConflictHandoff(
+  repository: GitRepository,
+  input: HandoffReceiptCoordinate,
+  captured: ConflictHandoffWitness,
+): Promise<Readonly<{ kind: "consume"; update: GitRefUpdate }> | Readonly<{ kind: "skip" }>> {
+  const observed = await observeConflictHandoff(repository, input, {
+    head: captured.head,
+    mergeHead: captured.mergeHead,
+  });
+  if (
+    observed.kind !== "active" ||
+    observed.stored.receipt.consumed ||
+    observed.stored.ref !== captured.ref ||
+    observed.stored.oid !== captured.oid
+  )
+    return { kind: "skip" };
+  return {
+    kind: "consume",
+    update: { ref: captured.ref, newOid: captured.consumedOid, expectedOid: captured.oid },
+  };
 }

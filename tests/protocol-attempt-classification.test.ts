@@ -1,127 +1,75 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  entryUlid,
-  contractIdFromSegment,
-  documentKey,
-  snapshotId,
-  type JournalEntry,
-} from "../src/core/facts/types.js";
-import { runBoundedAttempts } from "../src/protocol/run.js";
+import type { AttemptContext } from "../src/core/decide.js";
+import { entryUlid } from "../src/core/facts/types.js";
+import { runBoundedAttempts, spentPreparation } from "../src/protocol/run.js";
 
-test("bounded admission classification stops on the first accepted or refused result", async () => {
-  const seen: number[] = [];
-  const accepted = await runBoundedAttempts<{ kind: "accepted"; value: number }, string>(
-    [{ entryUlids: [] }, { entryUlids: [] }],
-    async (_attempt, index) => {
-      seen.push(index);
-      return index === 0 ? { kind: "accepted", value: 7 } : { kind: "refused", refusal: "late" };
+type Final = Readonly<{ kind: "accepted" }>;
+const contexts = (count: number): AttemptContext[] =>
+  Array.from({ length: count }, (_, index) => ({
+    entryUlids: [entryUlid(`01ARZ3NDEKTSV4RRFFQ69G5FA${index + 1}`)],
+  }));
+const prepared = async () => ({ kind: "prepared" as const, prepared: undefined });
+test("each spent premise consumes only its own fresh context", async () => {
+  const budget = contexts(3);
+  const preparedSeen: AttemptContext[] = [];
+  const admittedSeen: AttemptContext[] = [];
+  const result = await runBoundedAttempts<undefined, Final, string>(
+    budget,
+    async (context) => {
+      preparedSeen.push(context);
+      return context === budget[0] ? spentPreparation : prepared();
+    },
+    async (_prepared, context) => {
+      admittedSeen.push(context);
+      return context === budget[1] ? { kind: "spent" } : { kind: "accepted" };
     },
   );
-  assert.deepEqual(accepted, { kind: "accepted", value: 7 });
-  assert.deepEqual(seen, [0]);
-
-  const refused = await runBoundedAttempts<{ kind: "accepted"; value: number }, string>(
-    [{ entryUlids: [] }, { entryUlids: [] }],
-    async (_attempt, index) => {
-      seen.push(index);
-      return index === 0 ? { kind: "refused", refusal: "no" } : { kind: "accepted", value: 8 };
-    },
+  assert.deepEqual(result, { kind: "accepted" });
+  assert.deepEqual(preparedSeen, budget, "every attempt prepares in its own fresh context");
+  assert.deepEqual(admittedSeen, budget.slice(1), "a spent preparation never reaches admission");
+  assert.ok(
+    admittedSeen.every((context, index) => context === budget[index + 1]),
+    "admission sees its preparing context",
   );
-  assert.deepEqual(refused, { kind: "refused", refusal: "no" });
-  assert.deepEqual(seen, [0, 0]);
 });
 
-test("stale and redecide spend contexts and exhaustion is distinct from a thrown callback", async () => {
-  let calls = 0;
-  const exhausted = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>(
-    [{ entryUlids: [] }, { entryUlids: [] }],
+test("exhaustion, collision, refusal and a throw keep their own terminals", async () => {
+  let spent = 0;
+  const exhausted = await runBoundedAttempts<undefined, Final, never>(
+    contexts(2),
     async () => {
-      calls += 1;
-      return calls === 1 ? { kind: "stale" } : { kind: "redecide" };
+      spent += 1;
+      return spentPreparation;
     },
+    async () => assert.fail("a spent preparation never reaches admission"),
   );
   assert.deepEqual(exhausted, { kind: "exhausted" });
-  assert.equal(calls, 2);
+  assert.equal(spent, 2);
 
+  let collisions = 0;
+  const collision = await runBoundedAttempts<undefined, Final, never>(contexts(2), prepared, async () => {
+    collisions += 1;
+    return { kind: "collision" };
+  });
+  assert.deepEqual(collision, { kind: "collision" });
+  assert.equal(collisions, 2, "a collision asks for a fresh attempt until the budget is spent");
+
+  let refusals = 0;
+  const refused = await runBoundedAttempts<undefined, Final, string>(contexts(2), prepared, async () => {
+    refusals += 1;
+    return { kind: "refused", refusal: "no" };
+  });
+  assert.deepEqual(refused, { kind: "refused", refusal: "no" });
+  assert.equal(refusals, 1);
+
+  let thrown = 0;
   await assert.rejects(
-    () =>
-      runBoundedAttempts<{ kind: "accepted"; value: number }, never>(
-        [{ entryUlids: [] }, { entryUlids: [] }],
-        async () => {
-          calls += 1;
-          throw new Error("attempt failed");
-        },
-      ),
+    runBoundedAttempts<undefined, Final, never>(contexts(2), prepared, async () => {
+      thrown += 1;
+      throw new Error("attempt failed");
+    }),
     /attempt failed/u,
   );
-  assert.equal(calls, 3, "an exception must not invoke a later attempt");
-});
-
-test("publication failure is terminal and never replays the spent callback", async () => {
-  let calls = 0;
-  const result = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>(
-    [{ entryUlids: [] }, { entryUlids: [] }],
-    async () => {
-      calls += 1;
-      return { kind: "publication-failed", diagnostic: "busy" };
-    },
-  );
-  assert.deepEqual(result, { kind: "publication-failed", diagnostic: "busy" });
-  assert.equal(calls, 1);
-});
-
-test("empty budget is exhausted and only the final collision is terminal", async () => {
-  let emptyCalls = 0;
-  const empty = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>([], async () => {
-    emptyCalls += 1;
-    return { kind: "accepted", value: 1 };
-  });
-  assert.deepEqual(empty, { kind: "exhausted" });
-  assert.equal(emptyCalls, 0);
-
-  const contract = contractIdFromSegment("classifier-collision");
-  const entry = (value: string): JournalEntry => ({
-    v: 1,
-    kind: "bind",
-    contract,
-    entry: entryUlid(value),
-    at: "2026-08-06T00:00:00Z",
-    data: {
-      coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: {
-        document: { bytes: "", key: documentKey("document") },
-        segments: [],
-        gates: [],
-        requirements: {},
-        after: [],
-      },
-    },
-  });
-  const collision = {
-    kind: "collision" as const,
-    contractId: contract,
-    planned: entry("01ARZ3NDEKTSV4RRFFQ69G5FA1"),
-    observed: entry("01ARZ3NDEKTSV4RRFFQ69G5FA2"),
-    plannedBytes: "planned",
-    observedBytes: "observed",
-  };
-  const contexts = [
-    { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3")] },
-    { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA4")] },
-    { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA5")] },
-  ];
-  const seen: string[] = [];
-  const result = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>(
-    contexts,
-    async (context, index) => {
-      seen.push(context.entryUlids[0]!);
-      return index === 1 ? { kind: "stale" } : collision;
-    },
-  );
-  assert.equal(result.kind, "collision");
-  assert.deepEqual(
-    seen,
-    contexts.map((context) => context.entryUlids[0]),
-  );
+  assert.equal(thrown, 1, "an exception must not invoke a later attempt");
 });

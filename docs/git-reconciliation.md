@@ -53,11 +53,15 @@ create no candidate, review, target movement, or journal fact.
 
 Reconciliation observes a materialized handoff through Git's private receipt
 and the receipt's recorded live identity, not through topology or equal bytes.
-It can discard an orphan receipt only when no live operation remains. After
-delivery admission, it retires a fully matching handoff's merge metadata
-without touching the real index or worktree; failure remains recoverable lag
-and never revokes delivery. Terminal reconciliation performs the same
-retirement before it removes a worktree. Mismatched, incomplete, or unrelated
+It can discard an orphan receipt only when no live operation remains. Delivery
+admission consumes its fully matching handoff atomically with the admission by
+replacing the exact receipt with durable consumed custody that still names the
+live operation. The same owner retires the matching operation metadata and only
+then removes that consumed receipt; confirmed absence of the operation is the
+other permitted removal. Failure remains recoverable lag and never revokes
+delivery, and a later ordinary reconciliation replays the persisted consumed
+custody after restart. An unconsumed handoff of an active Contract is retained;
+terminal custody may retire it. Mismatched, incomplete, or foreign
 state is retained unchanged. The same proof permits explicit rematerialization
 to retire a prior handoff; neither conflict resolution completeness nor tree
 equality is an ownership test.

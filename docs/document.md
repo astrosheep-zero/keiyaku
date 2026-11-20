@@ -80,8 +80,10 @@ terminal legality belong to [lifecycle.md](lifecycle.md).
 The library decodes a document once per attempt and may pass only an
 attempt-local, identity-stamped derivation required by the operation, including
 its title and prepared Verification work. That derivation is not persisted,
-cached, or exposed as a second document authority. Review instead testifies to
-the document and worktree it actually observed. The sole lifecycle decision
+cached, or exposed as a second document authority. A spent preparation discards
+its derivation, and the fresh attempt derives from the authority it observes
+without recapturing the invocation's immutable worktree bytes. Review testifies
+to the document and worktree it actually observed. The sole lifecycle decision
 judges a derivation's currency.
 
 Public callers supply Markdown through the package boundary described by

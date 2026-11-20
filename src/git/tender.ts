@@ -5,7 +5,7 @@ import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { registeredWorktreePaths } from "./repository.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
-import { captureWorkspaceTree, workspaceMergeHead, worktreePath } from "./workspace.js";
+import { captureWorkspaceTree, workspaceMergeHead, worktreePath, type WorkspaceTree } from "./workspace.js";
 
 type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
@@ -35,14 +35,7 @@ export const dirtyWorkspaceRefusalSchema = z
   .strict()
   .readonly();
 export type DirtyWorkspaceRefusal = z.infer<typeof dirtyWorkspaceRefusalSchema>;
-export type TenderCapture = Readonly<{
-  tree: GitObjectId;
-  head: SnapshotId;
-  mergeHead?: SnapshotId;
-  at: string;
-  dirty: boolean;
-  changes: Awaited<ReturnType<typeof captureWorkspaceTree>>["changes"];
-}>;
+export type TenderCapture = WorkspaceTree & Readonly<{ mergeHead?: SnapshotId }>;
 
 async function workspaceExists(repository: GitRepository, path: string): Promise<boolean> {
   const exists = await access(path).then(

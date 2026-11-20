@@ -12,7 +12,7 @@ import { privateStatePublicationSeatPath, withPrivateStatePublicationSeat } from
 import { observeContractsAt } from "../src/git/observe.js";
 import type { GitRepository } from "../src/git/process.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
+import { admitDecidedOffer, mintAttempt } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
 import { cachedRepositoryAt, withGitShim } from "./support/git.js";
@@ -47,6 +47,7 @@ async function readyPlacementFixture() {
         },
       },
       decideAttestation<never>,
+      { attempt: mintAttempt() },
     );
     assert.equal(result.kind, "accepted");
   });
@@ -127,7 +128,7 @@ test("queued placement decides from the journal after an earlier terminal public
     await contended.promise;
     return await withGitDecodeChannel(git, async (channel) => {
       const observation = await observeContractsAt(git, channel, [id]);
-      const attempt = mintAttempts({ entryCount: 1 })[0]!;
+      const attempt = mintAttempt();
       const decision = decideAbandon({
         input: { contractId: id, at: new Date().toISOString() },
         attempt,
@@ -150,8 +151,7 @@ test("queued placement decides from the journal after an earlier terminal public
   void placing.finally(contended.resolve).catch(() => undefined);
   const [publication, result] = await Promise.all([writer, placing]);
   assert.equal(publication.value.kind, "accepted");
-  assert.equal(result.kind, "refused");
-  assert.equal(result.refusal.kind, "terminal");
+  assert.deepEqual(result, { kind: "refused", refusal: { kind: "terminal" } });
   assert.equal(present(await contract.state()).terminal?.kind, "abandoned");
   assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
 });

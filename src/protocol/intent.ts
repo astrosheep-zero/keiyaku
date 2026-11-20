@@ -1,75 +1,73 @@
 import type { ProtocolProgress } from "./progress.js";
-import type { ContractReadView } from "../git/observe.js";
+import { observeContractsAt, type ContractReadView } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
-import type { DecideInput, OfferDecision } from "../core/decide.js";
-import type { ContractId } from "../core/facts/types.js";
-import { runProtocol, type CompanionDecorator, type ProtocolPreparation, type ProtocolResult } from "./run.js";
-import { mintAttempts, type PrepareRefCompanion } from "./attempt.js";
+import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
+import type { ContractHead, ContractId } from "../core/facts/types.js";
+import {
+  privateStateSeatAttempt,
+  preparationIsCurrent,
+  spentPreparation,
+  type CompanionDecorator,
+  type ObservedRef,
+  type ProtocolTerminal,
+} from "./run.js";
+import { admitDecidedOffer, type DecidedOfferResult, type PrepareRefCompanion } from "./attempt.js";
 
-type CommonIntentAdmissionOptions<Refusal> = Readonly<{
+export type IntentAdmissionOptions<Refusal = never> = Readonly<{
   progress?: ProtocolProgress;
   observedContracts?: readonly ContractId[];
-  observe?: (
-    repository: GitRepository,
-    channel: GitDecodeChannel,
-    contracts: readonly ContractId[],
-  ) => Promise<ContractReadView>;
   decorateOffer?: CompanionDecorator;
-  prepareRefCompanion?: PrepareRefCompanion<Refusal>;
   validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
+  prepareRefCompanion?: PrepareRefCompanion<Refusal>;
   observationSelection?: GitTreeSelection;
+  expectedHead?: ContractHead | null;
+  expectedRef?: ObservedRef;
 }>;
 
-export type IntentAdmissionOptions<Refusal = never> = CommonIntentAdmissionOptions<Refusal>;
+/** One admission carries both the attempt identity and the optional admission options. */
+export type IntentAdmission<Refusal = never> = IntentAdmissionOptions<Refusal> & Readonly<{ attempt: AttemptContext }>;
 
-type PreparedIntentAdmissionOptions<Input, Refusal, Seed, Prepared> = CommonIntentAdmissionOptions<Refusal> &
-  Readonly<{ preparation: ProtocolPreparation<Input, Refusal, Seed, Prepared> }>;
-
-/** Observe, decide, and atomically admit one intent whose invocation already is its decision input. */
-export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
+/** Observe, decide, and atomically admit one prepared decision input inside the publication seat. */
+export async function admitIntent<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
   channel: GitDecodeChannel,
   repository: GitRepository,
   input: Input,
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
-  options: IntentAdmissionOptions<Refusal> = {},
-): Promise<ProtocolResult<Refusal>> {
-  const { observedContracts = [input.contractId], ...admission } = options;
-  return runProtocol<Input, Refusal, Input, Input>({
-    ...admission,
-    input,
-    channel,
-    repository,
-    contracts: observedContracts,
-    attempts: mintAttempts({ entryCount: 1 }),
-    decide,
-  });
-}
-
-/**
- * Observe, decide, and atomically admit one intent whose repeatable preparation happens outside
- * the publication seat and whose decision input is assembled from the fresh in-custody observation.
- */
-export function admitPreparedIntent<
-  Input extends Readonly<{ contractId: ContractId }>,
-  Refusal,
-  Seed extends Readonly<{ contractId: ContractId }>,
-  Prepared,
->(
-  channel: GitDecodeChannel,
-  repository: GitRepository,
-  input: Seed,
-  decide: (input: DecideInput<Input>) => OfferDecision<Refusal>,
-  options: PreparedIntentAdmissionOptions<Input, Refusal, Seed, Prepared>,
-): Promise<ProtocolResult<Refusal>> {
-  const { observedContracts = [input.contractId], ...admission } = options;
-  return runProtocol<Input, Refusal, Seed, Prepared>({
-    ...admission,
-    input,
-    channel,
-    repository,
-    contracts: observedContracts,
-    attempts: mintAttempts({ entryCount: 1 }),
-    decide,
+  admission: IntentAdmission<Refusal>,
+): Promise<DecidedOfferResult<Refusal> | ProtocolTerminal> {
+  const { contractId } = input;
+  const { attempt, ...options } = admission;
+  const { expectedHead, expectedRef } = options;
+  return privateStateSeatAttempt<DecidedOfferResult<Refusal>>(repository, async (seat) => {
+    const observation = await observeContractsAt(
+      repository,
+      channel,
+      options.observedContracts ?? [contractId],
+      options.observationSelection,
+    );
+    if (
+      expectedHead !== undefined &&
+      !(await preparationIsCurrent(repository, observation, contractId, expectedHead, expectedRef))
+    ) {
+      return spentPreparation;
+    }
+    const decision = decide({ input, observation: observation.decision, attempt });
+    if (decision.kind === "refused") return decision;
+    const companions = await options.decorateOffer?.({ repository, observation, contractId, offer: decision.offer });
+    const offer = companions?.length
+      ? { ...decision.offer, companions: [...(decision.offer.companions ?? []), ...companions] }
+      : decision.offer;
+    return await admitDecidedOffer({
+      ...options,
+      scope: repository,
+      channel,
+      contractId,
+      seat,
+      observation,
+      attempt,
+      offer,
+      assertions: expectedRef?.oid == null ? [] : [{ ref: expectedRef.ref, oid: expectedRef.oid }],
+    });
   });
 }

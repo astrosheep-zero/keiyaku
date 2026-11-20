@@ -1,5 +1,16 @@
 import { z } from "zod";
-import type { BindData, ContractId } from "../core/facts/types.js";
+import { contractState } from "../core/facts/observation.js";
+import type { BindData, ContractHead, ContractId, ContractTarget, SnapshotId } from "../core/facts/types.js";
+import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
+import {
+  observeBindCoordinates,
+  observeContractsAt,
+  selectExplicitTarget,
+  type BindTargetSelection,
+} from "../git/observe.js";
+import type { GitRepository } from "../git/process.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
 import {
   resolveContractTarget,
   targetRef,
@@ -7,24 +18,17 @@ import {
   type TargetWorkspaceRefusal,
 } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
-import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
-import { gitObjectIdForSnapshot } from "../git/identity.js";
-import {
-  selectExplicitTarget,
-  observeBindCoordinates,
-  type BindCoordinatesObservation,
-  type BindTargetSelection,
-} from "../git/observe.js";
-import type { GitRepository } from "../git/process.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
 import {
   VERIFIED,
   type VerificationDeclarationPreparation,
   type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
-import { admitPreparedIntent } from "./intent.js";
+import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
-import type { CompanionDecorator, ExternalProtocolPreparation, InCustodyProtocolPreparation } from "./run.js";
+import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
+import { runBoundedAttempts, type ObservedRef } from "./run.js";
+import type { CompanionDecorator } from "./run.js";
+import type { ProtocolProgress } from "./progress.js";
 
 export type { BindRefusal } from "../core/verbs/bind.js";
 export type { BindTargetSelection };
@@ -49,194 +53,147 @@ type BindOperationInput = Readonly<{
   verification: VerificationDeclarationPreparation;
   targetSelection: BindTargetSelection;
   decorateOffer?: CompanionDecorator;
+  progress?: ProtocolProgress;
   contractId: ContractId;
-  coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
+  coordinates?: Readonly<{ start: SnapshotId }>;
   source?: Readonly<{
     contractId: ContractId;
     head: import("../core/facts/types.js").ContractHead | null;
-    start: import("../core/facts/types.js").SnapshotId;
+    start: SnapshotId;
     document: import("../core/facts/types.js").DocumentKey;
   }>;
 }>;
 
-type BindRefusalUnion =
-  | BindRefusal
-  | TargetInputRefusal
-  | VerificationDeclarationRefusal
-  | ForkSourceMovedRefusal
-  | TargetWorkspaceRefusal;
-type BindSeed = Readonly<{ contractId: ContractId; at: string }>;
-type RefusedVerificationDeclaration = Extract<VerificationDeclarationPreparation, Readonly<{ kind: "refused" }>>;
+type BindFailure = TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal;
+type BindPreparation = BindInput<BindFailure>["preparation"];
+type PreparedBind = Readonly<{
+  preparation: BindPreparation;
+  expectedHead: ContractHead | null;
+  expectedRef?: ObservedRef;
+}>;
 
-/** What one seat-external coordinate acquisition proves about the mutable Git coordinates. */
-type BindCoordinatesPreparation =
-  | Readonly<{ kind: "resolved"; observed: BindCoordinatesObservation }>
-  | Readonly<{ kind: "unresolved"; reason: "target-missing" | "unborn-head" }>
-  | Readonly<{ kind: "target-refused"; refusal: TargetWorkspaceRefusal }>
-  | Readonly<{ kind: "declaration-refused"; preparation: RefusedVerificationDeclaration }>;
-
-/**
- * Acquire the repeatable Git coordinates outside the publication seat. The artifact carries the
- * observed start/target plus the expected ref assertions that publication must still confirm.
- */
-async function prepareBindCoordinates(
+async function prepareBind(
   input: BindOperationInput,
   selection: BindTargetSelection,
-): Promise<ExternalProtocolPreparation<BindCoordinatesPreparation, BindRefusalUnion>> {
+): Promise<Readonly<{ preparation: BindPreparation; expectedRef?: ObservedRef }>> {
   if (input.terms.gates.includes(VERIFIED) && input.verification.kind === "refused") {
-    return { kind: "prepared", prepared: { kind: "declaration-refused", preparation: input.verification } };
+    return { preparation: input.verification };
   }
+  const fixedStart = input.coordinates?.start;
+  let start: SnapshotId;
+  let target: ContractTarget | undefined;
   if (selection.kind === "contract") {
     const resolved = await resolveContractTarget(input.scope, selection.contractId, selection.inherited);
-    if (resolved.kind === "refused")
-      return { kind: "prepared", prepared: { kind: "target-refused", refusal: resolved.refusal } };
-    const observed: BindCoordinatesObservation = { start: resolved.head, target: resolved.target, branch: null };
-    return {
-      kind: "prepared",
-      prepared: { kind: "resolved", observed },
-      assertions: [{ ref: targetRef(resolved.target), oid: gitObjectIdForSnapshot(resolved.head) }],
-    };
-  }
-  const observed = await observeBindCoordinates(input.scope, selection);
-  if (observed === null) return { kind: "prepared", prepared: { kind: "unresolved", reason: "target-missing" } };
-  if ("kind" in observed) return { kind: "prepared", prepared: { kind: "unresolved", reason: "unborn-head" } };
-  return {
-    kind: "prepared",
-    prepared: { kind: "resolved", observed },
-    ...(input.coordinates === undefined
-      ? {
-          assertions: [
-            {
-              ref: observed.target === undefined ? "HEAD" : targetRef(observed.target),
-              oid: gitObjectIdForSnapshot(observed.start),
-            },
-          ],
-        }
-      : {}),
-  };
-}
-
-/**
- * Assemble the decision input from the fresh in-custody observation. Coordinates fixed by the
- * invocation are never replaced; mutable coordinate disappearance is read again as current evidence.
- */
-async function assembleBindInput(
-  input: BindOperationInput,
-  selection: BindTargetSelection,
-  seed: BindSeed,
-  prepared: BindCoordinatesPreparation,
-): Promise<
-  InCustodyProtocolPreparation<BindInput<VerificationDeclarationRefusal | TargetWorkspaceRefusal>, BindRefusalUnion>
-> {
-  const targetContract = selection.kind === "contract" ? selection.contractId : undefined;
-  const targetInput = targetContract === undefined ? {} : { targetContract };
-  if (prepared.kind === "declaration-refused") {
-    return { kind: "prepared", input: { ...seed, ...targetInput, preparation: prepared.preparation } };
-  }
-  if (prepared.kind === "target-refused") {
-    return {
-      kind: "prepared",
-      input: { ...seed, ...targetInput, preparation: { kind: "refused", refusal: prepared.refusal } },
-    };
-  }
-  if (prepared.kind === "unresolved") {
-    if (selection.kind === "contract") return { kind: "stale" };
-    const current = await observeBindCoordinates(input.scope, selection);
-    if (current === null) return { kind: "refused", refusal: { kind: "target-missing" } };
-    if ("kind" in current) return { kind: "refused", refusal: { kind: "unborn-head" } };
-    return { kind: "stale" };
-  }
-  const observed = prepared.observed;
-  if (selection.kind === "contract") {
-    const expected = observed.target;
-    if (expected === undefined || typeof expected === "string") throw new Error("missing prepared Contract target");
-    const current = await resolveContractTarget(input.scope, selection.contractId, expected);
-    if (current.kind === "refused")
+    if (resolved.kind === "refused") return { preparation: resolved };
+    ({ start, target } = { start: resolved.head, target: resolved.target });
+  } else if (selection.kind === "targetless" && fixedStart !== undefined) {
+    start = fixedStart;
+  } else {
+    const observed = await observeBindCoordinates(input.scope, selection);
+    if (observed === null) {
+      if (selection.kind !== "explicit") throw new Error("missing bind coordinates without an explicit target");
       return {
-        kind: "prepared",
-        input: { ...seed, ...targetInput, preparation: { kind: "refused", refusal: current.refusal } },
+        preparation: { kind: "refused", refusal: { kind: "target-missing" } },
+        expectedRef: { ref: selection.target, oid: null },
       };
-    if (current.head !== observed.start) return { kind: "stale" };
+    }
+    if ("kind" in observed) {
+      return {
+        preparation: { kind: "refused", refusal: { kind: "unborn-head" } },
+        expectedRef: { ref: "HEAD", oid: null },
+      };
+    }
+    ({ start, target } = observed);
   }
+  const expectedRef =
+    target !== undefined || fixedStart === undefined
+      ? { ref: target === undefined ? "HEAD" : targetRef(target), oid: gitObjectIdForSnapshot(start) }
+      : undefined;
   return {
-    kind: "prepared",
-    input: {
-      ...seed,
-      ...targetInput,
-      preparation: {
-        kind: "prepared",
-        data: {
-          coordinates: {
-            start: input.coordinates?.start ?? observed.start,
-            ...(observed.target === undefined ? {} : { target: observed.target }),
-            workspace: "worktree",
-          },
-          terms: input.terms,
-        },
+    preparation: {
+      kind: "prepared",
+      data: {
+        terms: input.terms,
+        coordinates: { start: fixedStart ?? start, workspace: "worktree", ...(target === undefined ? {} : { target }) },
       },
     },
+    ...(expectedRef === undefined ? {} : { expectedRef }),
   };
 }
 
 export async function bindOperation(
   input: BindOperationInput,
-): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusalUnion>> {
-  let selection: BindTargetSelection = input.targetSelection;
-  if (selection.kind === "explicit") {
-    const explicit = await selectExplicitTarget(input.scope, selection.target);
-    if (explicit === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
-    selection = explicit;
-  }
-  const at = new Date().toISOString();
-  const id = input.contractId;
-  const incoming =
-    selection.kind === "contract" ? await acquireTargetPlacementFence(input.scope, selection.contractId) : undefined;
+): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusal | BindFailure>> {
+  const selection =
+    input.targetSelection.kind === "explicit"
+      ? await selectExplicitTarget(input.scope, input.targetSelection.target)
+      : input.targetSelection;
+  if (selection === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
+  const { scope, channel, contractId, source } = input;
+  const targetContract = selection.kind === "contract" ? selection.contractId : undefined;
+  const incoming = targetContract === undefined ? undefined : await acquireTargetPlacementFence(scope, targetContract);
   try {
-    return complete(
-      await admitPreparedIntent<
-        BindInput<VerificationDeclarationRefusal | TargetWorkspaceRefusal>,
-        BindRefusalUnion,
-        BindSeed,
-        BindCoordinatesPreparation
-      >(
-        input.channel,
-        input.scope,
-        {
-          contractId: id,
-          at,
-        } satisfies BindSeed,
-        decideBind,
-        {
-          observedContracts: [
-            id,
-            ...input.terms.after,
-            ...(selection.kind === "contract" ? [selection.contractId] : []),
-            ...(input.source === undefined ? [] : [input.source.contractId]),
-          ],
-          preparation: {
-            external: async () => await prepareBindCoordinates(input, selection),
-            assemble: async (_observation, original, prepared) =>
-              await assembleBindInput(input, selection, original, prepared),
+    const result = await runBoundedAttempts<PreparedBind, AcceptedAdmission, BindRefusal | BindFailure>(
+      mintAttempts({ entryCount: 1 }),
+      async () => {
+        const before = await observeContractsAt(scope, channel, [contractId]);
+        const expectedHead = contractState(before.decision, contractId)?.head ?? null;
+        const { preparation, expectedRef } = await prepareBind(input, selection);
+        return {
+          kind: "prepared",
+          prepared: { preparation, expectedHead, ...(expectedRef === undefined ? {} : { expectedRef }) },
+        };
+      },
+      async (prepared, attempt) => {
+        const { preparation, expectedHead, expectedRef } = prepared;
+        const target = preparation.kind === "prepared" ? preparation.data.coordinates.target : undefined;
+        const validateAdmission: NonNullable<IntentAdmissionOptions<BindFailure>["validateAdmission"]> = async (
+          observation,
+        ) => {
+          if (source !== undefined) {
+            const current = contractState(observation.decision, source.contractId);
+            if (
+              current === null ||
+              current.head !== source.head ||
+              current.coordinates.start !== source.start ||
+              current.terms.document.key !== source.document
+            )
+              return { kind: "fork-source-moved" };
+          }
+          if (target !== undefined && typeof target !== "string") {
+            const resolved = await resolveContractTarget(scope, target.contractId, target);
+            if (resolved.kind === "refused") return resolved.refusal satisfies TargetWorkspaceRefusal;
+          }
+          return undefined;
+        };
+        return await admitIntent(
+          channel,
+          scope,
+          {
+            contractId,
+            at: new Date().toISOString(),
+            preparation,
+            ...(targetContract === undefined ? {} : { targetContract }),
           },
-          ...(input.source === undefined
-            ? {}
-            : {
-                validateAdmission: (observation: import("../git/observe.js").ContractReadView) => {
-                  const current = observation.decision.get(input.source!.contractId);
-                  return current !== null &&
-                    current !== undefined &&
-                    current.head === input.source!.head &&
-                    current.coordinates.start === input.source!.start &&
-                    current.terms.document.key === input.source!.document
-                    ? undefined
-                    : ({ kind: "fork-source-moved" } as const);
-                },
-              }),
-          ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
-        },
-      ),
-      { contractId: id },
+          decideBind,
+          {
+            attempt,
+            expectedHead,
+            ...(expectedRef === undefined ? {} : { expectedRef }),
+            observedContracts: [
+              contractId,
+              ...input.terms.after,
+              ...(targetContract === undefined ? [] : [targetContract]),
+              ...(source === undefined ? [] : [source.contractId]),
+            ],
+            validateAdmission,
+            ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
+            ...(input.progress === undefined ? {} : { progress: input.progress }),
+          },
+        );
+      },
     );
+    return complete(result, { contractId });
   } finally {
     incoming?.close();
   }

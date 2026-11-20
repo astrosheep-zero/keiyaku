@@ -155,24 +155,23 @@ It alone judges Contract existence, terminality, document currency, and
 verb-specific legality. A changed document is a refusal for operations using a
 stamped derivation; review's later currency is a gate question.
 
-Admission currentness is witnessed per semantic attempt. Shared protocol owns the classification of lower attempt conclusions and the bounded availability of fresh custody, while each verb retains ownership of preparation, legal decision, publication, and any recovery meaning. A publication failure is a terminal typed non-admission and never licenses replay of its offer; spent currentness evidence is discarded before a later attempt obtains fresh custody. Collision and exhaustion remain distinct terminal observations.
+Protocol joins the pure decision to Git observation and admission. Each verb
+prepares its immutable artifacts outside publication custody. Before it uses
+those artifacts, the addressed journal head and any selected mutable ref must
+still match the preparation's observation. This establishes applicability,
+not admission or a promise about current worktree bytes. Core decides against
+fresh authority, including destination and prerequisite legality. Protocol
+submits at most one offer, and Git atomically judges its expected durable state.
 
-Protocol alone joins that decision to Git observation and admission. It holds
-the necessary publication custody, submits at most one decision offer, and Git
-atomically proves its expected durable state. Mechanical preparation cannot
-override lifecycle legality. Custody binds observation, decision, and admission;
-repeatable preparation may precede that custody when it carries the observed
-currentness witnesses it used, and those witnesses must still hold against the
-in-custody observation. A preparation whose witnesses no longer hold is spent: it
-is discarded and the whole cycle restarts from fresh observation and fresh
-preparation under a new attempt identity, never replaying the spent offer. A
-spent preparation is never a publication failure and never a public business
-refusal. A real publication failure keeps its own typed meaning (seat
-contention, Git publication failure, unconfirmable outcome); it is never
-re-described as a spent preparation and is never answered by republishing the
-same offer. It discards the offer, and any retry uses a fresh observation and
-preparation; uncertain outcomes are resolved only from durable journal facts.
-Bounded retries eventually return a typed non-admission outcome. The journal,
+A mismatch spends that attempt, and one bounded owner replaces it with a fresh
+attempt identity observed and prepared again outside custody; the old offer is
+never rebuilt or replayed. Only exhausting the finite attempt budget reports
+exhaustion. Worktree bytes captured by the invocation stay immutable across
+those attempts: a fresh attempt derives its decision data again without
+recapturing the mutable worktree inside custody. Collision and an
+unchanged-premise publication failure keep their own categories and never
+become a spent preparation or a semantic refusal. Uncertain admission is
+resolved only from durable facts identifying the original offer. The journal,
 rather than a queue or cache, is the only recovery and handoff receipt.
 An admitted current candidate is reused by subsequent delivery only when the
 observed worktree-content identity is unchanged. Changed content replaces the

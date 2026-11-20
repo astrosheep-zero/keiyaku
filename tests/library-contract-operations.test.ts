@@ -1,7 +1,7 @@
 import { present, accepted, assertRefused } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test, { describe } from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
@@ -336,6 +336,100 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     if (resolved.kind !== "present") throw new Error("missing resolved row");
     assert.equal(resolved.row.workspace.kind, "present");
     if (resolved.row.workspace.kind === "present") assert.equal(resolved.row.workspace.merge, undefined);
+  });
+
+  test("an older admitted delivery cannot retire a newer conflict handoff", async () => {
+    const { repository, repo, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
+    const git = await cachedRepositoryAt(repository.path);
+    const id = await publicContractId(contract);
+    const candidateHead = snapshotId(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim());
+
+    // Admit a clean older candidate without placement; the reviewed gate is unmet.
+    repository.run(["-C", worktree, "checkout", "--detach", "--quiet", `${candidateHead}^`]);
+    accepted(await contract.deliver());
+    const older = present(await contract.state());
+    assert.notEqual(older.delivery, null);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetHead);
+
+    // Restore the conflicting candidate and materialize the native handoff.
+    repository.run(["-C", worktree, "checkout", "--detach", "--quiet", candidateHead]);
+    const handoff = await contract.deliver({ includeDirty: true, materializeConflict: true });
+    assert.equal(handoff.kind, "handoff", JSON.stringify(handoff));
+    if (handoff.kind !== "handoff") throw new Error("expected a native conflict handoff");
+
+    const appointment = await readManagedWorktreeAppointment(git, id);
+    assert.equal(appointment.kind, "appointed");
+    if (appointment.kind !== "appointed") throw new Error("missing fixture appointment");
+    const receiptRef = `${HANDOFF_RECEIPT_REF_NAMESPACE}/${contractPhysicalName(id)}/${appointment.place}`;
+    const receiptOid = await readRef(git, receiptRef);
+    assert.ok(receiptOid);
+    assert.equal(mergeHead(repository, worktree), targetHead);
+    const conflictedIndex = repository.run(["-C", worktree, "ls-files", "--stage"]);
+    const conflictedBytes = readFileSync(join(worktree, "a.txt"), "utf8");
+
+    // Ordinary reconcile must not let the earlier delivery retire this unconsumed handoff.
+    const reconciled = await Keis.of(repo).reconcile({ contract: id });
+    assert.equal(reconciled.kind, "contract");
+    assert.deepEqual(present(await contract.state()), older);
+    assert.equal(await readRef(git, receiptRef), receiptOid);
+    assert.equal(mergeHead(repository, worktree), targetHead);
+    assert.equal(repository.run(["-C", worktree, "ls-files", "--stage"]), conflictedIndex);
+    assert.equal(readFileSync(join(worktree, "a.txt"), "utf8"), conflictedBytes);
+
+    // Resolving the bytes consumes the exact receipt atomically; one refused post-admission
+    // metadata retirement leaves durable consumed custody for a later ordinary reconcile.
+    writeFileSync(join(worktree, "a.txt"), "resolved a\n");
+    writeFileSync(join(worktree, "z.txt"), "resolved z\n");
+    repository.run(["-C", worktree, "add", "a.txt", "z.txt"]);
+    accepted(await contract.review({ verdict: "satisfied", summary: "Resolved handoff review passed" }));
+    const resolvedIndex = repository.run(["-C", worktree, "ls-files", "--stage"]);
+    const refuse = join(repository.path, ".git", "merge-quit-refused");
+    const fired = join(repository.path, ".git", "merge-quit-refusal-fired");
+    writeFileSync(refuse, "");
+    await withGitShim(
+      [
+        'case " $* " in',
+        '  *" merge --quit "*)',
+        '    if [ -e "$KEIYAKU_REFUSE_MERGE_QUIT" ]; then : > "$KEIYAKU_MERGE_QUIT_REFUSED"; exit 1; fi ;;',
+        "esac",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      { KEIYAKU_REFUSE_MERGE_QUIT: refuse, KEIYAKU_MERGE_QUIT_REFUSED: fired },
+      async (gitPath) => {
+        const traced = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id });
+        const delivered = accepted(await traced.deliver({ includeDirty: true }));
+        assert.equal(existsSync(fired), true, "the post-admission merge-quit refusal must fire");
+        assert.equal(delivered.placement?.kind, "placed");
+        assert.ok(delivered.issues?.some((issue) => issue.kind === "reconcile-failed"));
+        assert.equal(repository.run(["show", `${delivered.candidate}:a.txt`]), "resolved a\n");
+        unlinkSync(refuse);
+
+        const consumedOid = await readRef(git, receiptRef);
+        assert.ok(consumedOid);
+        assert.notEqual(consumedOid, receiptOid);
+        const proof = JSON.parse((await readBlob(git, consumedOid!)).toString("utf8")) as Record<string, unknown>;
+        assert.equal(proof.consumed, true);
+        assert.equal(proof.head, handoff.handoffBase);
+        assert.equal(proof.mergeHead, targetHead);
+        assert.equal(mergeHead(repository, worktree), targetHead);
+        assert.equal(repository.run(["-C", worktree, "ls-files", "--stage"]), resolvedIndex);
+        const mainIndex = repository.run(["ls-files", "--stage", "--", "a.txt", "z.txt"]);
+        const mainBytes = readFileSync(join(repository.path, "a.txt"), "utf8");
+        const afterDelivery = present(await traced.state());
+        assert.equal(afterDelivery.terminal?.kind, "claimed");
+
+        const retried = await Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({
+          contract: id,
+        });
+        assert.equal(retried.kind, "contract");
+        assert.deepEqual(present(await contract.state()), afterDelivery);
+        assert.equal(await readRef(git, receiptRef), null);
+        assert.equal(repository.run(["ls-files", "--stage", "--", "a.txt", "z.txt"]), mainIndex);
+        assert.equal(readFileSync(join(repository.path, "a.txt"), "utf8"), mainBytes);
+        assert.equal(repository.run(["show", `${delivered.candidate}:z.txt`]), "resolved z\n");
+        assert.equal(existsSync(worktree), false, "terminal cleanup follows the retired handoff");
+      },
+    );
   });
 
   test("plain deliver conflict is an executable handoff and does not mutate", async () => {

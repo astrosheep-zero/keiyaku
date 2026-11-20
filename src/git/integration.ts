@@ -12,7 +12,7 @@ import {
   type DeliveryCommitMetadata,
   type TenderCapture,
 } from "./tender.js";
-import { workspaceMergeStatePresent } from "./workspace.js";
+import { workspaceMergeHead, workspaceMergeStatePresent } from "./workspace.js";
 import { readLiteralObjects } from "./read-observation.js";
 import { resolveContractTarget, targetRef, targetRepository } from "./target.js";
 
@@ -293,21 +293,24 @@ export async function materializeJudgedConflict(
   repository: GitRepository,
   workspace: string,
   targetHead: SnapshotId,
-): Promise<void> {
-  const result = await runAllowingNonzero(repository, [
-    "-C",
-    workspace,
-    "merge",
-    "--no-commit",
-    gitObjectIdForSnapshot(targetHead),
-  ]);
-  if (result.status === 0 || result.status === 1) return;
-  throw new GitPlumbingError({
-    stdout: result.stdout,
-    stderr: result.stderr,
-    status: result.status,
-    message: "git merge --no-commit failed",
-  });
+): Promise<boolean> {
+  try {
+    await executeGit(repository, [
+      "-C",
+      workspace,
+      "merge",
+      "--no-commit",
+      "--no-overwrite-ignore",
+      gitObjectIdForSnapshot(targetHead),
+    ]);
+    return true;
+  } catch (error) {
+    // A conflicted merge exits 1 while establishing MERGE_HEAD: that is a live handoff. A native
+    // refusal before any merge operation (for example, due to later local edits) exits 1 or 2
+    // without MERGE_HEAD and must not be reported as materialized.
+    if (!(error instanceof GitPlumbingError) || (error.status !== 1 && error.status !== 2)) throw error;
+    return (await workspaceMergeHead(repository, workspace)) === targetHead;
+  }
 }
 
 export async function planIntegration(
@@ -315,6 +318,7 @@ export async function planIntegration(
   input: IntegrationCoordinates,
   tender: IntegrationTender,
   requireBranchesToBeUpToDate: boolean,
+  observedTarget?: SnapshotId | null,
 ): Promise<
   Preparation<
     IntegrationPlan,
@@ -335,11 +339,12 @@ export async function planIntegration(
     const resolved = await resolveContractTarget(repository, target.contractId, target);
     if (resolved.kind === "refused") return resolved;
   }
-  const observed = await readRef(targetRepository(repository, target), targetRef(target));
-  if (observed === null) {
-    return { kind: "refused", refusal: { kind: "target-missing" } };
-  }
-  const targetHead = mintSnapshotId(observed);
+  const oid =
+    observedTarget === undefined
+      ? await readRef(targetRepository(repository, target), targetRef(target))
+      : observedTarget;
+  if (oid === null) return { kind: "refused", refusal: { kind: "target-missing" } };
+  const targetHead = mintSnapshotId(oid);
   let tree: GitObjectId;
   if (requireBranchesToBeUpToDate) {
     if (!(await isAncestor(repository, targetHead, tender.head))) {

@@ -23,10 +23,11 @@ export { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 import { targetWorkspaceRefusalSchema } from "../git/target.js";
 import { dirtyWorkspaceRefusalSchema, worktreeMissingRefusalSchema } from "../git/tender.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
-import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
 import { complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
+import { runBoundedAttempts } from "./run.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
@@ -182,7 +183,13 @@ export async function admitVoidIntent<Payload extends object, Refusal>(
     at: timestamp(),
     ...payload,
   };
-  return complete(await admitIntent(input.channel, input.scope, decisionInput, decide, options), undefined);
+  const result = await runBoundedAttempts<undefined, AcceptedAdmission, Refusal>(
+    mintAttempts({ entryCount: 1 }),
+    async () => ({ kind: "prepared", prepared: undefined }),
+    async (_prepared, attempt) =>
+      await admitIntent(input.channel, input.scope, decisionInput, decide, { ...(options ?? {}), attempt }),
+  );
+  return complete(result, undefined);
 }
 
 export type DocumentDerivation = Readonly<{
@@ -191,14 +198,6 @@ export type DocumentDerivation = Readonly<{
   title: string;
   verification: VerificationDeclarationPreparation;
 }>;
-
-export type AttemptDecision<Value, Refusal = IntentRefusal> =
-  | (AcceptedAdmission & Readonly<{ value: Value }>)
-  | Readonly<{ kind: "refused"; refusal: Refusal }>
-  | Readonly<{ kind: "redecide" }>
-  | Readonly<{ kind: "stale" }>
-  | Readonly<{ kind: "collision" }>
-  | Extract<DecidedOfferResult, { kind: "publication-failed" }>;
 
 export function timestamp(): string {
   return new Date().toISOString();

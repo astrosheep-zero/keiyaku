@@ -61,7 +61,7 @@ function seatCloseObligations(
 export function admitted<Value, Refusal = never>(
   admission: AcceptedProtocolStep,
   value: Value,
-): IntentOutcome<Value, Refusal> {
+): Extract<IntentOutcome<Value, Refusal>, Readonly<{ kind: "accepted" }>> {
   return accepted(
     admission.state,
     admission.facts,

@@ -25,6 +25,8 @@ import {
   entryUlid,
 } from "../core/facts/types.js";
 
+import { spentPreparation } from "./run.js";
+
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const MAX_SEMANTIC_ATTEMPTS = 3;
 
@@ -43,14 +45,13 @@ function nextEntryUlid(): EntryUlid {
   return entryUlid(value);
 }
 
-function mintEntryUlids(count: number): readonly EntryUlid[] {
-  return Array.from({ length: count }, nextEntryUlid);
+export function mintAttempt(entryCount = 1): AttemptContext {
+  return { entryUlids: Array.from({ length: entryCount }, nextEntryUlid) };
 }
 
+/** Mint the finite budget of fresh semantic attempt identities one invocation may use. */
 export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly AttemptContext[] {
-  return Array.from({ length: MAX_SEMANTIC_ATTEMPTS }, () => ({
-    entryUlids: mintEntryUlids(input.entryCount),
-  }));
+  return Array.from({ length: MAX_SEMANTIC_ATTEMPTS }, () => mintAttempt(input.entryCount));
 }
 
 export type AcceptedAdmission = Readonly<{
@@ -65,8 +66,7 @@ export type AttemptTerminal = Readonly<{ kind: "collision" }> | PublicationFaile
 export type DecidedOfferResult<Refusal = never> =
   | AcceptedAdmission
   | AttemptTerminal
-  | Readonly<{ kind: "stale" }>
-  | Readonly<{ kind: "redecide" }>
+  | typeof spentPreparation
   | Readonly<{ kind: "refused"; refusal: Refusal }>;
 
 function offerEntries(offer: Offer): readonly JournalEntry[] {
@@ -115,7 +115,11 @@ async function publicationPremiseMoved(
 
 export type PrepareRefCompanion<Refusal> = (
   observation: ContractReadView,
-) => Promise<Readonly<{ kind: "companion"; update: GitRefUpdate }> | Readonly<{ kind: "refused"; refusal: Refusal }>>;
+) => Promise<
+  | Readonly<{ kind: "companion"; update: GitRefUpdate }>
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+>;
 
 /** Admit one decided offer without making another legal decision. */
 export async function admitDecidedOffer<Refusal = never>(
@@ -144,7 +148,13 @@ export async function admitDecidedOffer<Refusal = never>(
   }
   const companion = await input.prepareRefCompanion?.(decisionObservation);
   if (companion?.kind === "refused") return companion;
-  const admission = await admit(repository, offer, decisionObservation, assertions, companion?.update);
+  const admission = await admit(
+    repository,
+    offer,
+    decisionObservation,
+    assertions,
+    companion?.kind === "companion" ? companion.update : undefined,
+  );
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(seat);
     input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
@@ -160,7 +170,7 @@ export async function admitDecidedOffer<Refusal = never>(
   }
   if (admission.kind === "publication-failed") {
     return (await publicationPremiseMoved(repository, decisionObservation, offer, assertions))
-      ? { kind: "redecide" }
+      ? spentPreparation
       : admission;
   }
   const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
@@ -172,7 +182,8 @@ export async function admitDecidedOffer<Refusal = never>(
     ),
   );
   const recoveredKind = classifyUnknownAttempt(recovered.journals, offer);
-  if (recoveredKind !== "accepted") return { kind: recoveredKind };
+  if (recoveredKind === "collision") return { kind: "collision" };
+  if (recoveredKind === "redecide") return spentPreparation;
   const { state, entries } = contractJournal(recovered.journals, primaryContract);
   if (state === null) throw new Error(`recovered offer is missing its primary contract: ${primaryContract}`);
   confirmPrivateStatePublication(seat);

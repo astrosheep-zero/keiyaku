@@ -134,7 +134,12 @@ semantic capabilities and coordinates; only leaf CLI presentation supplies
 command grammar.
 
 A normal refusal or retry is returned only before the leading act has confirmed
-an effect. Later stops remain on the accepted answer or thrown exception.
+an effect. A spent preparation is retired and prepared again within the
+invocation's finite attempt budget; only exhaustion, identity collision, or an
+unchanged-premise publication failure yields a retryable stop, which is not a
+semantic refusal. The same condition during trailing work is a stop on the
+accepted answer, never a retry of the confirmed leading act. Later stops remain
+on the accepted answer or thrown exception.
 An exceptional receipt retains the native category and cause together with
 confirmed admissions, consequential movement, resource effects and issues, and
 Verification evidence already produced. It does not reconstruct an unfinished
@@ -157,6 +162,8 @@ stop. Satisfied review can find no delivery to place, and a later placement stop
 cannot undo admitted delivery, review, or verification testimony.
 
 Delivery identifies the captured candidate, integration, and content identity.
+Review identifies the captured subject and reports changes from that observation;
+neither result implies that the mutable worktree still matches it.
 Ordinary fresh admission is implicit; continued admission is explicitly
 identified from the historical entry witnessed in this invocation's custody.
 That reuse is never represented as a newly admitted fact. A changed candidate

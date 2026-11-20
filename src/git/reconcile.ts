@@ -347,15 +347,12 @@ async function retireHandoff(
     contractId: state.id,
     place,
     workspace: path,
-    consume: state.delivery !== null,
+    consumeUnconsumed: state.terminal !== null,
   });
-  if (
-    (state.terminal !== null && handoff.kind === "active") ||
-    ((state.terminal !== null || state.delivery !== null) && handoff.kind === "retained")
-  ) {
+  if (handoff.kind === "retained" && (state.terminal !== null || handoff.consumed)) {
     acc.recordLag({
       kind: "reconcile-failed",
-      diagnostic: `conflict handoff retirement retained: ${handoff.kind === "retained" ? handoff.reason : "active"}`,
+      diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
     });
     return false;
   }
