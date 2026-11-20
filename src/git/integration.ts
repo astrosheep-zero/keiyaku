@@ -3,7 +3,7 @@ import type { Preparation } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { decodeGitNameOnly, decodeGitNumstat, readRef } from "./repository.js";
+import { decodeGitNameOnly, decodeGitNumstat } from "./repository.js";
 import { executeGit, GitPlumbingError, runGitPipe, type GitRepository } from "./process.js";
 import {
   deliveryEnvironment,
@@ -13,7 +13,7 @@ import {
 } from "./tender.js";
 import { workspaceMergeHead, workspaceMergeStatePresent } from "./workspace.js";
 import { readLiteralObjects } from "./read-observation.js";
-import { resolveContractTarget, targetRef, targetRepository } from "./target.js";
+import { observeTarget, type TargetObservation, type TargetWorkspaceRefusal } from "./target.js";
 
 export { workspaceMergeStatePresent };
 
@@ -309,11 +309,11 @@ export async function planIntegration(
   input: IntegrationCoordinates,
   tender: IntegrationTender,
   requireBranchesToBeUpToDate: boolean,
-  observedTarget?: SnapshotId | null,
+  observedTarget?: TargetObservation,
 ): Promise<
   Preparation<
     IntegrationPlan,
-    Readonly<{ kind: "target-missing" }> | IntegrationPreparationRefusal | import("./target.js").TargetWorkspaceRefusal
+    Readonly<{ kind: "target-missing" }> | IntegrationPreparationRefusal | TargetWorkspaceRefusal
   >
 > {
   const target = input.coordinates.target;
@@ -326,16 +326,10 @@ export async function planIntegration(
       },
     };
   }
-  if (typeof target !== "string") {
-    const resolved = await resolveContractTarget(repository, target.contractId, target);
-    if (resolved.kind === "refused") return resolved;
-  }
-  const oid =
-    observedTarget === undefined
-      ? await readRef(targetRepository(repository, target), targetRef(target))
-      : observedTarget;
-  if (oid === null) return { kind: "refused", refusal: { kind: "target-missing" } };
-  const targetHead = mintSnapshotId(oid);
+  const observed = observedTarget ?? (await observeTarget(repository, target));
+  if (observed.kind === "refused") return observed;
+  const targetHead = observed.head;
+  if (targetHead === null) return { kind: "refused", refusal: { kind: "target-missing" } };
   let tree: GitObjectId;
   if (requireBranchesToBeUpToDate) {
     if (!(await isAncestor(repository, targetHead, tender.head))) {

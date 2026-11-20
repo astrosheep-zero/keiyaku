@@ -260,15 +260,13 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
     if (prepared.kind === "refused") return prepared;
     const { snapshot, changeId, definition } = prepared;
     let checkpoint = prepared.checkpoint;
-    const { state, journal } = checkpoint;
+    const { state } = checkpoint;
     const checks: VerificationCheck[] = [];
     const subject = dependencyKeySet([
       { kind: "snapshot", value: snapshot },
       ...(input.verificationMode === "strict" ? [] : [{ kind: "change" as const, value: changeId }]),
       ...(state.targetRevision === undefined ? [] : [{ kind: "target" as const, value: state.targetRevision }]),
     ]);
-    // This observation carries no new fact. It supplies the exact head even when every admission reuses testimony.
-    input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal });
     const selected = definition.declarations
       .map((declaration, offset) => ({ declaration, index: offset + 1 }))
       .filter(({ index }) => input.index === undefined || input.index === index);

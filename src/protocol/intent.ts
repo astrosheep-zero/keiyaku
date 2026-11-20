@@ -7,9 +7,10 @@ import type { ContractHead, ContractId } from "../core/facts/types.js";
 import {
   privateStateSeatAttempt,
   preparationIsCurrent,
+  preparationAssertions,
   spentPreparation,
   type CompanionDecorator,
-  type ObservedRef,
+  type RefPremise,
   type ProtocolTerminal,
 } from "./run.js";
 import { admitDecidedOffer, type DecidedOfferResult, type PrepareRefCompanion } from "./attempt.js";
@@ -22,7 +23,7 @@ export type IntentAdmissionOptions<Refusal = never> = Readonly<{
   prepareRefCompanion?: PrepareRefCompanion<Refusal>;
   observationSelection?: GitTreeSelection;
   expectedHead?: ContractHead | null;
-  expectedRef?: ObservedRef;
+  expectedRef?: RefPremise;
 }>;
 
 /** One admission carries both the attempt identity and the optional admission options. */
@@ -67,7 +68,7 @@ export async function admitIntent<Input extends Readonly<{ contractId: ContractI
       observation,
       attempt,
       offer,
-      assertions: expectedRef?.oid == null ? [] : [{ ref: expectedRef.ref, oid: expectedRef.oid }],
+      assertions: preparationAssertions(expectedRef),
     });
   });
 }

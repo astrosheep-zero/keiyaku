@@ -23,14 +23,14 @@ import {
   type VerificationDeclarationPreparation,
   type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
-import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted, type IntentOutcome } from "./outcome.js";
+import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import {
   privateStateSeatAttempt,
   preparationIsCurrent,
   runBoundedAttempts,
   spentPreparation,
   type ObservedRef,
+  type ProtocolResult,
   type ProtocolTerminal,
   type SpentPreparation,
 } from "./run.js";
@@ -57,9 +57,8 @@ type TargetInputRefusal = Readonly<{ kind: "invalid-target" | "target-missing" }
 type AmendmentRefusal = AmendRefusal | VerificationDeclarationRefusal | TargetInputRefusal;
 
 /** An amendment either admits terms or answers that the Contract already stands as asked. */
-export type AmendAdmission = IntentOutcome<Amendment, AmendmentRefusal> | Readonly<{ kind: "unchanged" }>;
-
-type AmendFinal = Extract<AmendAdmission, Readonly<{ kind: "accepted" | "unchanged" }>>;
+type AmendFinal = (AcceptedAdmission & Readonly<{ value: Amendment }>) | Readonly<{ kind: "unchanged" }>;
+type AmendAdmission = AmendFinal | Exclude<ProtocolResult<AmendmentRefusal>, AcceptedAdmission>;
 type PreparedAmendment = Readonly<{
   expectedHead: ContractHead | null;
   amendment?: Amendment;
@@ -217,15 +216,17 @@ export async function amendOperation(input: AmendOperationInput): Promise<AmendA
             assertions: expectedRef?.oid == null ? [] : [{ ref: expectedRef.ref, oid: expectedRef.oid }],
           });
           if (admission.kind !== "accepted") return admission;
-          return admitted(admission, {
-            ...amendment,
-            ...(prepared.replacement === undefined ? {} : { target: prepared.replacement }),
-          });
+          return {
+            ...admission,
+            value: {
+              ...amendment,
+              ...(prepared.replacement === undefined ? {} : { target: prepared.replacement }),
+            },
+          };
         }),
     );
-    return result.kind === "exhausted" || result.kind === "collision" || result.kind === "publication-failed"
-      ? { kind: "retry", reason: result }
-      : result;
+    if (result.kind === "accepted") input.progress?.recordResidue(contractId, result);
+    return result;
   } finally {
     incoming?.close();
   }

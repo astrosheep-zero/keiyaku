@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { targetName, type ContractState } from "../core/facts/types.js";
+import type { ContractState } from "../core/facts/types.js";
 import { snapshotIdSchema, contractIdSchema } from "../git/identity.js";
 import { deliveryDiffScopeSchema } from "../git/integration.js";
 import { requirementIdSchema, gateSchema, snapshotChangeSchema } from "./result-leaves.js";
 import type { GateReport } from "../core/facts/gate.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { admitPlacement, observeIntegrationTargetMovement, type PlacementProtocolResult } from "./placement.js";
+import { admitPlacement, confirmPlacement, type PlacementProtocolResult } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
   contractCheckpoint,
@@ -209,7 +209,9 @@ export function compactScope(scope: z.output<typeof deliveryDiffScopeSchema>): z
 
 type PlacementAttempt = PlacementProtocolResult | ReintegrationResult;
 
-function placementConclusion(result: Exclude<PlacementAttempt, { kind: "accepted" }>): CompactPlacementStop {
+function placementConclusion(
+  result: Exclude<PlacementAttempt, { kind: "accepted" | "target-moved" }>,
+): CompactPlacementStop {
   switch (result.kind) {
     case "refused": {
       const reason = result.refusal;
@@ -220,12 +222,8 @@ function placementConclusion(result: Exclude<PlacementAttempt, { kind: "accepted
     }
     case "placement-failed":
       return { kind: "failed", diagnostic: result.diagnostic };
-    case "target-moved": {
-      const { target, expected, observed, observedTreeEqualsCandidate } = result;
-      if (!observedTreeEqualsCandidate || observed === null)
-        throw new Error("unexhausted returned target movement requires identical content");
-      return { kind: "target-content-identical", target, expected, observed };
-    }
+    case "target-content-identical":
+      return result;
     case "retry":
       return compactRetry(result.reason);
     default:
@@ -242,18 +240,6 @@ type CompletionInput = Readonly<{
 }>;
 
 type CompletionResult = Readonly<{ checkpoint: ContractCheckpoint; placement: Placement }>;
-
-function confirmPlacement(progress: ProtocolProgress, state: ContractState): Placed {
-  const {
-    currentIntegration,
-    coordinates: { target },
-  } = state;
-  if (currentIntegration === null) throw new Error("accepted placement requires its integration snapshot");
-  return progress.recordCompletion(state.id, {
-    integration: currentIntegration.snapshot,
-    ...(target === undefined ? {} : { target: targetName(target), predecessor: currentIntegration.predecessor }),
-  });
-}
 
 async function placeCurrentCandidate(input: CompletionInput, state: ContractState) {
   input.signal?.throwIfAborted();
@@ -288,22 +274,18 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     progress.recordCandidate(id, undefined);
     for (let cycles = 0; ; cycles += 1) {
       input.signal?.throwIfAborted();
-      const attempt =
-        (await observeIntegrationTargetMovement(input.repository, checkpoint.state)) ??
-        (await placeCurrentCandidate(input, checkpoint.state));
+      const attempt = await placeCurrentCandidate(input, checkpoint.state);
       if (attempt.kind === "accepted") {
         checkpoint = contractCheckpoint(attempt);
-        const placement = confirmPlacement(progress, checkpoint.state);
-        progress.recordResidue(id, attempt);
-        return { checkpoint, placement };
+        return { checkpoint, placement: attempt.placement };
       }
-      if (attempt.kind !== "target-moved" || target === undefined || attempt.observedTreeEqualsCandidate)
-        return stopped(placementConclusion(attempt));
+      if (attempt.kind !== "target-moved") return stopped(placementConclusion(attempt));
+      if (target === undefined) throw new Error("targetless placement reported destination movement");
       if (cycles === MAX_REINTEGRATION_CYCLES)
         return stopped({
           kind: "target-moved",
-          target: targetName(target),
-          integration: checkpoint.state.currentIntegration!.snapshot,
+          target: attempt.target,
+          integration: attempt.integration,
           observed: attempt.observed,
         });
       input.signal?.throwIfAborted();
@@ -316,7 +298,6 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
       });
       if (reintegrated.kind !== "accepted") return stopped(placementConclusion(reintegrated));
       checkpoint = contractCheckpoint(reintegrated);
-      progress.recordResidue(id, reintegrated);
     }
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;

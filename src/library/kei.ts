@@ -44,6 +44,7 @@ import {
   type AbandonOutcome,
   type AmendOutcome,
   type ArcOutcome,
+  type Delivery,
   type DeliveryPreviewInput,
   type DeliveryPreviewOutcome,
   type DeliverOutcome,
@@ -51,7 +52,6 @@ import {
   type ReviewOutcome,
   type VerifyOutcome,
   type AmendValue,
-  retainAdmission,
 } from "./contract-outcomes.js";
 import {
   type LocalContractCompositionCapture,
@@ -77,9 +77,8 @@ import {
   type VerifyInput,
 } from "./contract-types.js";
 import { selectHistoryPage, type HistoryCursor } from "../history.js";
-import { admitDeliveryOperation, type DeliverLeading } from "../protocol/deliver.js";
+import { admitDeliveryOperation } from "../protocol/deliver.js";
 import { compactDelivery } from "../protocol/result-leaves.js";
-import { type Delivery } from "./delivery.js";
 import {
   validateContractWaitHandle,
   waitContractLocal,
@@ -262,7 +261,6 @@ export class Kei {
       });
       // No requested change is the same answer as before: an accepted amendment that changed nothing.
       if (admission.kind === "unchanged") return { kind: "unchanged", contractId: this.id };
-      if (admission.kind === "retry") return { contractId: this.id, ...compactRetry(admission.reason) };
       if (admission.kind === "refused") {
         const { refusal } = admission;
         return {
@@ -271,13 +269,13 @@ export class Kei {
           reason: refusal.kind === "target-workspace-unavailable" ? compactReason(refusal) : refusal,
         };
       }
+      if (admission.kind !== "accepted") return { contractId: this.id, ...compactRetry(admission) };
       const changes = {
         ...changedAmendTerms(admission.value.source, admission.value.terms),
         ...(admission.value.target === undefined ? {} : { target: targetName(admission.value.target) }),
       };
       const sections =
         changedSections === undefined || changedSections.size === 0 ? {} : { changedSections: [...changedSections] };
-      retainAdmission(accumulator, this.id, admission);
       const region = await observeChangedRegion(
         scope,
         this.id,
@@ -330,8 +328,7 @@ export class Kei {
           return { kind: "refused", contractId: this.id, reason };
         }
         if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
-        const { leading, ...value } = outcome.value;
-        requireMatchingDeliveryLeading(leading, accumulator, this.id);
+        const { value } = outcome;
         const { integration, tail } = await advanceAndContinue(accumulator, scope, localChannel, outcome);
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
         const { placement, ...continuation } = tail;
@@ -468,8 +465,7 @@ export class Kei {
       if (admission.kind !== "accepted")
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: admission.refusal }
-          : { contractId: this.id, ...compactRetry(admission.reason) };
-      retainAdmission(accumulator, this.id, admission);
+          : { contractId: this.id, ...compactRetry(admission) };
       await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
       return { kind: "accepted", contractId: this.id };
     });
@@ -492,10 +488,11 @@ export class Kei {
       if (admission.kind !== "accepted")
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: admission.refusal }
-          : { contractId: this.id, ...compactRetry(admission.reason) };
-      retainAdmission(accumulator, this.id, admission);
+          : { contractId: this.id, ...compactRetry(admission) };
+      const arc = accumulator.firstFact("arc");
+      if (arc?.contract !== this.id) throw new Error("arc receipt requires its admitted sequence");
       await reconcileAffectedContracts(accumulator, this.id, scope, channel, hooks);
-      return { kind: "accepted", contractId: this.id, chapter: admission.value.chapter };
+      return { kind: "accepted", contractId: this.id, chapter: arc.data.seq };
     });
   }
 
@@ -553,7 +550,8 @@ export async function invokeContract<Answer extends Readonly<{ kind: string; con
       const result = await run(channel);
       if (
         result.kind === "accepted" &&
-        (result.contractId === undefined || accumulator.head(result.contractId) === undefined)
+        (result.contractId === undefined ||
+          (operation !== "verify" && accumulator.head(result.contractId) === undefined))
       )
         throw new Error("missing leading admission receipt");
       return result;
@@ -881,17 +879,4 @@ async function advanceAndContinue(
       ...(continuation.claimed === undefined && continuation.stopped === undefined ? {} : { continuation }),
     },
   };
-}
-
-/** An accepted delivery's leading act must be the fact this invocation admitted. */
-function requireMatchingDeliveryLeading(
-  leading: DeliverLeading,
-  accumulator: InvocationAccumulator,
-  contractId: ContractId,
-): void {
-  const fact = accumulator.firstFact("deliver");
-  const witnessed = fact === undefined ? accumulator.checkpoint(contractId)?.state.delivery?.entry : fact.entry;
-  if (witnessed === undefined) throw new Error("confirmed delivery requires its own receipt");
-  if (leading.fact !== witnessed || leading.kind !== (fact === undefined ? "already-admitted" : "admitted-now"))
-    throw new Error("accepted delivery leading disagrees with its admitted fact");
 }

@@ -11,6 +11,8 @@ import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-tran
 import { privateStatePublicationSeatPath, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { observeContractsAt } from "../src/git/observe.js";
 import type { GitRepository } from "../src/git/process.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
+import { invocationIssues } from "../src/library/outcome.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { admitDecidedOffer, mintAttempt } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
@@ -54,11 +56,12 @@ async function readyPlacementFixture() {
   return { ...value, git };
 }
 
-function place(git: GitRepository, contractId: ContractId) {
+function place(git: GitRepository, contractId: ContractId, progress = new InvocationAccumulator()) {
   return withGitDecodeChannel(git, (channel) =>
     admitPlacement({
       channel,
       repository: git,
+      progress,
       target: "refs/heads/main",
       placement: { contractId, at: new Date().toISOString() },
     }),
@@ -86,7 +89,8 @@ test("checkout probing begins after atomic admission and outside the publication
     ].join("\n"),
     { SHAPE_STARTED: marker, SHAPE_RELEASE: release },
     async (gitPath) => {
-      const placing = place({ ...git, gitPath }, id);
+      const progress = new InvocationAccumulator();
+      const placing = place({ ...git, gitPath }, id, progress);
       void placing.catch(() => undefined);
       const file = resolve(repository.path, "collision.txt");
       const indexPath = resolve(repository.path, ".git", "index");
@@ -110,7 +114,7 @@ test("checkout probing begins after atomic admission and outside the publication
       }
       const result = await placing;
       assert.equal(result.kind, "accepted");
-      const lag = result.physical?.lag.find((issue) => issue.kind === "target-checkout-retained");
+      const lag = invocationIssues(progress.snapshot().effects, id).find((issue) => issue.kind === "target-checkout-retained");
       assert.match(lag?.diagnostic ?? "", /Untracked working tree file 'collision\.txt' would be overwritten/u);
       assert.deepEqual(readFileSync(indexPath), index);
       assert.equal(readFileSync(file, "utf8"), "unignored bytes after first classification\n");

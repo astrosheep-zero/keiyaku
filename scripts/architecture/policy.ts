@@ -99,7 +99,6 @@ const libraryOwner = {
     any("markdown/**"),
     ...protocolOperations,
     any("protocol/operations.ts"),
-    any("protocol/outcome.ts"),
     any("protocol/result-reasons.ts"),
     any("protocol/read/**"),
     any("settings.ts"),
@@ -171,7 +170,6 @@ const outcomeOwner = {
     any("protocol/progress.ts"),
     any("protocol/result-reasons.ts"),
     runtime("runtime/proc/diagnostic.ts", ["processDiagnostic"]),
-    types("protocol/outcome.ts"),
     types("protocol/verify.ts", ["VerifyValue"]),
     runtime("protocol/verify.ts", ["verificationAdmissionOutcome"]),
     any("protocol/completion.ts", ["placedSchema", "placementSchema", "placementOutcome"]),
@@ -287,7 +285,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/deliver.ts", ["prepareDelivery", "deliveryIntegrationSnapshots"]),
         any("verification/declaration.ts", ["VERIFIED", "verificationRequirement"]),
         types("protocol/deliver.ts", ["MechanicalPreparationRefusal"]),
-        any("protocol/outcome.ts", ["accepted"]),
         runtime("protocol/completion.ts", [
           "compactScope",
           "compactScopeSchema",
@@ -476,7 +473,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/bind.ts"),
         any("protocol/completion.ts"),
         any("protocol/progress.ts"),
-        types("protocol/outcome.ts"),
         any("protocol/execution-observation.ts"),
       ],
       deny: [
@@ -497,7 +493,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("markdown/query.ts", ["normalizeTitle", "indexDocument", "indexedHeadings", "sectionContent"]),
         any("protocol/completion.ts"),
         any("protocol/progress.ts"),
-        types("protocol/outcome.ts"),
         any("protocol/execution-observation.ts"),
       ],
       deny: [
@@ -515,7 +510,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/contract-outcomes.ts",
-      allow: [...contractOwner.allow, types("protocol/outcome.ts", ["IntentOutcome"])],
+      allow: [
+        ...contractOwner.allow.filter((rule) => rule.target !== "protocol/completion.ts"),
+        runtime("protocol/completion.ts", ["placedSchema", "placementSchema", "placementStopSchema"]),
+        runtime("protocol/result-leaves.ts", ["deliveryIdentitySchema"]),
+      ],
       deny: contractOwner.deny,
     },
     { source: "library/contract*.ts", ...contractOwner },
@@ -549,15 +548,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/placement.ts"),
         any("protocol/run.ts"),
       ],
-    },
-    {
-      source: "library/delivery.ts",
-      allow: [
-        ...libraryOwner.allow,
-        runtime("protocol/completion.ts", ["placedSchema", "placementStopSchema"]),
-        runtime("protocol/result-leaves.ts", ["deliveryIdentitySchema"]),
-      ],
-      deny: libraryOwner.deny,
     },
     {
       source: "library/refusal.ts",
@@ -915,7 +905,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "VerbCompletion",
         ]),
         runtime("library/contract-composition.ts", ["Keis"]),
-        types("library/delivery.ts", ["Delivery"]),
         types("library/outcome.ts"),
         any("library/repo.ts", ["Repo", "NoGitWorldError", "RepoAtInput"]),
         runtime("library/nuke.ts", ["nukeKeiyaku"]),

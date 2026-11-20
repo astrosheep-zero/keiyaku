@@ -5,12 +5,11 @@ import { KeiyakuError } from "../errors.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
-import type { IntentOutcome } from "../protocol/outcome.js";
-import type { BindOperationRefusal, BindTargetSelection } from "../protocol/bind.js";
+import type { BindTargetSelection } from "../protocol/bind.js";
 import { executionStop, isOperationalStop } from "../protocol/progress.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
-import { retainAdmission, type BindOutcome } from "./contract-outcomes.js";
+import type { BindOutcome } from "./contract-outcomes.js";
 import {
   captureLocalContractComposition,
   derivedGates,
@@ -99,10 +98,9 @@ type BindContext = Readonly<{
 
 async function bindAnswer(
   { accumulator, scope, channel, hooks, handle }: BindContext,
-  leading: IntentOutcome<Readonly<{ contractId: ContractId }>, BindOperationRefusal>,
+  leading: Awaited<ReturnType<typeof prepareMarkdownBind>>["result"],
   region: Parameters<typeof observeRegion>[3],
 ): Promise<BindOutcome> {
-  if (leading.kind === "retry") return compactRetry(leading.reason);
   if (leading.kind === "refused") {
     const { refusal } = leading;
     return {
@@ -110,11 +108,15 @@ async function bindAnswer(
       reason: refusal.kind === "target-workspace-unavailable" ? compactReason(refusal) : refusal,
     };
   }
-  const id = leading.value.contractId;
-  retainAdmission(accumulator, id, leading);
+  if (leading.kind !== "accepted") return compactRetry(leading);
   const bind = accumulator.firstFact("bind");
-  if (bind?.contract !== id) throw new Error("bind receipt requires its admitted coordinates");
-  const target = bind.data.coordinates.target;
+  if (bind?.contract !== leading.state.id) throw new Error("bind receipt requires its admitted coordinates");
+  const {
+    contract: id,
+    data: {
+      coordinates: { target },
+    },
+  } = bind;
   await reconcileAffectedContracts(accumulator, id, scope, channel, hooks);
   let worktreePath: string | undefined;
   try {

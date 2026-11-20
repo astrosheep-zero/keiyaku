@@ -514,6 +514,6 @@ export async function reconcileDependentWorktree(
   return acc.report;
 }
 
-export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult): ReconcileResult {
-  return { effects: prior?.effects ?? [], lag: [...(prior?.lag ?? []), failureLag(error)] };
+export function reconcileEffectFailure(error: unknown): ReconcileResult {
+  return { effects: [], lag: [failureLag(error)] };
 }

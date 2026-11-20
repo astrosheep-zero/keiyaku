@@ -16,9 +16,8 @@ import { withGitReadObservation, type GitDecodeChannel } from "../git/read-obser
 import { currentBranch, repositoryAt } from "../git/repository.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
-import { complete, type IntentOutcome } from "./outcome.js";
 import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
-import { runBoundedAttempts } from "./run.js";
+import { runBoundedAttempts, type ProtocolResult } from "./run.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
@@ -43,16 +42,13 @@ export type MutationOperationInput = OperationInput &
 /** The decision input of an intent whose verb contributes only its own payload. */
 type VoidIntentDecision<Payload extends object> = Payload & Readonly<{ contractId: ContractId; at: string }>;
 
-/**
- * Observe, decide, and atomically admit one intent over the invocation time, then complete it
- * as a void outcome. The verb contributes only its own decision payload.
- */
-export async function admitVoidIntent<Payload extends object, Refusal>(
+/** Admit an intent that needs no seat-external preparation. */
+export async function admitSimpleIntent<Payload extends object, Refusal>(
   input: MutationOperationInput,
   payload: Payload,
   decide: (input: DecideInput<VoidIntentDecision<Payload>>) => OfferDecision<Refusal>,
-  options?: IntentAdmissionOptions<Refusal>,
-): Promise<IntentOutcome<void, Refusal>> {
+  options?: Omit<IntentAdmissionOptions<Refusal>, "progress">,
+): Promise<ProtocolResult<Refusal>> {
   const decisionInput: VoidIntentDecision<Payload> = {
     contractId: input.contractId,
     at: timestamp(),
@@ -62,9 +58,14 @@ export async function admitVoidIntent<Payload extends object, Refusal>(
     mintAttempts({ entryCount: 1 }),
     async () => ({ kind: "prepared", prepared: undefined }),
     async (_prepared, attempt) =>
-      await admitIntent(input.channel, input.scope, decisionInput, decide, { ...(options ?? {}), attempt }),
+      await admitIntent(input.channel, input.scope, decisionInput, decide, {
+        ...options,
+        attempt,
+        ...(input.progress === undefined ? {} : { progress: input.progress }),
+      }),
   );
-  return complete(result, undefined);
+  if (result.kind === "accepted") input.progress?.recordResidue(input.contractId, result);
+  return result;
 }
 
 export type DocumentDerivation = Readonly<{

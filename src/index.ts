@@ -7,7 +7,7 @@ export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
 export { Kei } from "./library/kei.js";
 export type { Guidance } from "./library/kei.js";
-export type { Delivery } from "./library/delivery.js";
+export type { Delivery } from "./library/contract-outcomes.js";
 export type { LifecycleSelection } from "./bounded-list.js";
 export { Keiyaku, KeiyakuArcDocumentError, KeiyakuUsageError } from "./library/keiyaku.js";
 export type { KeiyakuFor } from "./library/keiyaku.js";

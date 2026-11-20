@@ -15,13 +15,13 @@ import {
   abandonOutcomeSchema,
   arcOutcomeSchema,
   deliveryPreviewOutcomeSchema,
+  deliverySchema,
 } from "../src/library/contract-outcomes.js";
 import { contractCatalogueSchema, contractObservationSchema } from "../src/protocol/read/status.js";
 import { contractResolutionSchema, contractHistorySchema } from "../src/library/contract-types.js";
 import { contractWaitResultSchema } from "../src/library/contract-wait.js";
 import { contractStateSchema } from "../src/protocol/result-leaves.js";
 import { guidanceSchema } from "../src/library/kei.js";
-import { deliverySchema } from "../src/library/delivery.js";
 import { reconcileResultSchema } from "../src/library/reconcile.js";
 import { executionObservationSchema } from "../src/protocol/execution-observation.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";

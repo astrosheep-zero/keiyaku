@@ -11,6 +11,8 @@ import {
 } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import { readRef } from "../git/repository.js";
+import { observeTarget, targetRef, type TargetObservation } from "../git/target.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
 import { contractState } from "../core/facts/observation.js";
 import type { AttemptContext } from "../core/decide.js";
 import type { ContractHead, ContractId } from "../core/facts/types.js";
@@ -42,6 +44,15 @@ export const spentPreparation = { kind: "spent" } as const;
 export type SpentPreparation = typeof spentPreparation;
 
 export type ObservedRef = Readonly<{ ref: string; oid: string | null }>;
+export type RefPremise = ObservedRef | TargetObservation;
+
+export function preparationAssertions(premise: RefPremise | undefined) {
+  if (premise === undefined) return [];
+  if ("ref" in premise) return premise.oid === null ? [] : [{ ref: premise.ref, oid: premise.oid }];
+  return premise.kind === "observed" && premise.head !== null
+    ? [{ ref: targetRef(premise.target), oid: gitObjectIdForSnapshot(premise.head) }]
+    : [];
+}
 
 /** One attempt's seat-external preparation: usable artifacts, a real refusal, or a spent premise. */
 export type PreparedAttempt<Prepared, Refusal> =
@@ -96,10 +107,16 @@ export async function preparationIsCurrent(
   observation: ContractReadView,
   id: ContractId,
   expectedHead: ContractHead | null,
-  expectedRef?: ObservedRef,
+  expectedRef?: RefPremise,
 ): Promise<boolean> {
   if ((contractState(observation.decision, id)?.head ?? null) !== expectedHead) return false;
   if (expectedRef === undefined) return true;
+  if ("target" in expectedRef) {
+    const current = await observeTarget(repository, expectedRef.target);
+    return expectedRef.kind === "observed"
+      ? current.kind === "observed" && current.head === expectedRef.head
+      : current.kind === "refused" && current.refusal.reason === expectedRef.refusal.reason;
+  }
   const repo = expectedRef.ref.startsWith("worktrees/")
     ? { ...repository, effectiveCwd: repository.primaryWorktree }
     : repository;

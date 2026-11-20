@@ -6,7 +6,7 @@ import { contractId, type ContractId, type ContractTarget, type SnapshotId } fro
 import { readPlaceRegister } from "../workspace-place.js";
 import { mintSnapshotId } from "./identity.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
-import { commonGitDirectory, currentBranch, registeredWorktrees, worktreeGitDirectory } from "./repository.js";
+import { commonGitDirectory, currentBranch, readRef, registeredWorktrees, worktreeGitDirectory } from "./repository.js";
 import { workspaceMergeStatePresent, worktreePath } from "./workspace.js";
 
 export type ContractDestination = Exclude<ContractTarget, string>;
@@ -35,6 +35,19 @@ export function targetRepository(repository: GitRepository, target: ContractTarg
 
 export function targetRef(target: ContractTarget): string {
   return typeof target === "string" ? target : `worktrees/${target.worktree.id}/HEAD`;
+}
+
+export type TargetObservation = Readonly<{ target: ContractTarget }> &
+  (Readonly<{ kind: "observed"; head: SnapshotId | null }> | Extract<TargetResolution, { kind: "refused" }>);
+
+/** A target head is evidence only after proving the selected destination. */
+export async function observeTarget(repository: GitRepository, target: ContractTarget): Promise<TargetObservation> {
+  if (typeof target !== "string") {
+    const resolved = await resolveContractTarget(repository, target.contractId, target);
+    return resolved.kind === "refused" ? { ...resolved, target } : { kind: "observed", target, head: resolved.head };
+  }
+  const oid = await readRef(repository, target);
+  return { kind: "observed", target, head: oid === null ? null : mintSnapshotId(oid) };
 }
 
 async function fingerprint(root: string, admin: string): Promise<string> {

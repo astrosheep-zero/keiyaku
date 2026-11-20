@@ -34,17 +34,17 @@ import {
 import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
 import {
   preparationIsCurrent,
+  preparationAssertions,
   privateStateSeatAttempt,
   runBoundedAttempts,
   spentPreparation,
-  type ObservedRef,
   type ProtocolResult,
   type SpentPreparation,
 } from "./run.js";
 import type { PrivateStatePublicationSeat } from "../git/private-state-seat.js";
-import { contractState, targetContractRefusal, type TargetContractRefusal } from "../core/facts/observation.js";
-import { resolveContractTarget, targetRef, type TargetWorkspaceRefusal } from "../git/target.js";
-import { acquireTargetPlacementFence, observeTargetHead } from "../git/target-placement.js";
+import { contractState } from "../core/facts/observation.js";
+import { observeTarget, type TargetObservation, type TargetWorkspaceRefusal } from "../git/target.js";
+import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import { currentBranch, readRef } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import type {
@@ -52,16 +52,13 @@ import type {
   ContractHead,
   ContractId,
   ContractState,
-  ContractTarget,
   DeliverData,
-  EntryUlid,
   JournalEntry,
   SnapshotId,
 } from "../core/facts/types.js";
-import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
+import { decideDeliver, matchingDelivery, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import type { AttemptContext } from "../core/decide.js";
-import type { LeadingOutcome } from "./outcome.js";
 import { readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import { timestamp, type MutationOperationInput } from "./operations.js";
 
@@ -76,11 +73,6 @@ export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): 
     })
     .reverse();
 }
-export type DeliverLeading = Readonly<{
-  kind: "admitted-now" | "already-admitted";
-  fact: EntryUlid;
-}>;
-type DeliverValue = DeliveryIdentity & Readonly<{ leading: DeliverLeading }>;
 export const materializedConflictSchema = z
   .object({
     kind: z.literal("integration-conflict-materialized"),
@@ -120,7 +112,7 @@ type DeliverOperationRefusal = Exclude<DeliverRefusal, { kind: "document-moved" 
 type DeliveryDecision = DeliverInput<DeliveryFailure>;
 type DeliveryResult =
   | Exclude<ProtocolResult<DeliverOperationRefusal>, AcceptedAdmission>
-  | (AcceptedAdmission & Readonly<{ value: DeliverValue }>);
+  | (Omit<AcceptedAdmission, "facts"> & Readonly<{ value: DeliveryIdentity }>);
 
 type DeliveryStage = Readonly<{
   contractId: ContractId;
@@ -138,7 +130,7 @@ type DeliveryOptions = Readonly<{
 }>;
 type DeliveryHints = Readonly<{
   changeId?: ChangeId | undefined;
-  targetHead?: SnapshotId | null | undefined;
+  targetObservation?: TargetObservation | undefined;
 }>;
 type DeliveryTender = TenderCapture & Readonly<{ ownedHandoff: boolean }>;
 
@@ -159,7 +151,7 @@ async function prepareCapturedDelivery(
   | { kind: "refused"; refusal: MechanicalPreparationRefusal; tenderSnapshot: SnapshotId }
 > {
   const { contractId, coordinates } = stage;
-  let { changeId, targetHead } = hints;
+  let { changeId } = hints;
   const requireBranchesToBeUpToDate = input.requireBranchesToBeUpToDate ?? false;
   const targetless = coordinates.target === undefined;
   const { holdIntegration } = input;
@@ -191,7 +183,7 @@ async function prepareCapturedDelivery(
     { coordinates },
     { ...tender, head: tender.ownedHandoff ? tenderSnapshot : tender.head },
     requireBranchesToBeUpToDate,
-    targetHead,
+    hints.targetObservation,
   );
   if (integration.kind === "refused") return { ...integration, tenderSnapshot };
   changeId ??= await worktreeChangeId(repository, stage, tender);
@@ -268,7 +260,6 @@ type DeliveryInvocationCapture = Readonly<{
 
 type CapturedDeliveryPreparation = Readonly<{
   preparation: DeliveryDecision["preparation"];
-  reuse?: true;
   handoff?: ConflictHandoff;
 }>;
 
@@ -324,7 +315,7 @@ async function prepareCapturedDeliveryAttempt(
   state: ContractState,
   captured: DeliveryInvocationCapture,
   journal: readonly JournalEntry[],
-  targetHead: SnapshotId | null | undefined,
+  targetObservation: TargetObservation | undefined,
 ): Promise<CapturedDeliveryPreparation> {
   const { scope, contractId } = input;
   const { coordinates } = state;
@@ -335,9 +326,8 @@ async function prepareCapturedDeliveryAttempt(
   let changeId: ChangeId | undefined;
   if (!input.overwrite && state.delivery !== null) {
     changeId = await worktreeChangeId(scope, { coordinates }, tender);
-    if (state.delivery.data.integration.changeId === changeId) {
-      return { preparation: { kind: "unavailable" }, reuse: true };
-    }
+    const delivery = matchingDelivery(state, changeId, input.overwrite);
+    if (delivery !== undefined) return { preparation: { kind: "reuse", document: key, delivery } };
   }
   const prepared = await prepareCapturedDelivery(
     scope,
@@ -349,7 +339,7 @@ async function prepareCapturedDeliveryAttempt(
       ...(input.message === undefined ? {} : { message: input.message }),
     },
     tender,
-    { changeId, targetHead },
+    { changeId, targetObservation },
   );
   if (prepared.kind === "prepared") return { preparation: { ...prepared, document: key } };
   const result = refuse(prepared.refusal);
@@ -370,72 +360,29 @@ async function prepareCapturedDeliveryAttempt(
   };
 }
 
-/** Accept a delivery whose current candidate is already admitted, without admitting it again. */
-function reuseDelivery(
-  input: DeliverOperationInput,
-  observation: ContractReadView,
-  state: ContractState,
-): DeliveryResult {
-  const record = contractJournal(observation.journals, input.contractId);
-  const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
-  if (delivery?.kind !== "deliver" || state.delivery === null) {
-    throw new Error("current delivery is missing its journal fact");
-  }
-  input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries }, delivery);
-  const leading: DeliverLeading = { kind: "already-admitted", fact: delivery.entry };
-  const value = compactDelivery(
-    { ...state.delivery.data, integration: state.currentIntegration ?? state.delivery.data.integration },
-    true,
-  );
-  return { kind: "accepted", facts: [], state, journal: record.entries, value: { ...value, leading } };
-}
-
-/** Judge a terminal Contract's target before deciding whether it can reuse its delivery. */
-async function terminalTargetRefusal(
-  scope: GitRepository,
-  observation: ContractReadView,
-  target: ContractTarget | undefined,
-): Promise<TargetContractRefusal | TargetWorkspaceRefusal | undefined> {
-  const refusal = targetContractRefusal(observation.decision, target);
-  if (refusal !== undefined) return refusal;
-  if (target === undefined || typeof target === "string") return undefined;
-  const resolved = await resolveContractTarget(scope, target.contractId, target);
-  return resolved.kind === "refused" ? resolved.refusal : undefined;
-}
-
 type DeliveryAdmission = Readonly<{
   seat: PrivateStatePublicationSeat;
   observation: ContractReadView;
   capture: DeliveryInvocationCapture | undefined;
   prepared: CapturedDeliveryPreparation | undefined;
-  expectedRef: ObservedRef | undefined;
+  expectedRef: TargetObservation | undefined;
   attempt: AttemptContext;
 }>;
-
-/** Reuse an already-admitted candidate for a terminal-or-reusable frozen preparation. */
-async function reusableCapturedDelivery(
-  input: DeliverOperationInput,
-  observation: ContractReadView,
-  prepared: CapturedDeliveryPreparation | undefined,
-): Promise<DeliveryResult | undefined> {
-  const state = contractState(observation.decision, input.contractId);
-  if (state?.terminal !== null) return undefined;
-  const refusal = await terminalTargetRefusal(input.scope, observation, state.coordinates.target);
-  if (refusal !== undefined) return { kind: "refused", refusal };
-  return prepared?.reuse ? reuseDelivery(input, observation, state) : undefined;
-}
 
 async function admitCapturedDelivery(
   input: DeliverOperationInput,
   { seat, observation, capture, prepared, expectedRef, attempt }: DeliveryAdmission,
 ): Promise<DeliveryResult | SpentPreparation> {
   const { scope, contractId } = input;
-  const reusable = await reusableCapturedDelivery(input, observation, prepared);
-  if (reusable !== undefined) return reusable;
   const state = contractState(observation.decision, contractId);
   const preparation = prepared?.preparation ?? { kind: "unavailable" };
   const decision = decideDeliver({
-    input: { contractId, at: timestamp(), preparation },
+    input: {
+      contractId,
+      at: timestamp(),
+      preparation,
+      ...(expectedRef?.kind === "refused" ? { destinationRefusal: expectedRef.refusal } : {}),
+    },
     attempt,
     observation: observation.decision,
   });
@@ -444,7 +391,17 @@ async function admitCapturedDelivery(
       ? spentPreparation
       : { kind: "refused", refusal: decision.refusal };
   }
-  if (preparation.kind !== "prepared") throw new Error("offered delivery is missing its mechanical preparation");
+  if (decision.kind === "reuse") {
+    if (state === null) throw new Error("reused delivery has no observed Contract");
+    const { delivery } = decision;
+    const { entries: journal } = contractJournal(observation.journals, contractId);
+    input.progress?.recordDeliveryReuse({ state, journal }, delivery);
+    const value = compactDelivery(
+      { ...delivery.data, integration: state.currentIntegration ?? delivery.data.integration },
+      true,
+    );
+    return { kind: "accepted", state, journal, value };
+  }
   const handoff = capture?.handoff;
   const admission = await admitDecidedOffer({
     ...input,
@@ -452,7 +409,7 @@ async function admitCapturedDelivery(
     observation,
     attempt,
     offer: decision.offer,
-    assertions: expectedRef?.oid == null ? [] : [{ ref: expectedRef.ref, oid: expectedRef.oid }],
+    assertions: preparationAssertions(expectedRef),
     ...(capture === undefined || handoff === undefined
       ? {}
       : {
@@ -470,20 +427,19 @@ async function admitCapturedDelivery(
   });
   if (admission.kind !== "accepted") return admission;
   const fact = admission.facts.find((entry) => entry.contract === contractId && entry.kind === "deliver");
-  if (fact === undefined) throw new Error("confirmed delivery requires its own receipt");
+  if (fact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");
   const previousContentId = state?.delivery?.data.integration.changeId;
-  const leading: DeliverLeading = { kind: "admitted-now", fact: fact.entry };
   const value = compactDelivery(
-    preparation.data,
+    fact.data,
     false,
-    previousContentId === preparation.data.integration.changeId ? undefined : previousContentId,
+    previousContentId === fact.data.integration.changeId ? undefined : previousContentId,
   );
-  return { ...admission, value: { ...value, leading } };
+  return { kind: "accepted", state: admission.state, journal: admission.journal, value };
 }
 
 type PreparedDelivery = Readonly<{
   expectedHead: ContractHead | null;
-  expectedRef?: ObservedRef;
+  expectedRef?: TargetObservation;
   prepared: CapturedDeliveryPreparation | undefined;
 }>;
 
@@ -560,9 +516,7 @@ async function attemptDelivery(
     : seated;
 }
 
-export async function admitDeliveryOperation(
-  input: DeliverOperationInput,
-): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
+export async function admitDeliveryOperation(input: DeliverOperationInput) {
   const { scope, channel, contractId } = input;
   const incoming = input.materializeConflict ? await acquireTargetPlacementFence(scope, contractId) : undefined;
   try {
@@ -584,11 +538,7 @@ export async function admitDeliveryOperation(
         const before = await observeContractsAt(scope, channel, [contractId]);
         const state = contractState(before.decision, contractId);
         const target = state?.terminal === null ? state.coordinates.target : undefined;
-        const targetHead = target === undefined ? undefined : await observeTargetHead(scope, target);
-        const expectedRef =
-          target === undefined || targetHead === undefined
-            ? undefined
-            : { ref: targetRef(target), oid: targetHead === null ? null : gitObjectIdForSnapshot(targetHead) };
+        const expectedRef = target === undefined ? undefined : await observeTarget(scope, target);
         if (state === null || state.terminal !== null) {
           return {
             kind: "prepared",
@@ -605,7 +555,7 @@ export async function admitDeliveryOperation(
           state,
           capture,
           contractJournal(before.journals, contractId).entries,
-          targetHead,
+          expectedRef,
         );
         return {
           kind: "prepared",
@@ -623,7 +573,7 @@ export async function admitDeliveryOperation(
       return result;
     }
     if (result.kind === "refused" || result.kind === "integration-conflict-materialized") return result;
-    return { kind: "retry", reason: result };
+    return { kind: "retry" as const, reason: result };
   } finally {
     incoming?.close();
   }

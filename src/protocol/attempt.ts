@@ -155,41 +155,32 @@ export async function admitDecidedOffer<Refusal = never>(
     assertions,
     companion?.kind === "companion" ? companion.update : undefined,
   );
-  if (admission.kind === "accepted") {
-    confirmPrivateStatePublication(seat);
-    input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
-    const journal = [...contractJournal(decisionObservation.journals, primaryContract).entries, ...primary.entries];
-    const accepted: AcceptedAdmission = {
-      kind: "accepted",
-      facts: offerEntries(offer),
-      state: foldJournal(primary.contractId, journal, admission.heads[primary.contractId]!),
-      journal,
-    };
-    input.progress?.recordAdmission(accepted);
-    return accepted;
-  }
   if (admission.kind === "publication-failed") {
     return (await publicationPremiseMoved(repository, decisionObservation, offer, assertions))
       ? spentPreparation
       : admission;
   }
-  const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
-  const recovered = await withGitDecodeChannel(recoveryRepository, async (recoveryChannel) =>
-    observeContractsAt(
-      recoveryRepository,
-      recoveryChannel,
-      offer.facts.map((append) => append.contractId),
-    ),
-  );
-  const recoveredKind = classifyUnknownAttempt(recovered.journals, offer);
-  if (recoveredKind === "collision") return { kind: "collision" };
-  if (recoveredKind === "redecide") return spentPreparation;
-  const { state, entries } = contractJournal(recovered.journals, primaryContract);
-  if (state === null) throw new Error(`recovered offer is missing its primary contract: ${primaryContract}`);
+  if (admission.kind === "unknown") {
+    const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
+    const recovered = await withGitDecodeChannel(recoveryRepository, async (recoveryChannel) =>
+      observeContractsAt(
+        recoveryRepository,
+        recoveryChannel,
+        offer.facts.map((append) => append.contractId),
+      ),
+    );
+    const recoveredKind = classifyUnknownAttempt(recovered.journals, offer);
+    if (recoveredKind === "collision") return { kind: "collision" };
+    if (recoveredKind === "redecide") return spentPreparation;
+  }
   confirmPrivateStatePublication(seat);
-  const accepted: AcceptedAdmission = { kind: "accepted", facts: offerEntries(offer), state, journal: entries };
-  input.progress?.recordAdmission(accepted);
-  return accepted;
+  const head = admission.heads[primaryContract]!;
+  const facts = offerEntries(offer);
+  input.progress?.recordPublication(primaryContract, head, facts);
+  const journal = [...contractJournal(decisionObservation.journals, primaryContract).entries, ...primary.entries];
+  const state = foldJournal(primaryContract, journal, head);
+  input.progress?.recordCheckpoint({ state, journal });
+  return { kind: "accepted", facts, state, journal };
 }
 
 /** Classify an unknown atomic-publication outcome using only a captured Git observation. */

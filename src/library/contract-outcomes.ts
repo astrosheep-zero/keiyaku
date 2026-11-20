@@ -11,13 +11,12 @@ import {
   worktreeMissingReasonSchema,
 } from "../protocol/result-reasons.js";
 import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
-import { placementSchema } from "../protocol/completion.js";
+import { placedSchema, placementSchema, placementStopSchema } from "../protocol/completion.js";
+import { deliveryIdentitySchema } from "../protocol/result-leaves.js";
 import { verifyValueSchema, verifyNormalValueSchema } from "../protocol/verify.js";
+import { reviewAdmissionValueSchema } from "../protocol/review.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
-import type { IntentOutcome } from "../protocol/outcome.js";
-import { deliveredValueSchema } from "./delivery.js";
 import { continuationReportSchema, continuationNormalReportSchema } from "./continuation.js";
-import type { InvocationAccumulator } from "./invocation.js";
 import type { Kei } from "./kei.js";
 import {
   handoffOutcomeSchema,
@@ -30,7 +29,6 @@ import {
   previewIssueSchema,
 } from "./outcome.js";
 import { regionOverlapResultSchema } from "./region.js";
-import type { ContractId } from "../core/facts/types.js";
 
 const regionFields = {
   overlaps: z.array(regionOverlapResultSchema).min(1).readonly().exactOptional(),
@@ -48,17 +46,9 @@ const amendFields = {
   afterChanged: z.literal(true).exactOptional(),
   ...regionFields,
 };
-const worktreeChangesSchema = z
-  .strictObject({
-    staged: z.array(z.string()).min(1).readonly().exactOptional(),
-    unstaged: z.array(z.string()).min(1).readonly().exactOptional(),
-    untracked: z.array(z.string()).min(1).readonly().exactOptional(),
-    unmergedPaths: z.array(z.string()).min(1).readonly().exactOptional(),
-  })
-  .readonly();
 const reviewFields = {
+  ...reviewAdmissionValueSchema.unwrap().shape,
   placement: placementSchema.exactOptional(),
-  worktreeChanges: worktreeChangesSchema.exactOptional(),
   continuation: continuationReportSchema.exactOptional(),
 };
 const bindValueSchema = z.strictObject(bindFields).readonly();
@@ -123,6 +113,18 @@ export const amendOutcomeSchema = operationOutcomeSchema(
   localIssueSchema,
 );
 const previewRefusalSchema = z.union([activeReasonSchema, targetLifecycleReasonSchema, declarationReasonSchema]);
+const deliveredValueSchema = deliveryIdentitySchema
+  .unwrap()
+  .extend({
+    placement: z
+      .union([placedSchema.unwrap().omit({ integration: true }).readonly(), placementStopSchema])
+      .exactOptional(),
+    continuation: continuationReportSchema.exactOptional(),
+  })
+  .readonly();
+export const deliverySchema = deliveredValueSchema.nullable();
+export type Delivery = z.output<typeof deliveredValueSchema>;
+
 export const deliverOutcomeSchema = z.union([
   operationOutcomeSchema(
     deliveredValueSchema.unwrap().shape,
@@ -196,14 +198,3 @@ export type AbandonOutcome = z.output<typeof abandonOutcomeSchema>;
 export type DeliveryPreviewOutcome = z.output<typeof deliveryPreviewOutcomeSchema>;
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
-
-type AcceptedIntent<Value> = Extract<IntentOutcome<Value, never>, { kind: "accepted" }>;
-export function retainAdmission<Value>(
-  accumulator: InvocationAccumulator,
-  contract: ContractId,
-  leading: AcceptedIntent<Value>,
-): void {
-  accumulator.recordPublication(contract, leading.head, leading.facts);
-  accumulator.recordResidue(contract, leading);
-  accumulator.recordVerification(contract, undefined, leading);
-}

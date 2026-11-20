@@ -8,9 +8,10 @@ import {
 import { journalEntry, type ContractId, type ContractState } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
-type PlacementInput = Readonly<{
+type PlacementInput<DestinationStop> = Readonly<{
   contractId: ContractId;
   at: string;
+  destinationStop?: DestinationStop;
 }>;
 
 type UnmetPrerequisite = Readonly<{
@@ -49,11 +50,11 @@ export function unmetPrerequisites(
   return unmet;
 }
 
-export function decidePlacement({
+export function decidePlacement<DestinationStop = never>({
   input,
   attempt,
   observation,
-}: DecideInput<PlacementInput>): OfferDecision<PlacementRefusal> {
+}: DecideInput<PlacementInput<DestinationStop>>): OfferDecision<PlacementRefusal | DestinationStop> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
@@ -64,6 +65,7 @@ export function decidePlacement({
   if (!delivery || !integration) {
     return { kind: "refused", refusal: { kind: "delivery-missing" } };
   }
+  if (input.destinationStop !== undefined) return { kind: "refused", refusal: input.destinationStop };
   const unmet = unmetPrerequisites(current.terms.after, observation);
   if (unmet.length > 0) {
     return { kind: "refused", refusal: { kind: "prerequisites-unsatisfied", unmet } };

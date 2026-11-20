@@ -18,10 +18,8 @@ import {
   type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
-import { complete, type IntentOutcome } from "./outcome.js";
 import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
-import { runBoundedAttempts, type ObservedRef } from "./run.js";
-import type { CompanionDecorator } from "./run.js";
+import { runBoundedAttempts, type CompanionDecorator, type ObservedRef, type ProtocolResult } from "./run.js";
 import type { ProtocolProgress } from "./progress.js";
 
 export type { BindRefusal } from "../core/verbs/bind.js";
@@ -106,9 +104,7 @@ async function prepareBind(
   };
 }
 
-export async function bindOperation(
-  input: BindOperationInput,
-): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindOperationRefusal>> {
+export async function bindOperation(input: BindOperationInput): Promise<ProtocolResult<BindOperationRefusal>> {
   const selection =
     input.targetSelection.kind === "explicit"
       ? await selectExplicitTarget(input.scope, input.targetSelection.target)
@@ -178,7 +174,8 @@ export async function bindOperation(
         );
       },
     );
-    return complete(result, { contractId });
+    if (result.kind === "accepted") input.progress?.recordResidue(contractId, result);
+    return result;
   } finally {
     incoming?.close();
   }

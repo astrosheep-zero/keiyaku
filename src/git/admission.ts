@@ -33,8 +33,8 @@ import {
 import { validPath } from "./tree.js";
 import { targetRef } from "./target.js";
 
-type Accepted = Readonly<{
-  kind: "accepted";
+type Publication = Readonly<{
+  kind: "accepted" | "unknown";
   heads: Readonly<Record<string, ContractHead>>;
 }>;
 
@@ -43,9 +43,7 @@ export const publicationFailedSchema = z
   .strict()
   .readonly();
 export type PublicationFailed = z.infer<typeof publicationFailedSchema>;
-type Unknown = Readonly<{ kind: "unknown" }>;
-
-export type Admission = Accepted | PublicationFailed | Unknown;
+export type Admission = Publication | PublicationFailed;
 
 const CONTRACT_JOURNAL_PATH = /^contracts\/(?:active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
 
@@ -201,13 +199,9 @@ export async function admit(
     owner,
     refCompanion,
   );
-  if (publication.kind === "published") {
-    return {
-      kind: "accepted",
-      heads: attempt.heads,
-    };
+  if (publication.kind !== "non-published") {
+    return { kind: publication.kind === "published" ? "accepted" : "unknown", heads: attempt.heads };
   }
-  if (publication.kind === "unknown") return { kind: "unknown" };
   return {
     kind: "publication-failed",
     diagnostic: publication.error instanceof Error ? publication.error.message : String(publication.error),

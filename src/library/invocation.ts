@@ -11,12 +11,10 @@ import {
   type ExecutionObservation,
   type ExecutionObserver,
 } from "../protocol/execution-observation.js";
-import type { AcceptedProtocolStep } from "../protocol/outcome.js";
 import {
   publicationKey,
   type ContractCheckpoint,
   type ExecutionStop,
-  type ProgressResidue,
   type ProtocolProgress,
   type VerificationResidue,
 } from "../protocol/progress.js";
@@ -30,8 +28,6 @@ type AdmissionWitness = Readonly<{ bytes: string; reused: boolean }>;
 export type InvocationSnapshot = Readonly<{
   facts: readonly JournalEntry[];
   reused?: string;
-  checkpoints: ReadonlyMap<ContractId, ContractCheckpoint>;
-  heads: ReadonlyMap<ContractId, ContractHead>;
   affected: readonly ContractId[];
   effects: readonly InvocationEffect[];
   placements: ReadonlyMap<ContractId, Placement>;
@@ -104,14 +100,16 @@ export class InvocationAccumulator implements ProtocolProgress {
     return fresh;
   }
 
-  recordAdmission(step: AcceptedProtocolStep, reused?: NonNullable<ContractState["delivery"]>): void {
-    if (step.state.head === null) throw new Error("admission requires a journal head");
-    this.recordPublication(step.state.id, step.state.head, step.facts);
-    if (reused !== undefined) this.recordWitnesses(step.state.id, [reused], true);
-    if (this.admittedHeads.get(step.state.id) === step.state.head) {
-      this.admittedCheckpoints.set(step.state.id, { state: step.state, journal: step.journal });
-    }
-    this.recordResidue(step.state.id, step);
+  recordCheckpoint({ state, journal }: ContractCheckpoint): void {
+    if (this.admittedHeads.get(state.id) === state.head) this.admittedCheckpoints.set(state.id, { state, journal });
+  }
+
+  recordDeliveryReuse(checkpoint: ContractCheckpoint, delivery: NonNullable<ContractState["delivery"]>): void {
+    const { id, head } = checkpoint.state;
+    if (head === null) throw new Error("reused delivery requires its witnessed journal head");
+    this.recordWitnesses(id, [delivery], true);
+    if (!this.admittedHeads.has(id)) this.admittedHeads.set(id, head);
+    this.recordCheckpoint(checkpoint);
   }
 
   hasFact(fact: JournalEntry): boolean {
@@ -127,8 +125,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     return this.admittedCheckpoints.get(contract);
   }
 
-  recordResidue(contract: ContractId, residue: ProgressResidue): void {
-    if (residue.physical !== undefined) this.recordReconciliation(contract, residue.physical);
+  recordResidue(contract: ContractId, residue: Parameters<ProtocolProgress["recordResidue"]>[1]): void {
     for (const failure of residue.seatClose ?? []) this.recordSeatClose(contract, failure);
   }
 
@@ -169,10 +166,6 @@ export class InvocationAccumulator implements ProtocolProgress {
 
   /** Physical residue a continuation's dependent reconciliation observed. */
   recordPhysical(contract: ContractId, physical: ReconcileResult): void {
-    this.recordReconciliation(contract, physical);
-  }
-
-  recordPlacementPhysical(contract: ContractId, physical: ReconcileResult): void {
     this.recordReconciliation(contract, physical);
   }
 
@@ -229,8 +222,6 @@ export class InvocationAccumulator implements ProtocolProgress {
         );
       },
       ...(reused === undefined ? {} : { reused }),
-      checkpoints: new Map(this.admittedCheckpoints),
-      heads: new Map(this.admittedHeads),
       affected: Object.freeze([...this.affectedContracts]),
       effects: Object.freeze([...this.records]),
       placements: new Map(this.placements),

@@ -30,7 +30,6 @@ export const capabilityPolicy = {
         { source: "library/contract-wait.ts", symbols: ["z"] },
         { source: "library/contract-types.ts", symbols: ["z"] },
         { source: "library/contract-outcomes.ts", symbols: ["z"] },
-        { source: "library/delivery.ts", symbols: ["z"] },
         { source: "library/kei.ts", symbols: ["z"] },
         { source: "protocol/execution-observation.ts" },
         { source: "contract-worktree.ts", symbols: ["z"] },

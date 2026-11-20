@@ -10,7 +10,6 @@ import { decideAttestation, type AttestationInput } from "../core/verbs/attestat
 import { admitIntent } from "./intent.js";
 import { mintAttempts, type AcceptedAdmission } from "./attempt.js";
 import { runBoundedAttempts, spentPreparation } from "./run.js";
-import type { LeadingOutcome } from "./outcome.js";
 import { readPlaceRegister } from "../workspace-place.js";
 import { timestamp, type MutationOperationInput } from "./operations.js";
 
@@ -108,9 +107,7 @@ async function prepareReviewAttempt(
   };
 }
 
-export async function admitReviewOperation(
-  input: ReviewOperationInput,
-): Promise<LeadingOutcome<ReviewAdmissionValue, ReviewRefusal>> {
+export async function admitReviewOperation(input: ReviewOperationInput) {
   const { scope, channel, contractId, progress } = input;
   const initial = await observeContractsAt(scope, channel, [contractId]);
   const initialState = contractState(initial.decision, contractId);
@@ -167,5 +164,5 @@ export async function admitReviewOperation(
     return result;
   }
   if (result.kind === "refused") return result;
-  return { kind: "retry", reason: result };
+  return { kind: "retry" as const, reason: result };
 }

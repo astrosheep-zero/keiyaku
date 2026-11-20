@@ -1,12 +1,10 @@
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { AuthorityCorruptionError, KeiyakuError, Keis, Repo } from "../src/index.js";
 import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
-import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
@@ -28,7 +26,6 @@ import {
   observeContractsAt,
 } from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { executeGit } from "../src/git/process.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { decideAbandon } from "../src/core/verbs/abandon.js";
@@ -44,11 +41,6 @@ import {
   type ContractTerms,
 } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
-import { decideDeliver } from "../src/core/verbs/deliver.js";
-import { admitIntent } from "../src/protocol/intent.js";
-import { mintAttempt } from "../src/protocol/attempt.js";
-import { admitPlacement } from "../src/protocol/placement.js";
-import { appointManagedWorktrees, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   cachedRepoAt,
   cachedRepositoryAt,
@@ -64,7 +56,6 @@ import {
 const repositoryAt = cachedRepositoryAt;
 
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
-const DELIVERY_DOCUMENT = "# Contract\n";
 
 let untitledBind = 0;
 
@@ -119,18 +110,6 @@ function repositoryWithHead(): TestGitRepository {
     repositoryWithHeadTemplate.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   }
   return snapshotGitRepository(repositoryWithHeadTemplate);
-}
-
-async function preparationCoordinates(
-  repository: Awaited<ReturnType<typeof repositoryAt>>,
-  state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>,
-) {
-  await appointManagedWorktrees(repository, [state.id]);
-  const appointment = await readManagedWorktreeAppointment(repository, state.id);
-  if (appointment.kind !== "appointed") throw new Error(`managed worktree appointment missing for ${state.id}`);
-  if (!existsSync(appointment.path))
-    await executeGit(repository, ["worktree", "add", "--detach", appointment.path, "HEAD"]);
-  return { contractId: state.id, coordinates: state.coordinates };
 }
 
 function contractBody(): string {
@@ -646,7 +625,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
     const id = protocolContractId("Moving target");
     assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
-    assert.equal(bound.value.contractId, id);
+    assert.equal(bound.state.id, id);
     assert.equal((await observeContract(git, id)).state?.coordinates.start, moved);
     const repeated = await bindOperation({ scope: git, contractId: id, terms: terms([]),
       targetSelection: { kind: "explicit", target: "refs/heads/release" } });
@@ -663,7 +642,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
     });
     assert.ok(first.kind === "accepted", 'expected first.kind = "accepted"');
-    assert.equal(first.value.contractId, id);
+    assert.equal(first.state.id, id);
 
     const collision = await bindOperation({
       scope: git,
@@ -766,11 +745,11 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
     });
     assert.ok(existing.kind === "accepted", 'expected existing.kind = "accepted"');
-    const existingState = (await observeContract(git, existing.value.contractId)).state;
+    const existingState = (await observeContract(git, existing.state.id)).state;
     if (existingState === null) throw new Error("existing contract state was not observed");
     const amended = await amendOperation({
       scope: git,
-      contractId: existing.value.contractId,
+      contractId: existing.state.id,
       source: existingState.terms,
       terms: terms([missing]),
     });
@@ -789,52 +768,18 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.ok(activeDependency.kind === "accepted", 'expected activeDependency.kind = "accepted"');
     const waiting = await bindOperation({
       scope: await repositoryAt(repository.path),
-      terms: terms([activeDependency.value.contractId]),
+      terms: terms([activeDependency.state.id]),
     });
     assert.ok(waiting.kind === "accepted", 'expected waiting.kind = "accepted"');
 
-    const claimedDependency = await bindOperation({
-      scope: await repositoryAt(repository.path),
-      terms: terms([]),
-    });
-    assert.ok(claimedDependency.kind === "accepted", 'expected claimedDependency.kind = "accepted"');
     const git = await repositoryAt(repository.path);
-    const state = (
-      await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractJournals))
-    ).get(claimedDependency.value.contractId)?.state;
-    if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
-    const delivery = await prepareDelivery(git, await preparationCoordinates(git, state), {
-      title: "Targeted",
-      document: DELIVERY_DOCUMENT,
-    });
-    assert.ok(delivery.kind === "prepared", 'expected delivery.kind = "prepared"');
-    const delivered = await withGitDecodeChannel(git, (channel) =>
-      admitIntent(
-        channel,
-        git,
-        {
-          contractId: claimedDependency.value.contractId,
-          at: "2026-08-06T00:00:00Z",
-          preparation: { kind: "prepared", document: state.terms.document.key, data: delivery.data },
-        },
-        decideDeliver<never>,
-        { attempt: mintAttempt() },
-      ),
-    );
-    assert.equal(delivered.kind, "accepted");
-    const claimed = await withGitDecodeChannel(git, (channel) =>
-      admitPlacement({
-        channel,
-        repository: git,
-        target: state.coordinates.target,
-        placement: { contractId: claimedDependency.value.contractId, at: "2026-08-06T00:00:01Z" },
-      }),
-    );
-    assert.equal(claimed.kind, "accepted");
+    const keis = Keis.of(await Repo.at({ path: repository.path }));
+    const { kei } = accepted(await keis.bind({ terms: contractBody(), target: null, gates: [] }));
+    assert.equal(accepted(await kei.deliver()).placement?.kind, "placed");
 
     const immediatelyBound = await bindOperation({
       scope: git,
-      terms: terms([claimedDependency.value.contractId]),
+      terms: terms([kei.id]),
     });
     assert.ok(immediatelyBound.kind === "accepted", 'expected immediatelyBound.kind = "accepted"');
     assert.deepEqual(
@@ -842,14 +787,14 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       ["bind"],
     );
 
-    const waitingState = (await observeContract(git, waiting.value.contractId)).state;
+    const waitingState = (await observeContract(git, waiting.state.id)).state;
     if (waitingState === null) throw new Error("waiting contract state was not observed");
 
     const amended = await amendOperation({
       scope: git,
-      contractId: waiting.value.contractId,
+      contractId: waiting.state.id,
       source: waitingState.terms,
-      terms: terms([claimedDependency.value.contractId]),
+      terms: terms([kei.id]),
     });
     assert.ok(amended.kind === "accepted", 'expected amended.kind = "accepted"');
     assert.deepEqual(

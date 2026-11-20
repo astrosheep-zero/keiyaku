@@ -73,7 +73,7 @@ async function bind(
     }),
   );
   assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
-  return result.value.contractId;
+  return result.state.id;
 }
 
 test("git repository resolution rejects omitted and empty coordinates", async () => {

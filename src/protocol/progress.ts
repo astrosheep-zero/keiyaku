@@ -6,7 +6,6 @@ import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-l
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import { GitPrivateStateSeatContentionError, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
-import type { AcceptedProtocolStep } from "./outcome.js";
 import type { ExecutionObservation } from "./execution-observation.js";
 import type { VerificationCheck } from "./verify.js";
 import type { Placed, Placement } from "./completion.js";
@@ -76,12 +75,6 @@ export function executionStop(contractId: ContractId, error: unknown, signal?: A
   return { contractId, ...executionIssue(error, signal) };
 }
 
-/** Physical residue and custodial residue a leading admission or reconciliation step reports. */
-export type ProgressResidue = Readonly<{
-  physical?: ReconcileResult;
-  seatClose?: readonly PrivateStateSeatCloseLag[];
-}>;
-
 export type VerificationResidue = Readonly<{ cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
 
 /**
@@ -91,11 +84,10 @@ export type VerificationResidue = Readonly<{ cleanup?: VerificationCleanupFailur
 export interface ProtocolProgress {
   observe(event: ExecutionObservation): void;
   recordPublication(contractId: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void;
-  recordAdmission(step: AcceptedProtocolStep, reused?: NonNullable<ContractState["delivery"]>): void;
-  recordResidue(contractId: ContractId, residue: ProgressResidue): void;
+  recordCheckpoint(checkpoint: ContractCheckpoint): void;
+  recordDeliveryReuse(checkpoint: ContractCheckpoint, delivery: NonNullable<ContractState["delivery"]>): void;
+  recordResidue(contractId: ContractId, residue: Readonly<{ seatClose?: readonly PrivateStateSeatCloseLag[] }>): void;
   recordPhysical(contractId: ContractId, report: ReconcileResult): void;
-  /** Physical follow owned by this invocation's target movement, distinct from retained topology. */
-  recordPlacementPhysical(contractId: ContractId, report: ReconcileResult): void;
   recordVerification(
     contractId: ContractId,
     snapshot: SnapshotId | undefined,

@@ -11,7 +11,7 @@ import {
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { invocationIssues, project } from "../src/library/outcome.js";
-import type { AcceptedProtocolStep } from "../src/protocol/outcome.js";
+import type { AcceptedAdmission } from "../src/protocol/attempt.js";
 import { contractCheckpoint, executionStop, type ContractCheckpoint } from "../src/protocol/progress.js";
 
 function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
@@ -34,7 +34,7 @@ function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
   return { state, journal: [] };
 }
 
-function admission(before: ContractCheckpoint, sequence: number): AcceptedProtocolStep {
+function admission(before: ContractCheckpoint, sequence: number): AcceptedAdmission {
   const name = String(sequence).padStart(2, "0");
   const fact: JournalEntry = {
     v: 1,
@@ -52,13 +52,17 @@ function admission(before: ContractCheckpoint, sequence: number): AcceptedProtoc
   };
 }
 
+function record(progress: InvocationAccumulator, step: AcceptedAdmission) {
+  progress.recordPublication(step.state.id, step.state.head!, step.facts);
+  progress.recordCheckpoint(step);
+}
+
 test("an observed checkpoint cannot manufacture an invocation receipt", () => {
   const progress = new InvocationAccumulator();
   const captured = contractCheckpoint(admission(checkpoint(), 1));
-  assert.deepEqual(Object.keys(captured).sort(), ["journal", "state"]);
+  progress.recordCheckpoint(captured);
   assert.deepEqual(progress.snapshot().facts, []);
-  assert.equal(progress.head(captured.state.id), undefined);
-  assert.equal(progress.snapshot().checkpoints.size, 0);
+  assert.equal(progress.checkpoint(captured.state.id), undefined);
   const original = new DOMException("stopped", "AbortError");
   const projected = project("arc", progress.snapshot(), {
     kind: "failed",
@@ -70,37 +74,31 @@ test("an observed checkpoint cannot manufacture an invocation receipt", () => {
 });
 
 test("physical and seat-close reports accumulate without replay duplication or input mutation", () => {
-  const leading: AcceptedProtocolStep = {
-    ...admission(checkpoint(), 1),
-    physical: { effects: [], lag: [{ kind: "worktree-retained", path: "/leading" }] },
-    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "first" }],
-  };
-  const next: AcceptedProtocolStep = {
-    ...admission(leading, 2),
-    physical: { effects: [], lag: [{ kind: "worktree-retained", path: "/next" }] },
-    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "second" }],
-  };
+  const residues = [["/leading", "first"], ["/next", "second"]].map(([path, diagnostic]) => ({
+    physical: { effects: [], lag: [{ kind: "worktree-retained", path: path! }] },
+    seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: diagnostic! }],
+  }) as const);
+  const id = checkpoint().state.id;
   const progress = new InvocationAccumulator();
-  progress.recordAdmission(leading);
-  progress.recordAdmission(next);
-  progress.recordAdmission(next);
-  const issues = invocationIssues(progress.snapshot().effects, leading.state.id);
+  for (const step of [...residues, residues[1]!]) {
+    progress.recordPhysical(id, step.physical);
+    progress.recordResidue(id, step);
+  }
+  const issues = invocationIssues(progress.snapshot().effects, id);
   const lags = issues.filter((issue) => issue.kind === "worktree-retained");
-  assert.deepEqual(lags, [...leading.physical!.lag, ...next.physical!.lag].map((lag) => ({ ...lag, severity: "optional" })));
+  assert.deepEqual(lags, residues.flatMap(({physical}) => physical.lag.map((lag) => ({ ...lag, severity: "optional" }))));
   assert.deepEqual(
     issues.filter((issue) => issue.kind === "diagnostic").map((issue) => issue.diagnostic),
     ["first", "second"],
   );
-  assert.equal(leading.physical!.lag.length, 1);
+  assert.equal(residues[0]!.physical.lag.length, 1);
 });
 
 test("receipt replay cannot rewind a newer admitted checkpoint", () => {
   const leading = admission(checkpoint(), 1),
     next = admission(leading, 2);
   const progress = new InvocationAccumulator();
-  progress.recordAdmission(leading);
-  progress.recordAdmission(next);
-  progress.recordAdmission(leading);
+  for (const step of [leading, next, leading]) record(progress, step);
   assert.equal(progress.head(leading.state.id), next.state.head);
   assert.deepEqual(progress.checkpoint(leading.state.id), contractCheckpoint(next));
 });
@@ -110,7 +108,7 @@ test("conflicting identities reject an entire receipt before mutating progress",
     next = admission(leading, 2);
   const conflict: JournalEntry = { ...leading.facts[0]!, at: "2026-08-06T00:00:01.000Z" };
   const progress = new InvocationAccumulator();
-  progress.recordAdmission(leading);
+  record(progress, leading);
   assert.throws(
     () => progress.recordPublication(leading.state.id, next.state.head!, [...next.facts, conflict]),
     AuthorityCorruptionError,
