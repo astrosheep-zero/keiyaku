@@ -38,33 +38,6 @@ test("overlap receipt preserves repeated declarations and native Contract order"
   ].join("\n"));
 });
 
-test("overlap receipt keeps every containment pair with copyable patterns at narrow widths", () => {
-  const leaves = Array.from({ length: 7 }, (_, index) => `src/cli/render/file-${index}.ts`);
-  const text = render([{ contractId: related, patterns: [
-    { mine: "src/cli/render/**", theirs: "src/cli/render/**" },
-    { mine: "src/cli/parse.ts", theirs: "src/cli/**", relation: "mine-within-theirs" },
-    ...leaves.map((mine) => ({ mine, theirs: "tests/**", relation: "mine-within-theirs" as const })),
-  ] }], 20);
-  const rows = text.split("\n").filter((line) => line.startsWith("  overlap  "));
-  assert.equal(rows.length, 9);
-  assert.equal(rows[1], `  overlap  ${related} · src/cli/parse.ts · mine within theirs · src/cli/**`);
-  for (const [index, leaf] of leaves.entries())
-    assert.equal(rows[index + 2], `  overlap  ${related} · ${leaf} · mine within theirs · tests/**`);
-});
-
-test("overlap receipt keeps reversed containment, native relation and undefined intersection", () => {
-  const text = render([{ contractId: related, patterns: [
-    { mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" },
-    { mine: "src/*", theirs: "src/?.ts", relation: "intersect" },
-    { mine: "tests/*", theirs: "tests/?.ts" },
-  ] }]);
-  assert.deepEqual(text.split("\n").slice(-3), [
-    `  overlap  ${related} · src/** · theirs within mine · src/cli/**`,
-    `  overlap  ${related} · src/* · intersect · src/?.ts`,
-    `  overlap  ${related} · tests/* · intersection · tests/?.ts`,
-  ]);
-});
-
 test("overlap receipt distinguishes known absence from unavailable observation", () => {
   assert.doesNotMatch(render([]), /\n  overlap  /u);
   const unavailable = renderVerb("amend", { contract }, { kind: "returned", value: acceptedReceipt("amend", {

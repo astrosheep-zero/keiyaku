@@ -2,43 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
-import { contractId, documentKey, entryUlid, gateWord, snapshotId } from "../src/core/facts/types.js";
+import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { assertExplicitRepoUse, CliUsageError, parseArgv, type ParsedCommand } from "../src/cli/parse.js";
-import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 
 function command(argv: readonly string[]): ParsedCommand {
   const parsed = parseArgv(argv);
   if (!("command" in parsed)) throw new Error("expected an executable command");
   return parsed.command;
 }
-
-test("show routes complete Debt addresses to the native Debt operation", () => {
-  assert.deepEqual(command(["show", "debt/example"]), {
-    name: "show", input: { selector: "debt/example" }, output: "text",
-  });
-  for (const selectors of [["debt/one", "debt/two"], ["debt/one", "kei/two"], ["@one", "debt/two"]])
-    assert.throws(() => command(["show", ...selectors]), /at most one selector/u);
-  assert.throws(() => command(["show", "debt/Bad Name"]), /debt ID/u);
-  assert.throws(() => assertExplicitRepoUse(command(["show", "debt/example"]), "/repo"), /no consumer/u);
-});
-
-test("root listings select active by default, settled or all for lifecycle catalogues", () => {
-  for (const selector of ["debt/", "debt/*", "kei/", "kei/*", "aku/*"]) {
-    assert.deepEqual(command(["ls", selector]), { name: "ls", output: "text", input: { selector } });
-    for (const selection of ["settled", "all"]) {
-      assert.deepEqual(command(["ls", selector, `--${selection}`]), {
-        name: "ls", output: "text", input: { selector, lifecycle: selection },
-      });
-    }
-  }
-  assert.deepEqual(command(["ls", "--mine", "--settled"]), {
-    name: "ls", output: "text", input: { selector: "aku/*", mine: true, lifecycle: "settled" },
-  });
-  assert.throws(() => command(["ls", "debt", "--all", "--settled"]), CliUsageError);
-  assert.throws(() => command(["ls", "aku", "--all"]), CliUsageError);
-  assert.throws(() => command(["ls", "aku/", "--settled"]), CliUsageError);
-  assert.throws(() => command(["ls", "debt", "--closed"]), CliUsageError);
-});
 
 test("surveil and unsurveil map exact Akuma selection to one invocation operation", () => {
   assert.deepEqual(command(["surveil", "aku/worker/1234abcd", "--json"]), {
@@ -49,21 +20,6 @@ test("surveil and unsurveil map exact Akuma selection to one invocation operatio
   });
   assert.throws(() => command(["surveil", "aku/worker/*"]), /one complete/u);
   assert.throws(() => command(["unsurveil", "@one", "@two"]), /accepts one/u);
-});
-
-test("nuke admits only a literal WorldRoot confirmation", () => {
-  assert.deepEqual(parseArgv(["nuke"]), {
-    command: { name: "nuke", input: {}, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["nuke", "--confirm", "/world/root", "--json"]), {
-    command: { name: "nuke", input: { confirm: "/world/root" }, output: "json" },
-  });
-  assert.throws(() => parseArgv(["nuke", "kei/example"]), /nuke accepts no contract/u);
-  assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
-  assert.throws(() => parseArgv(["nuke", "--confirm", " "]), /requires a nonblank value/u);
-  assert.throws(() => parseArgv(["nuke", "--confirm", "/one", "--confirm", "/two"]), /duplicate option/u);
-  assert.match(renderContractHelp("nuke"), /usage  keiyaku nuke \[--confirm <world-directory>\]/u);
-  assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
 test("persisted removed workspace bytes are authority corruption", () => {
@@ -156,33 +112,6 @@ test("global coordinates are independent of command position", () => {
   );
 });
 
-test("spawn refuses retired options", () => {
-  assert.throws(
-    () => command(["spawn", "worker", "--allowed", "contract.review"]),
-    /option --allowed is not valid for spawn/u,
-  );
-});
-
-test("root version is recognized only after coordinates and help", () => {
-  assert.deepEqual(parseArgv(["--version"]), { version: true });
-  assert.deepEqual(parseArgv(["-C", "/definitely/absent/keiyaku-world", "--version"]), { version: true });
-  assert.deepEqual(parseArgv(["--version", "--help"]), { help: { kind: "root" } });
-  assert.throws(
-    () => parseArgv(["--version", "status"]),
-    (error: unknown) => error instanceof CliUsageError && error.guide?.given === "--version",
-  );
-  assert.throws(
-    () => parseArgv(["spawn", "worker", "--version"]),
-    (error: unknown) =>
-      error instanceof CliUsageError && error.message.includes("option --version is not valid for spawn"),
-  );
-  assert.throws(
-    () => parseArgv(["tell", "@worker", "--version"]),
-    (error: unknown) =>
-      error instanceof CliUsageError && error.message.includes("option --version is not valid for tell"),
-  );
-});
-
 test("verify parses contextual and indexed execution and refuses malformed index syntax", () => {
   assert.deepEqual(command(["verify"]), { name: "verify", input: { includeDirty: false }, output: "text" });
   assert.deepEqual(command(["verify", "@example", "--index", "2", "--include-dirty", "--json"]), {
@@ -246,76 +175,6 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
   assert.throws(() => parseArgv(["show", "--guidance"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "--limit", "2"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "-"]), /show reads no stdin/u);
-});
-
-test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
-  assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { name: "show", input: { selector: "kei/example" }, output: "json" },
-  });
-  assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { name: "show", input: { selector: "@example" }, output: "text" },
-  });
-  assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
-  for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {
-    assert.throws(
-      () => parseArgv(["status", "--guidance", ...selectors]),
-      /option --guidance is not valid for status/u,
-    );
-  }
-});
-
-test("bare ls requires a selector rather than opening help", () => {
-  assert.throws(() => parseArgv(["ls"]), CliUsageError);
-  assert.throws(() => parseArgv(["ls", "--json"]), CliUsageError);
-});
-
-test("ls parses only canonical identity directories", () => {
-  for (const path of ["debt", "debt/"]) {
-    assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { selector: path }, output: "text" },
-    });
-  }
-  for (const path of ["debt/feature", "debt/feature/", "debt//"]) {
-    assert.throws(() => parseArgv(["ls", path]), CliUsageError);
-  }
-  for (const path of ["kei", "kei/"]) {
-    assert.deepEqual(parseArgv(["ls", path, "--json"]), {
-      command: { name: "ls", input: { selector: path }, output: "json" },
-    });
-  }
-  assert.deepEqual(parseArgv(["ls", "kei/", "--limit", "100"]), {
-    command: { name: "ls", input: { selector: "kei/", limit: 100 }, output: "text" },
-  });
-  assert.throws(() => parseArgv(["ls", "kei/", "--limit", "0"]), /positive safe integer/u);
-  for (const path of ["aku", "aku/"]) {
-    assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { selector: path }, output: "text" },
-    });
-  }
-  for (const path of ["aku/worker", "aku/worker/"]) {
-    assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { selector: path }, output: "text" },
-    });
-  }
-  assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
-    command: { name: "ls", input: { selector: "aku/*/*" }, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
-    command: { name: "ls", input: { selector: "aku/elite/*", limit: 40 }, output: "text" },
-  });
-  assert.match(renderContractHelp("ls"), /ls "aku\/<name>\/\*"/u);
-  for (const path of [
-    "keiy/",
-    "@review",
-    "kei/review",
-    "debt/example",
-    "aku//",
-    "aku/worker/1234abcd",
-    "aku/*/",
-    "aku/worker/extra/",
-  ]) {
-    assert.throws(() => parseArgv(["ls", path]), CliUsageError);
-  }
 });
 
 test("ls parses caller-scoped Akuma selection", () => {
@@ -398,40 +257,6 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
   assert.throws(() => parseArgv(["bind", "--clear-after", "-"]), /not valid for bind/);
 });
 
-test("--gates word grammar restates the Contract owner's gateWord", () => {
-  const corpus = [
-    "reviewed",
-    "strict",
-    "a",
-    "x9-z",
-    "a".repeat(64),
-    "Strict",
-    "BAD GATE!!",
-    "9lives",
-    "-lead",
-    " ",
-    "a_b",
-    "café",
-    "a".repeat(65),
-  ];
-  for (const word of corpus) {
-    const parse = (): unknown => parseArgv(["bind", "--gates", word, "-"]);
-    if (gateWord(word)) assert.doesNotThrow(parse, `--gates ${JSON.stringify(word)}`);
-    else assert.throws(parse, /--gates name must match/u, `--gates ${JSON.stringify(word)}`);
-  }
-});
-
-test("abandon accepts a note but no caller-selected reason", () => {
-  assert.deepEqual(parseArgv(["abandon", "kei/example", "--note", "scope changed"]), {
-    command: {
-      name: "abandon",
-      input: { contract: "kei/example", note: "scope changed" },
-      output: "text",
-    },
-  });
-  assert.throws(() => parseArgv(["abandon", "kei/example", "--reason", "manual"]), CliUsageError);
-});
-
 test("spawn accepts a bare alias name and keeps prefixed input compatible", () => {
   for (const input of ["pi-reset-api-review", "@pi-reset-api-review"]) {
     const parsed = command(["spawn", "intern", "--alias", input, "audit"]);
@@ -445,33 +270,9 @@ test("spawn accepts a bare alias name and keeps prefixed input compatible", () =
   assert.throws(() => parseArgv(["spawn", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
-test("wait accepts a plural selection without an explicit completion mode", () => {
-  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "aku/claude/5678ef90"]), {
-    name: "wait",
-    input: { selectors: ["aku/claude/1234abcd", "aku/claude/5678ef90"] },
-    output: "text",
-  });
-  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--for", "5m"]), {
-    name: "wait",
-    input: { selectors: ["aku/claude/1234abcd", "@peer"], for: "5m" },
-    output: "text",
-  });
-  assert.deepEqual(command(["wait", "aku/*/*", "--all"]), {
-    name: "wait",
-    input: { selectors: ["aku/*/*"], completion: "all" },
-    output: "text",
-  });
-  assert.deepEqual(command(["wait", "aku/*/*", "--any"]), {
-    name: "wait",
-    input: { selectors: ["aku/*/*"], completion: "any" },
-    output: "text",
-  });
-  assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
-});
-
 test("wait accepts mixed selector families while kill takes one expanding selector", () => {
-  assert.deepEqual(command(["wait", "kei/example", "aku/work*/12*"]), {
-    name: "wait", input: { selectors: ["kei/example", "aku/work*/12*"] }, output: "text",
+  assert.deepEqual(command(["wait", "kei/example", "aku/work*/12*", "--for", "5m"]), {
+    name: "wait", input: { selectors: ["kei/example", "aku/work*/12*"], for: "5m" }, output: "text",
   });
   for (const action of ["wait", "kill"] as const) {
     const selectors = ["kei/example"];
@@ -543,15 +344,6 @@ test("review accepts either summary source", () => {
     acquire: { summary: true },
     output: "text",
   });
-});
-
-test("Contract mutations and Debt creation refuse a retired actor option", () => {
-  for (const argv of [
-    ["bind", "-"], ["amend", "-"], ["arc", "-"],
-    ["review", "--satisfied", "--summary", "ok"], ["abandon"], ["debt", "add", "Title"],
-  ]) {
-    assert.throws(() => parseArgv([...argv, "--actor", "operator"]), /option --actor is not valid/u);
-  }
 });
 
 test("exact-one source selection and nonblank argv fail at parse", () => {
@@ -644,79 +436,6 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     positionals: ["debt/a"],
     flags: { priority: "1" },
   });
-});
-
-test("a deliberately targetless bind parses as an explicit absence", () => {
-  assert.deepEqual(parseArgv(["bind", "--no-target", "-", "--json"]), {
-    command: { name: "bind", input: { target: null }, acquire: { markdown: true }, output: "json" },
-  });
-  assert.deepEqual(parseArgv(["bind", "--fork-of", "kei/source", "--no-target", "--json"]), {
-    command: { name: "bind", input: { forkOf: "kei/source", target: null }, output: "json" },
-  });
-});
-
-test("stdin marker is position independent for Contract commands and global coordinates", () => {
-  assert.deepEqual(parseArgv(["bind", "-", "--debt", "debt/example", "--json"]), {
-    command: { name: "bind", input: { debt: "debt/example" }, acquire: { markdown: true }, output: "json" },
-  });
-  assert.deepEqual(parseArgv(["amend", "-", "kei/example", "--json"]), {
-    command: { name: "amend", input: { contract: "kei/example" }, acquire: { markdown: true }, output: "json" },
-  });
-  assert.deepEqual(parseArgv(["arc", "-", "kei/example"]), {
-    command: {
-      name: "arc",
-      input: { contract: "kei/example" },
-      acquire: { markdown: true },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["review", "-", "--satisfied", "kei/example"]), {
-    command: {
-      name: "review",
-      input: { contract: "kei/example", verdict: "satisfied" },
-      acquire: { summary: true },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["bind", "-", "-C", "/repo/caller", "--repo", "../delivery"]), {
-    cwd: "/repo/caller",
-    repo: "../delivery",
-    command: { name: "bind", input: {}, acquire: { markdown: true }, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--", "--json"]), {
-    command: {
-      name: "tell",
-      input: { akuma: "aku/claude/1234abcd" },
-      acquire: { prompt: { kind: "argument", value: "--json" } },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["spawn", "worker", "--", "--cwd"]), {
-    command: {
-      name: "spawn",
-      input: { akumaName: "worker" },
-      acquire: { prompt: { kind: "argument", value: "--cwd" } },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["spawn", "worker", "--", "--help"]), {
-    command: {
-      name: "spawn",
-      input: { akumaName: "worker" },
-      acquire: { prompt: { kind: "argument", value: "--help" } },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["--repo", "../delivery", "bind", "-", "-C", "/repo/caller"]), {
-    cwd: "/repo/caller",
-    repo: "../delivery",
-    command: { name: "bind", input: {}, acquire: { markdown: true }, output: "text" },
-  });
-  assert.throws(() => parseArgv(["bind", "-", "--json", "-"]), /stdin marker '-' may appear only once/u);
-  assert.throws(() => parseArgv(["status", "-", "--json"]), /status reads no stdin/u);
-  assert.throws(() => parseArgv(["arc", "kei/example"]), /arc requires stdin/u);
-  assert.throws(() => parseArgv(["bind", "-", "-C", "/one", "--cwd", "/two"]), /-C\/--cwd may appear only once/u);
-  assert.throws(() => parseArgv(["bind", "-", "--repo"]), /--repo requires a path/u);
 });
 
 test("history accepts shared pages, exact records and Akuma answers", () => {

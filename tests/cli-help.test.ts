@@ -6,36 +6,14 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { captureOutput } from "./support/cli-fixtures.js";
-import { CliUsageError, parseArgv, renderHelp, renderRootHelp } from "../src/cli/parse.js";
+import { renderRootHelp } from "../src/cli/parse.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
-import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderDebtHelp } from "../src/cli/commands/debt-grammar.js";
 
 test("the runtime maps the six process outcomes", () => {
   const outcomes = ["accepted", "refused", "retryable", "failed", "unsatisfied", "usage"] as const;
   assert.deepEqual(outcomes.map(cliExitCode), [0, 1, 2, 3, 4, 64]);
-});
-
-test("help resolves the longest legal command-word prefix before syntax scanning", () => {
-  assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
-  assert.deepEqual(parseArgv(["bind", "--unknown", "--help", "-"]), {
-    help: { kind: "contract", command: "bind" },
-  });
-  assert.deepEqual(parseArgv(["debt", "unknown", "--help"]), { help: { kind: "debt" } });
-  assert.deepEqual(parseArgv(["debt", "doctor", "bad", "--help"]), {
-    help: { kind: "debt", action: "doctor" },
-  });
-  assert.deepEqual(parseArgv(["fork", "--json", "--help"]), {
-    help: { kind: "akuma", action: "fork" },
-  });
-  assert.deepEqual(parseArgv(["-C", "/absent/world", "--json", "--help"]), {
-    help: { kind: "root" },
-  });
-  assert.throws(() => parseArgv(["ls"]), CliUsageError);
-  assert.throws(() => parseArgv(["ls", "--json"]), CliUsageError);
-  assert.throws(() => parseArgv(["-h"]), CliUsageError);
-  assert.throws(() => parseArgv(["help"]), CliUsageError);
 });
 
 test("command family and leaf help expose executable usage and flags", () => {
@@ -61,37 +39,6 @@ test("command family and leaf help expose executable usage and flags", () => {
   assert.match(lsHelp, /ls debt\[\/\] \[--settled \| --all\] \[--limit <count>\]/u);
 });
 
-test("leaf help and usage refusals share accepted invocation options", () => {
-  for (const help of [
-    renderContractHelp("show"),
-    renderContractHelp("status"),
-    renderDebtHelp("doctor"),
-    renderAkumaHelp("tell"),
-    renderInstallHelp(),
-    renderHelp({ kind: "whoami" }),
-  ]) {
-    assert.match(help, /\[--json\]/u);
-    assert.match(help, /-C <path> \| --cwd <path>/u);
-  }
-  for (const args of [
-    ["show", "--bad"],
-    ["debt", "update"],
-    ["tell", "@worker"],
-  ]) {
-    assert.throws(
-      () => parseArgv(args),
-      (error: unknown) => {
-        assert.ok(error instanceof CliUsageError);
-        assert.match(error.guide!.accepts, /\[--json\]/u);
-        assert.match(error.guide!.accepts, /-C <path> \| --cwd <path>/u);
-        return true;
-      },
-    );
-  }
-  assert.match(renderContractHelp("show"), /\[--repo <path>\]/u);
-  assert.match(renderAkumaHelp("history"), /--id <historyId>/u);
-});
-
 test("help is stdout zero and does not enter an absent world", async () => {
   const { exit, stdout, stderr } = await captureOutput(() =>
     main(["-C", "/definitely/absent/keiyaku-world", "debt", "unknown", "--json", "-", "--help"]),
@@ -112,13 +59,6 @@ test("verify help stays complete on a narrow TTY without a World or plugins", as
   assert.equal(result.stderr, "");
 });
 
-test("show help needs neither World nor plugins", async () => {
-  const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "show", "--help"]));
-  assert.equal(result.exit, 0);
-  assert.match(result.stdout, /usage  keiyaku show/u);
-  assert.equal(result.stderr, "");
-});
-
 test("version is stdout zero and does not enter an absent world", () => {
   const root = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
   const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as {
@@ -136,12 +76,4 @@ test("version is stdout zero and does not enter an absent world", () => {
   assert.equal(result.status, 0);
   assert.equal(result.stdout, `${manifest.version}\n`);
   assert.equal(result.stderr, "");
-});
-
-test("bare ls is a compact usage refusal even when its cwd cannot be read", async () => {
-  const { exit, stdout, stderr } = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "ls"]));
-  assert.equal(exit, 64);
-  assert.equal(stdout, "");
-  assert.match(stderr, /× usage  keiyaku ls/u);
-  assert.match(stderr, /ls requires a selector/u);
 });

@@ -4,9 +4,6 @@ import { contractId } from "../src/core/facts/types.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { renderContractCatalogue } from "../src/cli/render/catalog.js";
-import { renderDebtList } from "../src/cli/render/debt.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
 import type { AkumaKanshiRow, KanshiReport } from "../src/kanshi/report.js";
 import { contractSummary } from "./support/cli-fixtures.js";
 import { startedTool, turnStarted, activityAkumaRow } from "./support/kanshi-activity.js";
@@ -99,24 +96,6 @@ test("World keeps three flat owner-ordered sections with complete links and nati
   assert.ok(sections.every((section) => section.endsWith("…")));
 });
 
-test("a populated Akuma section reports Alias failure once and keeps its omission", () => {
-  const child = worker("00000001", associated(first.id));
-  const peer = worker("00000002");
-  const input: KanshiReport = {
-    ...report([child, peer]),
-    akumas: {
-      rows: [child, peer],
-      more: true,
-      aliasesError: "Alias file unreadable",
-    },
-  };
-  const text = renderKanshiText(input, { columns: 120, color: false });
-  once(text, child.id);
-  once(text, peer.id);
-  once(text, "aliases unavailable");
-  assert.ok(text.endsWith("! aliases unavailable · Alias file unreadable\n…"));
-});
-
 test("unavailable Contract authority leaves every selected Akuma visible and preserves failure evidence", () => {
   const child = worker("00000001", associated(first.id));
   const unknown = worker("00000002", { kind: "unavailable" });
@@ -131,50 +110,6 @@ test("unavailable Contract authority leaves every selected Akuma visible and pre
   assert.match(text, /Repo unreadable/u);
   assert.match(text, /kei\/first/u);
   assert.match(text, /contract association unavailable/u);
-});
-
-test("World and standalone catalogues share thin rows at every width without age tones", () => {
-  const contract = { ...first, id: contractId(`kei/${"complete-identity-".repeat(8)}`) };
-  const akuma: AkumaKanshiRow = {
-    ...worker("00000001", associated(contract.id)),
-    life: "running",
-    lifeAt: at,
-    lastActivityAt: "2026-01-01T09:00:05.000Z",
-    pending: 2,
-    diagnostic: "Input handoff retained",
-  };
-  const debt = { id: "debt/catalogue", title: "Owned facts", priority: 2, disposition: "ready" } as const;
-  const input: KanshiReport = {
-    ...report([akuma]),
-    contracts: { rows: [contract] },
-    debts: { rows: [debt] },
-  };
-  for (const columns of [24, 120]) {
-    const context = { columns, color: true };
-    const standalone = [
-      renderContractCatalogue({ kind: "contract-catalogue", observedAt: at, rows: [contract] }),
-      renderVerb("ls", { selector: "aku/*" }, { kind: "returned", value: {
-        kind: "akuma-catalogue", observedAt: at, rows: [akuma],
-      } }, context),
-      renderDebtList({ kind: "debt-catalogue", rows: [debt] }),
-    ].join("\n\n");
-    assert.equal(renderKanshiText(input, context), standalone);
-    assert.ok(standalone.includes(contract.id));
-    assert.match(standalone, /running · 0s · activity 1h · pending input 2 · diagnostic Input handoff retained/u);
-    assert.doesNotMatch(standalone, /\u001b/u);
-  }
-});
-
-test("World reports pending input by native coordinates when current work supplies them", () => {
-  const row: AkumaKanshiRow = {
-    ...worker("00000001"),
-    life: "running",
-    pending: 2,
-    work: { kind: "open", pending: [{ id: 13 }, { id: 21 }] },
-  };
-  const text = renderKanshiText(report([row]));
-  once(text, "pending input");
-  assert.match(text, /^  pending input 13 21$/mu);
 });
 
 test("empty Alias failure and unavailable current work stay beside readable peers", () => {

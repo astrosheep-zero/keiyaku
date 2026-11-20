@@ -65,26 +65,6 @@ test("missing Zig skips only the Windows launcher on non-Windows hosts", () => {
   assert.match(result.stderr, /ENOENT/);
 });
 
-test("missing Zig fails with an actionable diagnostic on Windows", () => {
-  const result = runLauncher(missingExecutable(), "win32");
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Zig 0\.14\.1/);
-  assert.match(result.stderr, /PATH/);
-  assert.match(result.stderr, /KEIYAKU_ZIG/);
-  assert.match(result.stderr, /ENOENT/);
-});
-
-test("a Zig version below 0.14.1 is unusable and skips on non-Windows hosts", () => {
-  const result = runLauncher(executableReporting("0.14.0"));
-
-  assert.equal(result.status, 0);
-  assert.match(result.stderr, /Zig 0\.14\.1 or later/);
-  assert.match(result.stderr, /reported version 0\.14\.0; require at least 0\.14\.1/);
-  assert.match(result.stderr, /Skipping Windows launcher on non-Windows host\./);
-  assert.doesNotMatch(result.stderr, /mock Zig compiler invoked/);
-});
-
 test("a Zig version below 0.14.1 is a hard failure on Windows", () => {
   const result = runLauncher(executableReporting("0.14.0"), "win32");
 

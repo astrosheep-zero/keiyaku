@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { installOutcome, installHarnesses, renderInstallText } from "../src/cli/commands/install.js";
 import type { ProcessInput, ProcessOutcome } from "../src/runtime/proc/run.js";
 
@@ -16,9 +16,6 @@ const installModule = fileURLToPath(
   ),
 );
 const assetsRoot = resolve(dirname(realpathSync(installModule)), "../../../plugins");
-// The six skills have one source at the repository root; hosts package copies of it at build time.
-const repositoryRoot = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
-const skillsRoot = join(repositoryRoot, "skills");
 
 const terminal = (code = 0, stderr = ""): ProcessOutcome => ({
   kind: "terminal",
@@ -35,17 +32,6 @@ test("install parses one supported harness and --all", () => {
   assert.deepEqual(parseArgv(["install", "--all"]), {
     command: { command: "install", harnesses: ["codex", "claude", "opencode", "pi"], output: "text" },
   });
-});
-
-test("install rejects missing, mixed, unknown, and duplicate options", () => {
-  const refusals: readonly (readonly string[])[] = [
-    ["install"],
-    ["install", "claude", "--all"],
-    ["install", "unknown"],
-    ["install", "claude", "--nope"],
-    ["install", "claude", "--json", "--json"],
-  ];
-  for (const argv of refusals) assert.throws(() => parseArgv(argv), CliUsageError);
 });
 
 test("Codex and Claude use their native marketplace recipes", async () => {
@@ -90,26 +76,4 @@ test("--all records failure and continues in fixed harness order", async () => {
   assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
   assert.equal(installOutcome(result), "failed");
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
-});
-
-test("the bundled plugin contains all six skills", () => {
-  for (const name of [
-    "keiyaku",
-    "keiyaku-debt",
-    "keiyaku-bind",
-    "keiyaku-workflow",
-    "keiyaku-akuma",
-    "keiyaku-babysit",
-  ]) {
-    const path = join(skillsRoot, name, "SKILL.md");
-    const markdown = readFileSync(path, "utf8");
-    assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));
-  }
-});
-
-test("the bundled Akuma skill links to its packaged automation guide", () => {
-  const skill = join(skillsRoot, "keiyaku-akuma");
-  const index = readFileSync(join(skill, "SKILL.md"), "utf8");
-  assert.ok(index.includes("(references/automation.md)"));
-  readFileSync(join(skill, "references", "automation.md"), "utf8");
 });

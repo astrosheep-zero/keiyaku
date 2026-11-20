@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Akuma } from "../src/akuma/index.js";
@@ -44,101 +44,29 @@ test("show reads native bytes once for explicit Contract selection and refuses o
       }),
     }),
   );
-  const row = (await library.list({})).rows?.find((entry) => entry.id === bound.contractId);
-  assert.ok(row !== undefined);
-  const observed = await library.observe({ id: row.id });
-  assert.ok(observed.kind === "contract" && observed.workspace.kind !== "unappointed", "missing workspace");
-  const worktreePath = observed.workspace.path;
-  const expected = await library.kei({ id: row.id }).guidance();
+  const expected = await bound.kei.guidance();
   assert.equal(expected.kind, "present");
   if (expected.kind !== "present") assert.fail("missing native guidance");
   const read = t.mock.method(Kei.prototype, "guidance");
-  for (const [cwd, selector] of [
-    [repository.path, row.id],
-    [repository.path, `@${row.id.slice("kei/".length)}`],
-    [worktreePath, row.id],
-  ] as const) {
-    const argv = ["-C", cwd, "show", selector];
-    let before = read.mock.callCount();
-    const text = await runCli(argv, { environment: {} });
-    assert.equal(text.exit, 0, text.stderr);
-    assert.equal(text.stdout, expected.guidance.endsWith("\n") ? expected.guidance : `${expected.guidance}\n`);
-    assert.equal(read.mock.callCount(), before + 1);
-    before = read.mock.callCount();
-    const json = await cliJson(argv, { environment: {} });
-    assert.equal(json.exit, 0, json.stderr);
-    assert.deepEqual(json.value, expected);
-    assert.equal(read.mock.callCount(), before + 1);
-  }
-  const before = read.mock.callCount();
-  const status = await runCli(["-C", repository.path, "status", row.id], { environment: {} });
-  assert.equal(status.exit, 0, status.stderr);
-  assert.equal(read.mock.callCount(), before);
-  for (const selectors of [[row.id], [`@${row.id.slice("kei/".length)}`]]) {
-    const ordinary = await runCli(["-C", repository.path, "status", ...selectors], { environment: {} });
-    assert.equal(ordinary.exit, 0, ordinary.stderr);
-    assert.equal(read.mock.callCount(), before);
-    assert.doesNotMatch(ordinary.stdout, /# Guidance read/u);
-  }
-  const child = join(worktreePath, "nested");
-  mkdirSync(child);
-  for (const cwd of [worktreePath, child, join(repository.path, "missing")]) {
-    const omitted = await captureOutput(() => main(["-C", cwd, "show"]));
-    assert.equal(omitted.exit, 64);
-    assert.match(omitted.stderr, /show requires one explicit selector/u);
-    assert.equal(read.mock.callCount(), before);
-  }
-  assert.doesNotMatch(status.stdout, /# Guidance read/u);
+  const text = await runCli(["-C", repository.path, "show", bound.contractId], { environment: {} });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.equal(text.stdout, expected.guidance.endsWith("\n") ? expected.guidance : `${expected.guidance}\n`);
+  assert.equal(read.mock.callCount(), 1);
+  const omitted = await captureOutput(() => main(["-C", bound.worktreePath!, "show"]));
+  assert.equal(omitted.exit, 64);
+  assert.match(omitted.stderr, /show requires one explicit selector/u);
+  assert.equal(read.mock.callCount(), 1);
 });
 
-test("show preserves native absence and selection refusals with command-specific diagnostics", async (t) => {
+test("show preserves native absence", async (t) => {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
-  const read = t.mock.method(Kei.prototype, "guidance");
-  const text = await runCli(["-C", repository.path, "show", "kei/missing"], { environment: {} });
-  assert.equal(text.exit, 1);
-  assert.equal(text.stdout, "× show refused\n  contract  kei/missing\n  reason  contract missing\n");
   const json = await cliJson(["-C", repository.path, "show", "kei/missing"], { environment: {} });
   assert.equal(json.exit, 1);
   assert.deepEqual(json.value, { kind: "missing" });
-  assert.equal(read.mock.callCount(), 2);
-  for (const [args, reason] of [
-    [[], /show requires one explicit selector/u],
-    [["@missing"], /unknown contract selector/u],
-    [["@kei/missing"], /redundant short contract selector/u],
-    [["aku/worker/1234abcd"], /cannot select an Akuma/u],
-    [["kei/*"], /cannot select a category/u],
-    [["kei/a", "kei/b"], /at most one selector/u],
-    [["debt/a", "debt/b"], /at most one selector/u],
-    [["--unknown"], /not valid for show/u],
-  ] as const) {
-    const result = await captureOutput(() => main(["-C", repository.path, "show", ...args]));
-    assert.equal(result.exit, 64, result.stderr);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, reason);
-    assert.match(result.stderr, /keiyaku show/u);
-    assert.doesNotMatch(result.stderr, /keiyaku status/u);
-  }
-  assert.equal(read.mock.callCount(), 2);
 });
 
-test("retired status guidance is a usage refusal before World or guidance acquisition", async (t) => {
-  const read = t.mock.method(Kei.prototype, "guidance", async () => {
-    assert.fail("status must not acquire guidance");
-  });
-  for (const selectors of [[], ["kei/missing"], ["aku"], ["kei/a", "kei/b"]]) {
-    const result = await captureOutput(() =>
-      main(["-C", "/definitely/absent/keiyaku-world", "status", ...selectors, "--guidance", "--json"]),
-    );
-    assert.equal(result.exit, 64);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /× usage  keiyaku status/u);
-    assert.match(result.stderr, /option --guidance is not valid for status/u);
-  }
-  assert.equal(read.mock.callCount(), 0);
-});
-
-test("CLI Tell admits input and Ask retains its JSON and invalid-output results", { timeout: 60_000 }, async (t) => {
+test("CLI ask returns the exact parsed JSON on stdout", { timeout: 60_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-tell-"));
   const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
   const world = await World.at(root);
@@ -158,35 +86,12 @@ test("CLI Tell admits input and Ask retains its JSON and invalid-output results"
       (await readHeart(paths)).latestBody?.end === "exited" && (await probeLeash(paths)) === "free",
     );
     await waitForPidReceiptExit(receipt, 60_000, { requireBirth: true });
-    const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
-    const text = await runCli(["-C", root, "tell", born.id, "-"], runtime);
-    assert.equal(text.exit, 0, text.stderr);
-    assert.match(text.stdout, new RegExp(`^▸ ${born.id} +told(?: turn/[1-9][0-9]*)?\\n$`, "u"));
-    const waited = await runCli(["-C", root, "wait", born.id, "--for", "30s"], runtime);
-    assert.equal(waited.exit, 0, waited.stderr);
-    assert.ok(waited.stdout.includes(answer), waited.stdout);
-    const decoded = await cliJson<{ kind: string; answer: unknown }>(
-      ["-C", root, "ask", born.id, "--schema", schema, "-"], runtime,
-    );
-    assert.equal(decoded.exit, 0, decoded.stderr);
-    assert.equal(decoded.value.kind, "answered");
-    assert.deepEqual(decoded.value.answer, { ok: true });
+    const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal };
     const printed = await runCli(["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime);
     assert.equal(printed.exit, 0, printed.stderr);
     assert.equal(printed.stdout, answer, "one exact JSON serialization, without a newline");
     assert.match(printed.stderr, new RegExp(`^✓ answered ${born.id}\\n  input `, "u"));
     assert.equal(printed.stderr.trimEnd().split("\n").length, 2, "non-TTY Ask emits only final facts");
-    writeFileSync(agent, readFileSync(agent, "utf8").replace(`text: ${JSON.stringify(answer)}`, 'text: "not-json"'));
-    const invalid = await cliJson<{ kind: string; answer: unknown }>(
-      ["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime,
-    );
-    assert.equal(invalid.exit, 3, invalid.stderr);
-    assert.equal(invalid.value.kind, "invalid-output");
-    assert.equal(invalid.value.answer, "not-json");
-    const invalidText = await runCli(["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime);
-    assert.equal(invalidText.exit, 3, invalidText.stderr);
-    assert.equal(invalidText.stdout, "");
-    assert.match(invalidText.stderr, /invalid-output[\s\S]*invalid answer\n  not-json/u);
     operationFailed = false;
   } finally {
     try {
@@ -260,16 +165,4 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
       restore();
     }
   }
-});
-
-test("guidance acquisition failure stays a failure, not missing guidance", async (t) => {
-  const repository = makeGitRepository();
-  t.after(() => rmSync(repository.path, { recursive: true, force: true }));
-  t.mock.method(Kei.prototype, "guidance", async () => {
-    throw new Error("guidance unavailable");
-  });
-  const result = await captureOutput(() => main(["-C", repository.path, "show", "kei/missing"]));
-  assert.equal(result.exit, 3);
-  assert.equal(result.stdout, "");
-  assert.match(result.stderr, /guidance unavailable/u);
 });

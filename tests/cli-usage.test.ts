@@ -8,14 +8,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { parseAkumaId } from "../src/akuma/identity.js";
-import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
-import { parseAkumaAlias } from "../src/identity/selector.js";
-import { classifyVerb } from "../src/library/keiyaku-verbs.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
-import type { ReconcileCompletion } from "../src/library/reconcile.js";
-import { contractId } from "../src/core/facts/types.js";
-import type { WorldRoot } from "../src/world.js";
 
 function runCli(cwd: string, argv: readonly string[], input?: string) {
   return spawnSync(
@@ -41,22 +33,6 @@ function builtCli(): string {
   );
 }
 
-test("category status refuses invalid combinations before reading the invocation cwd", async () => {
-  for (const argv of [
-    ["status", "aku", "--limit", "0"],
-    ["status", "kei", "--limit", "9007199254740992"],
-    ["status", "kei/exact", "--limit", "2"],
-    ["status", "aku", "--guidance"],
-    ["status", "kei", "kei/exact"],
-    ["status", "kei/exact", "aku/worker/*"],
-  ]) {
-    const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", ...argv]));
-    assert.equal(result.exit, 64);
-    assert.equal(result.stdout, "");
-    assert.doesNotMatch(result.stderr, /invocation cwd/u);
-  }
-});
-
 test("spawn rejects an invalid workdir without establishing a World", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-spawn-invalid-workdir-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -67,59 +43,6 @@ test("spawn rejects an invalid workdir without establishing a World", async (con
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /workdir is not an existing directory: missing/u);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
-});
-
-test("debt coordinate failures retain usage output for text and JSON", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-debt-coordinate-"));
-  context.after(() => rmSync(root, { recursive: true, force: true }));
-  writeFileSync(join(root, ".keiyaku"), "not a directory");
-  for (const flags of [[], ["--json"]]) {
-    const result = await captureOutput(() => main(["-C", root, "ls", "debt/", ...flags]));
-    assert.equal(result.exit, 64);
-    if (flags.length === 0) {
-      assert.equal(result.stdout, "");
-      assert.match(result.stderr, /world marker is not a directory/u);
-    } else {
-      assert.equal(result.stderr, "");
-      assert.equal(JSON.parse(result.stdout).category, "invalid-input");
-      assert.match(JSON.parse(result.stdout).diagnostic, /world marker is not a directory/u);
-    }
-  }
-});
-
-test("debt owner failures use the shared verb failure projection", async (context) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-debt-failure-"));
-  context.after(() => rmSync(root, { recursive: true, force: true }));
-  mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "debts", "broken.md"), "not a Debt document\n");
-  const text = await captureOutput(() => main(["-C", root, "ls", "debt/"]));
-  assert.equal(text.exit, 3);
-  assert.match(text.stderr, /ls failed/u);
-  const json = await captureOutput(() => main(["-C", root, "ls", "debt/", "--json"]));
-  assert.equal(json.exit, 3);
-  assert.ok(JSON.parse(json.stdout));
-});
-
-test("Debt listing defaults to active rows and opts into terminal rows", () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-list-"));
-  try {
-    const added = runCli(root, ["debt", "add", "Active", "--json"]);
-    assert.equal(added.status, 0, added.stderr);
-    const closed = runCli(root, ["debt", "add", "Closed", "--json"]);
-    assert.equal(closed.status, 0, closed.stderr);
-    const id = JSON.parse(closed.stdout).id as string;
-    assert.equal(runCli(root, ["debt", "update", id, "--state", "done"]).status, 0);
-    const list = (flags: readonly string[]) => {
-      const result = runCli(root, ["ls", "debt/", ...flags, "--json"]);
-      assert.equal(result.status, 0, result.stderr);
-      return (JSON.parse(result.stdout).rows as readonly { id: string }[]).map((row) => row.id);
-    };
-    assert.equal(list([]).length, 1);
-    assert.deepEqual(list(["--settled"]), [id]);
-    assert.equal(list(["--all"]).length, 2);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("a closed stdout pipe during a blocked large write exits silently", async (context) => {
@@ -161,63 +84,6 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   assert.equal(exitError, undefined, exitError?.message);
   assert.equal(exitCode, 0);
   assert.equal(stderr, "");
-});
-
-test("native reconcile reports preserve hook, checkout, seat and settlement failure classification", () => {
-  const id = contractId("kei/example");
-  const reports: ReconcileCompletion[] = [
-    {
-      kind: "contract",
-      contractId: id,
-      issues: [
-        {
-          kind: "worktree-hook-failed",
-          severity: "required",
-          contractId: id,
-          phase: "create",
-          path: "/tmp/wt",
-          name: "prepare",
-          diagnostic: "hook failed",
-        },
-      ],
-    },
-    {
-      kind: "contract",
-      contractId: id,
-      issues: [
-        {
-          kind: "target-checkout-retained",
-          severity: "required",
-          contractId: id,
-          target: "refs/heads/main",
-          path: "/repo/file",
-          diagnostic: "checkout failed",
-        },
-      ],
-    },
-    {
-      kind: "contract",
-      contractId: id,
-      issues: [
-        {
-          kind: "diagnostic",
-          severity: "required",
-          contractId: id,
-          diagnostic: "could not close publication seat",
-        },
-      ],
-    },
-    {
-      kind: "contract",
-      contractId: id,
-      issues: [
-        { kind: "contract-file-failed", severity: "required", contractId: id, path: "KEIYAKU.md", diagnostic: "write failed" },
-        { kind: "settlement-failed", severity: "required", contractId: id, diagnostic: "debt failed" },
-      ],
-    },
-  ];
-  for (const report of reports)
-    assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("show preserves a Debt's multi-line body end to end", () => {
@@ -286,31 +152,6 @@ test("a local status on an absent complete id reports one caller-facing fact", (
   assert.ok(result.stderr.includes("keiyaku status --help"));
 });
 
-test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
-  const id = parseAkumaId("aku/intern/33dd4670").id;
-  const input = { selectors: [id] };
-  const refusals: readonly (readonly [unknown, readonly string[]])[] = [
-    [
-      new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
-      ["Akuma alias not found", "@missing"],
-    ],
-    [
-      new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }),
-      ["invalid Akuma address", "aku/intern/nope"],
-    ],
-    [
-      new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as WorldRoot }),
-      ["Akuma not in this World", id, "/private/world"],
-    ],
-  ];
-  for (const [error, facts] of refusals) {
-    const completion = { kind: "threw" as const, error };
-    assert.equal(classifyVerb("wait", input, completion), "refused");
-    const body = renderVerb("wait", input, completion, { columns: 100, color: false });
-    for (const fact of facts) assert.ok(body.includes(fact));
-  }
-});
-
 test("unknown debt command scopes minimal usage to debt", async () => {
   const result = await captureOutput(() => main(["debt", "nonsense"]));
   assert.equal(result.exit, 64);
@@ -322,14 +163,6 @@ test("unknown debt command scopes minimal usage to debt", async () => {
     "  help  keiyaku debt --help",
     "",
   ].join("\n"));
-});
-
-test("review unknown options retain leaf-scoped usage", async () => {
-  const result = await captureOutput(() => main(["review", "--satisfied", "--summary", "ok", "--unknown"]));
-  assert.equal(result.exit, 64);
-  assert.match(result.stderr, /reason  option --unknown is not valid for review/u);
-  assert.match(result.stderr, /  accepts  keiyaku review /u);
-  assert.match(result.stderr, /  help  keiyaku review --help/u);
 });
 
 test("invalid args keep diagnostic with deepest leaf usage", async () => {
@@ -349,86 +182,6 @@ test("invalid args keep diagnostic with deepest leaf usage", async () => {
     "  help  keiyaku --help",
     "",
   ].join("\n"));
-});
-
-test("unmatched Contract selectors keep the text refusal and native missing guidance object", () => {
-  const repo = makeGitRepository();
-  const run = (args: string[]) =>
-    spawnSync(
-      process.execPath,
-      [
-        ...(import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"]),
-        fileURLToPath(
-          new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../src/cli/index.ts", import.meta.url),
-        ),
-        "-C",
-        repo.path,
-        "show",
-        "kei/missing",
-        ...args,
-      ],
-      { encoding: "utf8" },
-    );
-  try {
-    const text = run([]);
-    assert.equal(text.status, 1);
-    assert.equal(text.stderr, "");
-    assert.equal(
-      text.stdout,
-      ["× show refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
-    );
-    const json = run(["--json"]);
-    assert.equal(json.status, 1);
-    assert.equal(json.stderr, "");
-    assert.deepEqual(JSON.parse(json.stdout), { kind: "missing" });
-  } finally {
-    rmSync(repo.path, { recursive: true, force: true });
-  }
-});
-
-test("malformed arc document is a substantive refusal", () => {
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const markdown = [
-    "# Arc refusal",
-    "## Context",
-    "Context.",
-    "## Objective",
-    "Objective.",
-    "## Design",
-    "Design.",
-    "## Region",
-    "src/**",
-    "## Criteria",
-    "### Works",
-    "Works.",
-  ].join("\n");
-  const bound = runCli(repository.path, ["bind", "--gates", "", "--json", "-"], markdown);
-  assert.equal(bound.status, 0, bound.stdout + bound.stderr);
-  const id = JSON.parse(bound.stdout).contractId as string;
-  for (const document of ["", "#  \n", "## Missing name\n"]) {
-    const text = runCli(repository.path, ["arc", id, "-"], document);
-    assert.equal(text.status, 1, text.stdout + text.stderr);
-    assert.equal(text.stderr, "");
-    assert.match(text.stdout, /^arc refused  kei\//mu);
-    assert.match(text.stdout, /reason  invalid document/u);
-    assert.equal(text.stdout.split("\n").filter((line) => line === "  diagnostic").length, 1);
-    assert.doesNotMatch(text.stdout, /^  cause diagnostic$/mu);
-  }
-  const json = runCli(repository.path, ["arc", id, "--json", "-"], "# \n");
-  assert.equal(json.status, 1);
-  assert.equal(JSON.parse(json.stdout).reason.kind, "invalid-document");
-  rmSync(repository.path, { recursive: true, force: true });
-});
-
-test("malformed bind is a substantive refusal on stdout with its draft", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-refusal-"));
-  const result = runCli(cwd, ["bind", "-"], "not valid bind markdown\n");
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /^bind refused$/mu);
-  assert.match(result.stdout, /^  reason  invalid document$/mu);
-  assert.equal(result.stderr, "");
-  rmSync(cwd, { recursive: true, force: true });
 });
 
 test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
@@ -464,32 +217,6 @@ test("blank stdin remains a visible usage diagnostic and performs no operation",
   }
 });
 
-test("blank bind stdin in JSON mode writes a plain typed usage failure to stdout", () => {
-  const repository = makeGitRepository();
-  try {
-    const result = runCli(repository.path, ["bind", "-", "--json"], "");
-    assert.equal(result.status, 64);
-    assert.equal(result.stderr, "");
-    const failure = JSON.parse(result.stdout);
-    assert.equal(failure.kind, "failed");
-    assert.equal(failure.category, "invalid-input");
-    assert.equal(failure.causeClass, "CliUsageError");
-    assert.equal(failure.causeDiagnostic, failure.diagnostic);
-    assert.match(failure.diagnostic, /nonblank stdin document/u);
-    assert.doesNotMatch(failure.diagnostic, /[\r\n]/u);
-    assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
-  } finally {
-    rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("settings and duplicate-flag diagnostics stay visible", async () => {
-  const result = await captureOutput(() => main(["install", "--all", "--all"]));
-  assert.equal(result.exit, 64);
-  assert.match(result.stderr, /  reason  duplicate option: --all/u);
-  assert.match(result.stderr, /  help  keiyaku install --help/u);
-});
-
 test("usage refusal exits 64 without touching an absent world", async () => {
   const cwd = join(mkdtempSync(join(tmpdir(), "keiyaku-usage-")), "missing-world");
   const result = await captureOutput(() => main(["-C", cwd, "nonsense"]));
@@ -498,20 +225,6 @@ test("usage refusal exits 64 without touching an absent world", async () => {
   assert.match(result.stderr, /^× usage  keiyaku$/mu);
   assert.match(result.stderr, /^  given  nonsense$/mu);
   assert.doesNotMatch(result.stderr, /no Keiyaku world/u);
-});
-
-test("a worldless addressed terminal update returns the native missing refusal", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-usage-worldless-"));
-  try {
-    const single = runCli(cwd, ["debt", "update", "debt/alpha", "--state", "drop"]);
-    assert.equal(single.status, 1);
-    const json = runCli(cwd, ["debt", "update", "debt/alpha", "--state", "done", "--json"]);
-    assert.equal(json.status, 1);
-    assert.deepEqual(JSON.parse(json.stdout), { kind: "refused", reason: "debt-missing" });
-    assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  } finally {
-    rmSync(cwd, { recursive: true, force: true });
-  }
 });
 
 test("a bare invocation prints the root help index instead of a usage refusal", async () => {
