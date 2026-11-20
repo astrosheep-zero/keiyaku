@@ -9,7 +9,7 @@ export function renderNukeText(result: NukeResult, input: Readonly<{ confirm?: s
       ...(result.refsRemoved === undefined ? [] : [`  refs removed  ${result.refsRemoved}`]),
       ...(result.worktreesRemoved === undefined ? [] : [`  worktrees removed  ${result.worktreesRemoved}`]),
       ...(result.debtsRemoved === undefined ? [] : [`  debt stores removed  ${result.debtsRemoved}`]),
-      "  locks  may remain · SQLite coordination files cannot be removed safely while concurrent writers may still hold them",
+      "  locks  may remain · concurrent writers may hold them",
       ...issues,
     ].join("\n");
   }

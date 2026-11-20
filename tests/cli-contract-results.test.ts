@@ -73,7 +73,7 @@ test("semantic Contract history renders native identities without raw journal ca
       },
     ],
   });
-  assert.match(text, /history  kei\/compact-cli · 3 entries/u);
+  assert.match(text, /^history  kei\/compact-cli$/mu);
   assert.match(text, /bound to targetless/u);
   assert.match(text, /× verification check-build · subject snapshot bbbbbbb/u);
   assert.match(text, /arc Recovery · 2 lines/u);

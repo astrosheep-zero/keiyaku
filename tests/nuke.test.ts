@@ -616,7 +616,7 @@ test("nuke receipt names confirmed removals and retained coordination locks", ()
   assert.match(text, /refs removed  3/u);
   assert.match(text, /worktrees removed  1/u);
   assert.match(text, /debt stores removed  2/u);
-  assert.match(text, /locks  may remain · SQLite coordination files cannot be removed safely/u);
+  assert.match(text, /locks  may remain · concurrent writers may hold them/u);
 });
 
 test("CLI nuke classifies required owner stops independently of optional residue", () => {

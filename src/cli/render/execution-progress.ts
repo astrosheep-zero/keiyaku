@@ -1,6 +1,6 @@
 import type { ExecutionObservation } from "../../protocol/execution-observation.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
-import { exactIndentedLines, safeText } from "./terminal.js";
+import { exactIndentedLines, omissionText, safeText } from "./terminal.js";
 
 type VerificationObservation = Extract<ExecutionObservation, { kind: "verification" }>["observation"];
 type Phase = Extract<VerificationObservation, { kind: "phase" }>;
@@ -70,7 +70,7 @@ export function createExecutionProgressRenderer(
       const lines: string[] = [stream];
       if (buffer.omittedBytes > 0) {
         const unit = buffer.omittedBytes === 1 ? "byte" : "bytes";
-        lines.push(`  [earlier output omitted: ${buffer.omittedBytes} ${unit}]`);
+        lines.push(`  ${omissionText(buffer.omittedBytes, unit)}`);
       }
       lines.push(...exactIndentedLines(buffer.text, "  "));
       await writeChunk(input.stream, `${lines.join("\n")}\n`);

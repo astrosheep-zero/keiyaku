@@ -1,6 +1,6 @@
 import type { ContractHistory, ContractHistoryEvent } from "../../index.js";
 import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
-import { exactIndentedLines, safeText } from "./terminal.js";
+import { exactIndentedLines, omissionText, safeText } from "./terminal.js";
 
 function listFact(label: string, values: readonly string[] | undefined): readonly string[] {
   return values === undefined ? [] : [`  ${label}  ${values.length === 0 ? "none" : values.map(safeText).join(" · ")}`];
@@ -173,14 +173,8 @@ export function renderContractHistory(
 ): string {
   const header = `history  ${history.contractId}`;
   if (history.kind === "contract-exact") return [header, "", ...exactEventLines(history.event)].join("\n");
-  const journals = history.events.filter((event) => event.kind !== "dispatch").length;
-  const dispatches = history.events.length - journals;
-  const counts = [
-    ...(journals === 0 ? [] : [`${journals} ${journals === 1 ? "entry" : "entries"}`]),
-    ...(dispatches === 0 ? [] : [`${dispatches} ${dispatches === 1 ? "dispatch" : "dispatches"}`]),
-  ];
-  const lines = [header + (counts.length === 0 ? "" : ` · ${counts.join(" · ")}`), ""];
-  if (history.omitted !== undefined) lines.push(`… ${history.omitted} journal entries omitted`, "");
+  const lines = [header, ""];
+  if (history.omitted !== undefined) lines.push(omissionText(history.omitted), "");
   let day: string | undefined;
   for (const event of history.events) {
     const nextDay = event.at.slice(0, 10);

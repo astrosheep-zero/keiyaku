@@ -348,12 +348,11 @@ test("history pages keep individual requirements and exact records retain subjec
       deliveryId: "5",
     },
   ];
-  const journals = events.filter((event) => event.kind !== "dispatch").length;
   const text = renderContractHistory({ kind: "contract", contractId: watch, events });
 
   assert.equal(
     text.split("\n")[0],
-    `history  kei/history-test · ${journals} entries · 1 dispatch`,
+    "history  kei/history-test",
     "the header reports returned rows without asserting current lifecycle",
   );
   assert.doesNotMatch(text, /journal/u);
@@ -525,7 +524,7 @@ test("Debt show and doctor render native prerequisite facts", () => {
       { kind: "cycle", relation: "needs", debts: ["debt/a", "debt/c"] },
     ],
   });
-  assert.match(issues, /^! doctor  3 issues$/mu);
+  assert.match(issues, /^! doctor$/mu);
   assert.match(issues, /^! missing-target debt\/a needs debt\/b$/mu);
   assert.match(issues, /^! self-relation debt\/a needs$/mu);
   assert.match(issues, /^! cycle needs debt\/a debt\/c$/mu);
@@ -544,7 +543,7 @@ test("catalog text renders only the selected identity layer", () => {
       kind: "akuma-name-catalogue",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
-    ["AKUMA NAMES // available", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
+    ["AKUMA NAMES", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
   );
 });
 test("ls help lists the Akuma catalogue usage forms", () => {
@@ -560,7 +559,7 @@ test("rendered Akuma catalog header names Akuma names, never akumaName", () => {
     kind: "akuma-name-catalogue",
     rows: [{ name: "reviewer" }],
   });
-  assert.ok(text.startsWith("AKUMA NAMES // available"));
+  assert.ok(text.startsWith("AKUMA NAMES\n"));
   assert.doesNotMatch(text, /akumaName/iu);
 });
 test("root Debt catalogue marks every disposition with its own state", () => {
@@ -2206,7 +2205,7 @@ test("status keeps current evidence while history retains thought narration", ()
     {}
   );
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
-  assert.match(historyText, /^ {2}··· 55 earlier events · showing last 13/mu);
+  assert.match(historyText, /^ {2}… 55 omitted$/mu);
   assert.doesNotMatch(historyText, /earlier turns/u);
   assert.doesNotMatch(historyText, /●/u, "history never asserts live activity");
   for (const command of ["c4", "c5", "c6", "c7"])

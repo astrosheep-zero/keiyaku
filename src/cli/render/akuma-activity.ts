@@ -15,6 +15,7 @@ import {
   ageText,
   DEFAULT_CLI_COLUMNS,
   exactIndentedLines,
+  omissionText,
   opaqueCoordinate,
   previewLines,
   safeText,
@@ -22,8 +23,6 @@ import {
 } from "./terminal.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
-
-const OMISSION = "···";
 
 function identity(id: string, alias?: string): string {
   return `${safeText(id)}${alias === undefined ? "" : ` (${safeText(alias)})`}`;
@@ -92,7 +91,7 @@ function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
   return [
     "changes",
     ...changes.map((change) => `  ${renderDiffstat(change.diffstat)}  ${safeText(change.path)}`),
-    ...(view.moreChanges === true ? [`  ${OMISSION} more files`] : []),
+    ...(view.moreChanges === true ? [`  ${omissionText()}`] : []),
     ...(view.outsideChanges === undefined ? [] : [`  ${view.outsideChanges} outside worktree`]),
   ];
 }
@@ -251,11 +250,12 @@ export function historyText(
   if (result.kind === "akuma-report") return result.text;
   if (result.kind === "akuma-no-answer") return "no answer retained";
   if (result.kind === "akuma-unknown-history") return `${presentation.id} has no matching retained history`;
-  const paging = presentation.since !== undefined ? "later events · showing first" : "earlier events · showing last";
+  const omitted = result.omitted === undefined ? [] : [`  ${omissionText(result.omitted)}`];
   return [
     ...panelHead(result.akumaId, presentation.alias, undefined),
-    ...(result.omitted === undefined ? [] : [`  ${OMISSION} ${result.omitted} ${paging} ${result.events.length}`]),
+    ...(presentation.since === undefined ? omitted : []),
     ...result.events.map(({ text }) => text).filter(Boolean),
+    ...(presentation.since === undefined ? [] : omitted),
   ].join("\n");
 }
 

@@ -5,11 +5,7 @@ function overlapBlocks(overlaps: readonly RegionOverlap[]): readonly string[] {
   return overlaps.flatMap((overlap) => {
     const patterns = overlap.patterns.filter((pattern) => pattern.mine !== pattern.theirs);
     if (patterns.length === 0) return [`overlap  ${overlap.contractId}  exact match`];
-    const count = patterns.length;
-    return [
-      `overlap  ${overlap.contractId}  ${count} ${count === 1 ? "pair" : "pairs"}`,
-      ...patterns.map((pattern) => `  ${pattern.mine} ~ ${pattern.theirs}`),
-    ];
+    return [`overlap  ${overlap.contractId}`, ...patterns.map((pattern) => `  ${pattern.mine} ~ ${pattern.theirs}`)];
   });
 }
 

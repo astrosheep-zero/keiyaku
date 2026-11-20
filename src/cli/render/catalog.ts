@@ -40,7 +40,7 @@ export function renderAkumaNameCatalogue(list: AkumaNameCatalog): string {
   const rows = list.rows ?? [];
   if (rows.length === 0) return emptyCatalogue("akuma names");
   return [
-    "AKUMA NAMES // available",
+    "AKUMA NAMES",
     "",
     ...rows.flatMap((row) => {
       const facts = [

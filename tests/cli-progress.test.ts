@@ -191,11 +191,11 @@ test("cumulative UTF-8 suffixes retain late failures, count omissions and reset 
   assert.equal(payload, "🙂".repeat(498) + "界".repeat(700));
   const stdout = stream.text.split("stdout\n")[1]?.split("stderr\n")[0] ?? "";
   assert.equal(stdout.replace(/\s/gu, "").endsWith("FAIL"), true);
-  assert.match(stdout, /^  \[earlier output omitted: 808 bytes\]\n/u);
+  assert.match(stdout, /^  … 808 bytes omitted\n/u);
   const stderr = stream.text.split("stderr\n")[1]?.split("× declaration")[0] ?? "";
-  assert.match(stderr, /^  \[earlier output omitted: 1 byte\]\n/u);
-  assert.equal(stderr.split("byte]\n")[1]?.replace(/\s/gu, ""), "e".repeat(4_096));
-  assert.equal((stream.text.match(/\[earlier output omitted:/gu) ?? []).length, 2);
+  assert.match(stderr, /^  … 1 byte omitted\n/u);
+  assert.equal(stderr.split("byte omitted\n")[1]?.replace(/\s/gu, ""), "e".repeat(4_096));
+  assert.equal((stream.text.match(/… \d+ bytes? omitted/gu) ?? []).length, 2);
   assert.doesNotMatch(stream.text, /�/u);
   assert.match(stream.text, /stdout\n  next phase\nstderr\n/u);
   const cleanupOutput = stream.text.split("stdout\n  next phase\nstderr\n")[1]?.split("✓ cleanup")[0] ?? "";
@@ -208,8 +208,8 @@ test("suffix eviction removes whole code points and keeps subsequent output", as
   renderer.observe(output("界".repeat(1_366)));
   renderer.observe(output("X"));
   await renderer.finish();
-  assert.match(stream.text, /^stdout\n  \[earlier output omitted: 3 bytes\]\n/u);
-  const payload = stream.text.split("bytes]\n")[1]?.replace(/\s/gu, "") ?? "";
+  assert.match(stream.text, /^stdout\n  … 3 bytes omitted\n/u);
+  const payload = stream.text.split("bytes omitted\n")[1]?.replace(/\s/gu, "") ?? "";
   assert.equal(payload, "界".repeat(1_365) + "X");
   assert.equal(Buffer.byteLength(payload), 4_096);
 });

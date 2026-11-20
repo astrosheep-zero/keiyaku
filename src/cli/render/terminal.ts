@@ -9,6 +9,12 @@ export function emptyCatalogue(surface: string): string {
   return `${surface}  none`;
 }
 
+/** One omission vocabulary shared by every renderer; callers own indentation. */
+export function omissionText(amount?: number, unit?: string): string {
+  if (amount === undefined) return "…";
+  return `… ${amount}${unit === undefined ? "" : ` ${unit}`} omitted`;
+}
+
 export type RecoveryCoordinates = Readonly<{ cwd: string; repo?: string }>;
 
 export type TextRenderContext = Readonly<{

@@ -108,8 +108,7 @@ function doctorIssue(issue: DebtDoctorIssue): string {
 export function renderDoctor(report: DebtDoctorReport | DebtAbsent): string {
   if (report.kind === "absent") return "debt world absent";
   if (report.issues === undefined) return "✓ doctor  healthy";
-  const noun = report.issues.length === 1 ? "issue" : "issues";
-  return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
+  return ["! doctor", ...report.issues.map(doctorIssue)].join("\n");
 }
 
 const PAST_VERBS: Readonly<Record<string, string>> = { add: "added", update: "updated" };

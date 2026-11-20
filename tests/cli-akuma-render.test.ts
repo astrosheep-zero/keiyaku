@@ -138,7 +138,7 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
   );
   for (const evidence of [
     "first input", "spoken line", "indented line", "hidden reasoning", "a note", "echo ok", "exit 1",
-    "pending input", "the answer", "2 earlier events",
+    "pending input", "the answer", "… 2 omitted",
   ])
     assert.ok(text.includes(evidence), evidence);
 });
