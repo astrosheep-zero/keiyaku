@@ -192,7 +192,7 @@ test("wire validation and classification reject malformed calls before observati
   }
   for (const [name, inputs] of [
     ["spawn", [{ akumaName: "worker", prompt: "work", wait: "5m" }]],
-    ["tell", [{ akuma: "@worker", prompt: "work", wait: "5m" }]],
+    ["tell", [{ akuma: "@worker", prompt: "work", wait: false }, { akuma: "@worker", prompt: "work", timeout: "5m" }]],
     ["show", [undefined, {}, { id: "kei/example" }, { id: "debt/a", selector: "debt/a" },
       { ids: ["debt/a"] }, { selector: ["debt/a"] }, { selector: "" }, { selector: " " },
       { selector: "aku/worker/1234abcd" }, { selector: "debt/" }, { selector: "@*" }, { selector: "@" }]],
@@ -209,8 +209,8 @@ test("wire validation and classification reject malformed calls before observati
   assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, true);
   for (const input of [
     { selectors: [] }, { selectors: ["invalid"] },
-    { ...mixed, timeout: 1 }, { ...mixed, timeout: "1.5s" },
-    { ...mixed, timeout: "9007199254740992ms" },
+    { ...mixed, timeout: "5m" }, { ...mixed, for: 1 }, { ...mixed, for: "1.5s" },
+    { ...mixed, for: "9007199254740992ms" },
   ]) {
     await assert.rejects(facet.run("wait", input as never), KeiyakuUsageError);
   }
@@ -274,11 +274,12 @@ test("history selects one item or a page and observation deadlines share duratio
   assert.equal(history.safeParse({ selector: "kei/example", item: "2" }).success, true);
   for (const item of ["answer", "turn/1", "report/2"]) assert.equal(history.safeParse({ selector: "kei/example", item }).success, false);
   assert.equal(history.safeParse({ selector: "kei/example", before: 3, since: 1 }).success, false);
-  for (const timeout of [undefined, "0ms", "30s", "5m", "1.5s"]) {
-    const expected = timeout !== "1.5s";
-    const deadline = timeout === undefined ? {} : { timeout };
-    assert.equal(Keiyaku.verbs.ask.input.safeParse({ akuma: "@worker", prompt: "answer", schema: {}, ...deadline }).success, expected);
-    assert.equal(Keiyaku.verbs.wait.input.safeParse({ selectors: ["@worker"], ...deadline }).success, expected);
+  for (const duration of [undefined, "0ms", "30s", "5m", "1.5s", "9007199254740992ms"]) {
+    const expected = duration !== "1.5s" && duration !== "9007199254740992ms";
+    const request = { akuma: "@worker", prompt: "answer" };
+    assert.equal(Keiyaku.verbs.ask.input.safeParse({ ...request, schema: {}, ...(duration === undefined ? {} : { timeout: duration }) }).success, expected);
+    assert.equal(Keiyaku.verbs.tell.input.safeParse({ ...request, wait: duration ?? true }).success, expected);
+    assert.equal(Keiyaku.verbs.wait.input.safeParse({ selectors: ["@worker"], ...(duration === undefined ? {} : { for: duration }) }).success, expected);
   }
 });
 

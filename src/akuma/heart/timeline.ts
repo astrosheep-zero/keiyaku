@@ -206,6 +206,29 @@ export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact
   });
 }
 
+// The status frontier and its bounded Wait tail use the same retained membership.
+const turnTimelineSelection = `
+      SELECT sequence FROM turns WHERE sequence = :turn
+      UNION SELECT sequence FROM calls WHERE turn_sequence = :turn
+      UNION SELECT sequence FROM reports WHERE turn_sequence = :turn
+      UNION SELECT sequence FROM activity WHERE turn_sequence = :turn
+      UNION SELECT tells.sequence FROM tells
+      JOIN tell_deliveries ON tell_deliveries.tell_id = tells.id
+      WHERE tell_deliveries.turn_sequence = :turn`;
+
+export const CURRENT_TURN_TAIL_LIMIT = 3;
+
+export function currentTurnTailFacts(database: DatabaseSync, turn: number): readonly TimelineFact[] {
+  const rows = database
+    .prepare(
+      `WITH selected(sequence) AS (${turnTimelineSelection})
+      SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence)
+      ORDER BY sequence DESC LIMIT ${CURRENT_TURN_TAIL_LIMIT}`,
+    )
+    .all({ turn }) as unknown as TimelineRow[];
+  return decodeTimelineBatch(readTimelineBatch(database, rows.reverse()));
+}
+
 /** Select the latest Turn, its delivered input, pending input and latest retained outcome. */
 export function statusFacts(database: DatabaseSync): readonly TimelineFact[] {
   const frontier = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
@@ -213,25 +236,12 @@ export function statusFacts(database: DatabaseSync): readonly TimelineFact[] {
     | undefined;
   const rows = database
     .prepare(
-      `WITH selected(sequence) AS (
-      SELECT sequence FROM turns WHERE sequence = ?
+      `WITH selected(sequence) AS (${turnTimelineSelection}
       UNION SELECT MAX(end_sequence) FROM turns WHERE end_sequence IS NOT NULL
-      UNION SELECT sequence FROM calls WHERE turn_sequence = ?
-      UNION SELECT sequence FROM reports WHERE turn_sequence = ?
-      UNION SELECT sequence FROM activity WHERE turn_sequence = ?
-      UNION SELECT tells.sequence FROM tells
-      JOIN tell_deliveries ON tell_deliveries.tell_id = tells.id
-      WHERE tell_deliveries.turn_sequence = ?
       UNION SELECT sequence FROM tells WHERE ${tellStateSql} = 'pending'
     ) SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence) ORDER BY sequence`,
     )
-    .all(
-      frontier?.sequence ?? null,
-      frontier?.sequence ?? null,
-      frontier?.sequence ?? null,
-      frontier?.sequence ?? null,
-      frontier?.sequence ?? null,
-    ) as unknown as readonly TimelineRow[];
+    .all({ turn: frontier?.sequence ?? null }) as unknown as readonly TimelineRow[];
   return decodeTimelineBatch(readTimelineBatch(database, rows));
 }
 

@@ -37,7 +37,7 @@ export const akumaReportResultSchema = z.union([
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
 export type AkumaIdleResult = Readonly<{
   reason: "completed" | "deadline";
-  status: Extract<AkumaWaitItem, { kind: "observed" }>;
+  status: Exclude<AkumaWaitItem, { state: "missing" | "unavailable" }>;
 }>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;

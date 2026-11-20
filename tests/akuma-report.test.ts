@@ -158,10 +158,10 @@ test("a deadline crossing the completion and report witness retains the exact an
       expire();
     }
   });
-  const pending = facet.wait({ selectors: [id], timeout: "10s" });
+  const pending = facet.wait({ selectors: [id], for: "10s" });
   await Promise.race([baseline.promise, pending.then(() => assert.fail("wait stopped before its report baseline"))]);
-  const worker = Akuma.select(world, id);
-  assert.equal((await worker.report("last progress before completion")).kind, "recorded");
+  const reportAt = "2026-10-30T00:00:01.000Z";
+  assert.equal((await recordReport(paths, { text: "last progress before completion", at: reportAt })).kind, "recorded");
   await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT,
     outcome: { kind: "answered", answer, session: { sessionId: "completion-witness" } } });
   assert.equal((await finishBodyIfIdle(paths, { sequence: body.sequence, at: AT })).kind, "finished");
@@ -169,11 +169,7 @@ test("a deadline crossing the completion and report witness retains the exact an
   settled = true;
   const result = await pending;
   assert.ok(atDeadline, "the bound expired as the confirming read committed");
-  assert.equal(result.reason, "completed");
-  const member = result.members[0];
-  assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
-  assert.equal(member.observation.life, "asleep");
-  assert.deepEqual(member.observation.outcome, { kind: "answered", answer, historyId: `turn/${turn.sequence}` });
+  assert.deepEqual(result.members, [{ akuma: id, state: "done", turn: `turn/${turn.sequence}`, at: AT, lastActivityAt: reportAt, answer }]);
 });
 
 test("exact report history selects retained identity without observing outcomes", async (context) => {
@@ -259,12 +255,12 @@ test("answer keeps its exact Turn through later failure, cancellation and report
     const report = await recordReport(value.allocated.paths, { text: "later report", at: AT });
     assert.ok(report.kind === "recorded");
     const answer = await facet.history({ selector, item: "answer" });
-    assert.deepEqual(answer, { kind: "akuma-answer", akumaId: selector,
-      historyId: `turn/${value.turn.sequence}`, answer: "old\n  exact answer\n" });
+    const outcome = { turn: `turn/${value.turn.sequence}`, state: "done", at: AT, answer: "old\n  exact answer\n" } as const;
+    assert.deepEqual(answer, { kind: "akuma-answer", akumaId: selector, ...outcome });
     assert.ok(answer.kind === "akuma-answer");
-    const exact = await facet.history({ selector, item: answer.historyId });
-    assert.ok(exact.kind === "akuma-exact" && exact.outcome.kind === "answered");
-    assert.equal(exact.outcome.answer, answer.answer);
+    const exact = await facet.history({ selector, item: answer.turn });
+    assert.ok(exact.kind === "akuma-exact");
+    assert.deepEqual(exact.outcome, outcome);
     const latest = await facet.history({ selector, limit: 1 });
     assert.ok(latest.kind === "akuma");
     assert.equal(latest.events[0]?.id, report.report.sequence);
@@ -275,7 +271,7 @@ test("answer keeps its exact Turn through later failure, cancellation and report
     await endTurn(value.allocated.paths, { turnSequence: next.sequence, completedAt: AT,
       outcome: { kind: "answered", answer: "", session: { sessionId: "native" } } });
     assert.deepEqual(await facet.history({ selector, item: "answer" }), {
-      kind: "akuma-answer", akumaId: selector, historyId: `turn/${next.sequence}`, answer: "",
+      kind: "akuma-answer", akumaId: selector, turn: `turn/${next.sequence}`, at: AT, state: "done", answer: "",
     });
     const empty = await runCli(["history", selector, "--answer"], { cwd: root });
     assert.equal(empty.exit, 0, empty.stderr);

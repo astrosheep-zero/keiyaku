@@ -56,8 +56,9 @@ export class GitPlumbingError extends Error {
       message: string;
       pid?: number | null;
     }>,
+    options?: ErrorOptions,
   ) {
-    super(input.message);
+    super(input.message, options);
     this.name = "GitPlumbingError";
     this.stdout = Buffer.from(input.stdout ?? "");
     this.stderr = Buffer.from(input.stderr);
@@ -93,7 +94,7 @@ function gitProcessOptions(repository: GitRepository, args: readonly string[], e
   };
 }
 
-function commandError(command: readonly string[], error: unknown): GitPlumbingError {
+function commandError(command: readonly string[], error: unknown, options?: ErrorOptions): GitPlumbingError {
   const candidate = error as {
     message?: string;
     stdout?: Buffer | string;
@@ -104,13 +105,49 @@ function commandError(command: readonly string[], error: unknown): GitPlumbingEr
   const stderr = candidate.stderr === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stderr);
   const stdout = candidate.stdout === undefined ? Buffer.alloc(0) : Buffer.from(candidate.stdout);
   const detail = stderr.length === 0 ? (candidate.message ?? "git command failed") : stderr.toString("utf8");
-  return new GitPlumbingError({
-    stdout,
-    stderr,
-    status: candidate.status ?? null,
-    message: `${command.join(" ")}: ${detail}`,
-    pid: candidate.pid ?? null,
+  return new GitPlumbingError(
+    {
+      stdout,
+      stderr,
+      status: candidate.status ?? null,
+      message: `${command.join(" ")}: ${detail}`,
+      pid: candidate.pid ?? null,
+    },
+    options,
+  );
+}
+
+async function retireFiniteGit(owned: ReturnType<typeof spawnCancellableProcess>) {
+  const { child } = owned;
+  type Terminal = Readonly<{ code: number | null; error?: Error }>;
+  let exit: Terminal | undefined;
+  let cancelledExit = false;
+  child.once("exit", (code, bySignal) => {
+    exit = { code };
+    // A stop that arrived only while closing the streams did not cause the exit.
+    cancelledExit = owned.cancelled() && (bySignal === "SIGTERM" || bySignal === "SIGKILL");
   });
+  const closed = new Promise<Terminal>((resolveTerminal) => {
+    child.once("error", (error) => {
+      exit = { code: null, error };
+      resolveTerminal(exit);
+    });
+    child.once("close", (code) => resolveTerminal({ code }));
+  });
+  // If retirement fails before close, don't block on streams it couldn't retire.
+  // waitTermination returns that same owned error and also releases the abort listener.
+  const close = await Promise.race([closed, owned.terminationFailure]).catch(() => undefined);
+  let retirement: { error: unknown } | undefined;
+  try {
+    await owned.waitTermination();
+  } catch (error) {
+    retirement = { error };
+  }
+  return { terminal: close ?? exit, retirement, cancelledExit };
+}
+
+function gitExitDiagnostic(status: number | null, cancelled: boolean, error?: Error): string {
+  return error?.message ?? (cancelled ? "git process cancelled" : `git exited with status ${status ?? "unknown"}`);
 }
 
 export async function executeGit(
@@ -119,8 +156,9 @@ export async function executeGit(
   input?: string | Uint8Array,
   environment?: NodeJS.ProcessEnv,
 ): Promise<Buffer> {
-  if (repository.signal?.aborted === true) {
-    throw commandError(args, { message: "git process cancelled", status: null });
+  const { signal } = repository;
+  if (signal?.aborted === true) {
+    throw commandError(args, { message: "git process cancelled", status: null }, { cause: signal.reason });
   }
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
@@ -139,27 +177,30 @@ export async function executeGit(
     inputError = error;
   });
   child.stdin!.end(input);
-  const terminal = await Promise.race([
-    new Promise<Readonly<{ code: number | null; error?: Error }>>((resolveTerminal) => {
-      child.once("error", (error) => resolveTerminal({ code: null, error }));
-      child.once("close", (code) => resolveTerminal({ code }));
-    }),
-    owned.terminationFailure,
-  ]);
-  await owned.waitTermination();
-  const output = Buffer.concat(stdout);
-  if (!owned.cancelled() && terminal.code === 0 && inputError === undefined) return output;
-  throw commandError(args, {
-    message:
-      (owned.cancelled() ? "git process cancelled" : undefined) ??
-      terminal.error?.message ??
-      inputError?.message ??
-      `git exited with status ${terminal.code ?? "unknown"}`,
-    stdout: output,
-    stderr: Buffer.concat(stderr),
-    status: terminal.code,
-    pid: child.pid,
-  });
+  const { terminal, retirement, cancelledExit } = await retireFiniteGit(owned);
+  const status = terminal?.code ?? null;
+  const problem = terminal?.error ?? inputError;
+  const cancelled = cancelledExit && status === null && problem === undefined;
+  if (problem === undefined) {
+    if (retirement !== undefined && (terminal === undefined || status === 0 || cancelled)) throw retirement.error;
+    if (status === 0) return Buffer.concat(stdout);
+  }
+  const failure = commandError(
+    args,
+    {
+      message: gitExitDiagnostic(status, cancelled, problem),
+      stdout: Buffer.concat(stdout),
+      stderr: Buffer.concat(stderr),
+      status,
+      pid: child.pid,
+    },
+    cancelled ? { cause: signal?.reason } : undefined,
+  );
+  if (retirement !== undefined) {
+    const clean = retirement.error instanceof Error ? retirement.error.message : String(retirement.error);
+    throw new AggregateError([failure, retirement.error], `${failure.message.trimEnd()}; ${clean}`, { cause: failure });
+  }
+  throw failure;
 }
 
 export function executeLiteralGit(repository: GitRepository, args: readonly string[], input?: string | Uint8Array) {

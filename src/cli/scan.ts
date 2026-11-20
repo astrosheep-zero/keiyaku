@@ -1,12 +1,13 @@
 import { isBlankInput } from "./usage.js";
 
 /** One surface's option table, named the way its refusal text names the surface. */
-export type ScanFlagKind = "boolean" | "value" | "raw-value" | "repeat";
+export type ScanFlagKind = "boolean" | "value" | "raw-value" | "repeat" | "optional-value";
 
 export type ScanSpec<Reader extends string = string> = Readonly<{
   /** Names this surface in refusal text: `bind`, `spawn`, `debt add`. */
   subject: string;
   flags: Readonly<Record<string, ScanFlagKind>>;
+  acceptsOptionalValue?: (value: string) => boolean;
   /** The reader that consumes `-` input; absent makes `-` invalid here. */
   stdin?: Reader;
   /** Refusal text for `-` on a surface that reads no stdin. */
@@ -63,7 +64,10 @@ function assignOption(
 ): number {
   const { token, name, kind, value } = option;
   if (flags[name] !== undefined && kind !== "repeat") fail(`duplicate option: ${token}`);
-  if (kind === "boolean") {
+  if (
+    kind === "boolean" ||
+    (kind === "optional-value" && !(value !== undefined && spec.acceptsOptionalValue?.(value)))
+  ) {
     flags[name] = true;
     return 0;
   }

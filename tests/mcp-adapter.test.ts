@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -36,7 +37,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
-import { beginTurn, endTurn, readSoul } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, finishBodyIfIdle, readSoul } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
@@ -349,7 +350,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: "10m" }],
-    ["tell", { akuma: "@worker", prompt: "work", wait: true }],
+    ["tell", { akuma: "@worker", prompt: "work", wait: false }],
     ["tell", { akuma: "@worker", prompt: "work", timeout: "0ms" }],
     ["show", {}],
     ["show", { id: "debt/example" }],
@@ -459,6 +460,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     const properties = tool.inputSchema.properties as Record<string, { anyOf?: unknown }>;
     for (const [key, schema] of Object.entries(properties)) {
       if (tool.name === "history" && key === "item") continue;
+      if (tool.name === "tell" && key === "wait") {
+        assert.deepEqual(schema.anyOf, [{ type: "boolean", const: true }, { type: "string" }]);
+        continue;
+      }
       assert.equal(schema.anyOf, undefined, `${tool.name}.${key}`);
     }
     assert.equal(JSON.stringify(tool.inputSchema).includes('"$ref"'), false);
@@ -472,14 +477,11 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "for", "string"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
   }
-  for (const name of ["spawn", "tell"]) {
-    const properties = tools.find(tool => tool.name === name)!.inputSchema.properties!;
-    assert.equal(Object.hasOwn(properties, "wait"), false);
-  }
+  assert.equal(Object.hasOwn(tools.find(tool => tool.name === "spawn")!.inputSchema.properties!, "wait"), false);
   assert.deepEqual(tools.find(tool => tool.name === "wait")!.inputSchema.required, ["selectors"]);
   assert.ok(tools.find(tool => tool.name === "show")!.inputSchema.required?.includes("selector"));
   assert.ok(tools.find(tool => tool.name === "kill")!.inputSchema.required?.includes("akuma"));
@@ -1012,7 +1014,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   );
   const late = new AbortController();
   const finished = await client.callTool(
-    { name: "wait", arguments: { selectors: [before.id], timeout: "0ms" } },
+    { name: "wait", arguments: { selectors: [before.id], for: "0ms" } },
     undefined,
     { signal: late.signal },
   );
@@ -1076,7 +1078,7 @@ test("verification keeps positive and terminal-negative answers distinct from in
   });
 });
 
-test("MCP waits omit timeout for terminal Contracts and idle Akumas", { timeout: 15_000 }, async (t) => {
+test("MCP waits need no bound for terminal Contracts and idle Akumas", { timeout: 15_000 }, async (t) => {
   const repository = repositoryWithMain();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const world = await World.at(repository.path);
@@ -1089,11 +1091,11 @@ test("MCP waits omit timeout for terminal Contracts and idle Akumas", { timeout:
   });
   const environment = { HOME: world, USERPROFILE: world, KEIYAKU_HOME: world };
   const { client } = await mcpFixture(t, { cwd: world, environment, version: "test" });
-  for (const selector of [bound.contractId, worker.id]) {
+  for (const [selector, state] of [[bound.contractId, "abandoned"], [worker.id, "idle"]] as const) {
     const response = await client.callTool({ name: "wait", arguments: { selectors: [selector] } }, undefined, { signal: t.signal });
     assert.equal(response.isError, false, JSON.stringify(response));
     const result = modelOutputSchemas.wait.parse(response.structuredContent);
-    assert.equal(result.reason, "completed");
+    assert.equal(result.members[0]?.state, state);
   }
 });
 
@@ -1108,21 +1110,39 @@ test("SDK waits distinguish observed failed/canceled work from an unreadable pee
   for (const outcome of [{ kind: "failed", diagnostic: "native failed Turn" }, { kind: "canceled" }] as const) {
     const turn = await beginTurn(born.allocated.paths, { bodySequence: born.body.sequence, startedAt: "2026-10-30T00:00:00.000Z" });
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:01.000Z", outcome });
-    const response = await client.callTool({ name: "wait", arguments: { selectors: [born.allocated.id], timeout: "0ms" } });
+    const response = await client.callTool({ name: "wait", arguments: { selectors: [born.allocated.id], for: "0ms" } });
     assert.equal(response.isError, false);
-    const value = modelOutputSchemas.wait.parse(response.structuredContent);
-    const member = value.members[0];
-    assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
-    assert.equal(member.observation.outcome?.kind, outcome.kind);
-    assert.match(member.observation.outcome?.historyId ?? "", /^turn\/\d+$/u);
+    const member = modelOutputSchemas.wait.parse(response.structuredContent).members[0];
+    assert.ok(member?.state === "running" && member.last);
+    assert.equal(member.last.state, outcome.kind);
+    assert.equal(member.last.turn, `turn/${turn.sequence}`);
   }
   const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "feed0024", createdAt: "2026-10-30T00:00:00.000Z" });
-  writeFileSync(peer.paths.heart, "not a Heart database\n");
-  const input = { selectors: [born.allocated.id, peer.id], completion: "all" as const, timeout: "150ms" };
-  const response = await client.callTool({ name: "wait", arguments: input });
+  const prepare = DatabaseSync.prototype.prepare;
+  let corrupted = false;
+  const witness = t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    // Explicit selection proves both Souls first. Fail the peer only when the first native Wait round starts.
+    if (!corrupted && sql.includes("FROM bodies ORDER BY sequence DESC LIMIT 1")) {
+      writeFileSync(peer.paths.heart, "not a Heart database\n");
+      corrupted = true;
+    }
+    return prepare.call(this, sql);
+  });
+  const input = { selectors: [born.allocated.id, peer.id], completion: "all" as const, for: "150ms" };
+  const incomplete = await client.callTool({ name: "wait", arguments: input }).finally(() => witness.mock.restore());
+  assert.ok(corrupted, "native Wait observation reached the first member");
+  assert.equal(incomplete.isError, false, JSON.stringify(incomplete));
+  const value = modelOutputSchemas.wait.parse(incomplete.structuredContent);
+  assert.deepEqual(value.members.map(({ state }) => state), ["running", "unavailable"]);
+  assert.match(JSON.stringify(incomplete.content), /not a database/u);
+  assert.equal((await finishBodyIfIdle(born.allocated.paths, {
+    sequence: born.body.sequence, at: "2026-10-30T00:00:02.000Z",
+  })).kind, "finished");
+  born.holder.release();
+  const response = await client.callTool({ name: "wait", arguments: { ...input, selectors: [born.allocated.id] } });
   assert.equal(response.isError, true);
   assert.equal(response.structuredContent, undefined);
-  assert.match(JSON.stringify(response.content), /not a database/u);
+  assert.match(JSON.stringify(response.content), /canceled turn\//u);
 });
 
 test("SDK wire ask passes JSON Schema and returns identity-decoded answer", async (t) => {
@@ -1164,18 +1184,18 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     const child = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
     assert.equal(child.action?.kind, "started");
     assert.match(child.action.historyId, /^turn\/[1-9][0-9]*$/u);
-    const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
+    const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], for: "30s" } });
     assert.equal(waited.isError, false);
     const completion = modelOutputSchemas.wait.parse(waited.structuredContent);
-    assert.ok(completion.members[0]?.kind === "akuma" && completion.members[0].observation.kind === "observed");
+    assert.equal(completion.members[0]?.state, "done");
     const told = await client.callTool({
       name: "tell", arguments: { akuma: child.akumaId, prompt: "structured" },
     });
     assert.equal(told.isError, false, JSON.stringify(told));
-    assert.match(JSON.stringify(told.content), new RegExp(`✓ ${child.akumaId} started turn/[1-9][0-9]*`, "u"));
-    const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
+    assert.match(JSON.stringify(told.content), new RegExp(`▸ ${child.akumaId} +told`, "u"));
+    const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], for: "30s" } });
     assert.equal(toldWait.isError, false, JSON.stringify(toldWait));
-    assert.equal(modelOutputSchemas.wait.parse(toldWait.structuredContent).reason, "completed");
+    assert.equal(modelOutputSchemas.wait.parse(toldWait.structuredContent).members[0]?.state, "done");
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",

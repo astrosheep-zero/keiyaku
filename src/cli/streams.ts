@@ -3,6 +3,7 @@ import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./render/terminal.j
 
 const EXIT_CODES = {
   accepted: 0,
+  incomplete: 75,
   refused: 1,
   retryable: 2,
   failed: 3,

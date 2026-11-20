@@ -31,7 +31,8 @@ test("all distinguished root SDK errors share the base and declare their owner c
     cause,
     outcome: { kind: "contract", contractId: bound.contractId },
     spawn: { kind: "spawned", akumaId: id },
-    tell: { kind: "admitted", akumaId: id, tellId: "exact-input" },
+    tell: { result: "failed", akumaId: id, tellId: "exact-input",
+      failures: [{ stage: "observation", diagnostic: cause.message }] },
   };
   const base = new KeiyakuError("invalid-input", "caller error", options);
   const cases: readonly (readonly [KeiyakuError, KeiyakuErrorCategory])[] = [

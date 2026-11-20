@@ -3,11 +3,13 @@ import { z } from "zod";
 import {
   publicFileChangeSchema,
   publicPermissionRequestSchema,
+  retainedTurnOutcome,
+  turnOutcomeSchema,
+  turnHistoryIdSchema,
   type PermissionRow,
   type ActivityRow,
   type ToolRow,
 } from "./projection.js";
-import { turnHistoryIdSchema } from "./identity.js";
 import { clipActionText, compactTimelineItem, oneLine, permissionText, toolSummary } from "./timeline-text.js";
 
 const sequence = z.number().int().nonnegative().safe();
@@ -43,6 +45,11 @@ export const currentWorkSchema = z
   })
   .readonly();
 export type CurrentWork = z.output<typeof currentWorkSchema>;
+export const addressedWorkSchema = currentWorkSchema
+  .unwrap()
+  .extend({ outcome: turnOutcomeSchema.exactOptional() })
+  .readonly();
+export type AddressedWork = z.output<typeof addressedWorkSchema>;
 
 function currentAction(row: ActivityRow): CurrentWork["summary"] {
   let source: string;
@@ -85,7 +92,7 @@ function latestUnmatchedTool(rows: readonly ActivityRow[], turnSequence: number)
 }
 
 /** Current work reads the complete directly retained frontier, never a bounded tail. */
-export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
+function workFrontier(rows: readonly ActivityRow[]) {
   const turn = rows.findLast((row) => row.kind === "turn");
   const outcome = rows.findLast((row) => row.kind === "outcome");
   const open = turn !== undefined && (outcome === undefined || outcome.turnSequence !== turn.sequence);
@@ -103,7 +110,7 @@ export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
         belongsToTurn(row, turn?.sequence),
     );
   const summary = selected === undefined ? undefined : currentAction(selected);
-  return {
+  const work: Omit<CurrentWork, "outcome"> = {
     kind: open ? "open" : "idle",
     ...(turn === undefined ? {} : { turn: { sequence: turn.sequence } }),
     ...(awaiting === undefined
@@ -117,16 +124,15 @@ export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
           },
         }),
     ...(pending.length === 0 ? {} : { pending }),
-    ...(outcome === undefined
-      ? {}
-      : {
-          outcome: {
-            historyId: `turn/${outcome.turnSequence}` as const,
-            verdict: outcome.outcome.kind,
-          },
-        }),
     ...(summary === undefined ? {} : { summary }),
   };
+  return { work, turn, outcome };
+}
+
+export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
+  const { work, outcome } = workFrontier(rows);
+  if (outcome === undefined) return work;
+  return { ...work, outcome: { historyId: `turn/${outcome.turnSequence}`, verdict: outcome.outcome.kind } };
 }
 
 export const reportedFileChangeSchema = publicFileChangeSchema.unwrap().pick({ path: true, diffstat: true }).readonly();
@@ -143,7 +149,9 @@ function accumulateChange(previous: ReportedFileChange | undefined, change: Repo
 
 /** Native status derives its detail and advisory changes on the same work frontier. */
 export function summarizeFrontier(rows: readonly ActivityRow[], executionDir: string) {
-  const work = projectCurrentWork(rows);
+  const { work, turn, outcome } = workFrontier(rows);
+  const retained =
+    outcome !== undefined ? retainedTurnOutcome(outcome) : turn === undefined ? undefined : retainedTurnOutcome(turn);
   const recent = frontierTail(rows);
   const changes = new Map<string, ReportedFileChange>();
   for (const row of rows) {
@@ -167,7 +175,7 @@ export function summarizeFrontier(rows: readonly ActivityRow[], executionDir: st
   });
   const outside = changes.size - inside.length;
   return {
-    work,
+    work: { ...work, ...(retained === undefined ? {} : { outcome: retained }) },
     ...(recent.length === 0 ? {} : { recent }),
     ...(inside.length === 0 ? {} : { changes: inside.slice(-5) }),
     ...(inside.length > 5 ? { moreChanges: true as const } : {}),

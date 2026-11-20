@@ -161,11 +161,8 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
   assert.equal(waited.reason, "completed", `public wait confirms ${selector} settled after kill`);
   assert.equal(waited.results.length, 1, `public wait observes ${selector} once`);
   const observed = waited.results[0]!;
-  assert.equal(observed.kind, "observed");
-  if (observed.kind === "observed") {
-    assert.equal(observed.id, member.id);
-    assert.notEqual(observed.life, "running");
-  }
+  assert.equal(observed.akuma, member.id);
+  assert.ok(["done", "idle", "canceled"].includes(observed.state));
 }
 
 /**
@@ -219,27 +216,22 @@ test("packaged prompt-free spawn births without admitting a Tell", { timeout: 12
   }
 });
 
-test("packaged spawn and tell refuse the removed --wait option", { timeout: 120_000 }, async () => {
+test("packaged Spawn does not accept answer observation", { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    for (const argv of [
-      ["-C", world, "spawn", "worker", "--bare", "--wait", "1s", "prompt"],
-      ["-C", world, "tell", "@worker", "--wait", "1s", "continue"],
-    ] as const) {
-      const result = await runPackagedCli(argv, { cwd: world, env });
-      assert.equal(result.code, 64, result.stderr);
-      assert.equal(result.stdout, "");
-      assert.match(result.stderr, /reason  option --wait is not valid for (?:spawn|tell)/u);
-      assert.match(result.stderr, /help  keiyaku (?:spawn|tell) --help/u);
-    }
+    const result = await runPackagedCli(["-C", world, "spawn", "worker", "--bare", "--wait", "1s", "prompt"], { cwd: world, env });
+    assert.equal(result.code, 64, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /reason  option --wait is not valid for spawn/u);
+    assert.match(result.stderr, /help  keiyaku spawn --help/u);
   } finally {
     await removeTempDirectory(root);
   }
 });
 
 test(
-  "packaged spawn and tell confirm submission and leave answers to separate waits",
+  "packaged Tell admits input or observes its exact answer while Spawn remains independent",
   { timeout: 120_000 },
   async () => {
     assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
@@ -259,17 +251,17 @@ test(
       assert.doesNotMatch(started.stdout, /attempt \d+|answered|● running/u, "spawn waits for no answer");
       assert.equal(started.stderr, "", "spawn writes no live progress");
 
-      const single = await runPackagedCli(["-C", world, "wait", "@notes", "--timeout", "10s"], { cwd: world, env });
-      assert.equal(single.code, 0, single.stderr);
+      const single = await runPackagedCli(["-C", world, "wait", "@notes", "--for", "10s"], { cwd: world, env });
+      assert.equal(single.code, 75, single.stderr);
       assert.notEqual(single.stdout, "", "an unfinished single wait writes its status snapshot to stdout");
       assert.equal(single.stderr, "", "snapshot-only wait writes no live progress to stderr");
       assert.match(single.stdout, /aku\/worker\/[0-9a-f]{8}/u, "the snapshot names the selected Akuma");
       assert.match(
         single.stdout,
-        /● aku\/worker\/[0-9a-f]{8}(?: \(@notes\))? — running/u,
+        /⧗ aku\/worker\/[0-9a-f]{8}(?: \(@notes\))? +running/u,
         "the snapshot states the observed life",
       );
-      assert.match(single.stdout, /^deadline$/mu, "a running single wait reports its deadline");
+      assert.match(single.stdout, /^resume: .*--for 10s$/mu);
       assert.match(
         single.stdout,
         /retry note|attempt \d+/u,
@@ -288,11 +280,11 @@ test(
         );
         assert.equal(detached.code, 0, detached.stderr);
         detachedStarted = true;
-        const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--timeout", "1s"], {
+        const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--for", "1s"], {
           cwd: world,
           env,
         });
-        assert.equal(afterExit.code, 0, afterExit.stderr);
+        assert.equal(afterExit.code, 75, afterExit.stderr);
         assert.notEqual(afterExit.stdout, "", "detached wait returns its status snapshot");
         assert.equal(afterExit.stderr, "", "detached snapshot wait writes no live progress");
         assert.match(afterExit.stdout, /aku\/worker\/[0-9a-f]{8}/u, "detached snapshot names the Akuma");
@@ -310,22 +302,13 @@ test(
       assert.equal(answered.stderr, "");
       const finisherId = answered.stdout.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
       assert.notEqual(finisherId, undefined, "the admission receipt names its Akuma");
-      const answerWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--timeout", "20s"], {
+      const answerWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--for", "20s"], {
         cwd: world,
         env,
       });
       assert.equal(answerWait.code, 0, answerWait.stderr);
-      assert.match(answerWait.stdout, /^completed$/mu, "the opening work completes");
-      assert.match(
-        answerWait.stdout,
-        new RegExp(`^✓ ${finisherId!} — answered$`, "mu"),
-        "the wait snapshot carries the settled answered outcome",
-      );
-      assert.match(
-        answerWait.stdout,
-        /^[ \t]*turn\/[1-9][0-9]* · answered$/mu,
-        "the wait snapshot names its exact answered Turn",
-      );
+      const openingOutcome = answerWait.stdout.match(new RegExp(`^✓ ${finisherId} +done (turn/[1-9][0-9]*)$`, "mu"));
+      assert.ok(openingOutcome, "the wait names its exact answered Turn");
       assert.match(
         answerWait.stdout,
         /^[ \t]*the answer$/mu,
@@ -338,30 +321,30 @@ test(
         env,
       });
       assert.equal(tell.code, 0, tell.stderr);
-      assert.match(tell.stdout, new RegExp(`^✓ ${finisherId} started turn/[1-9][0-9]*\\n$`, "u"));
-      assert.doesNotMatch(tell.stdout, /the answer/u, "tell returns submission, not an answer");
+      assert.match(tell.stdout, new RegExp(`^▸ ${finisherId} +told(?: turn/[1-9][0-9]*)?\\n$`, "u"));
+      assert.doesNotMatch(tell.stdout, /the answer/u, "tell returns admission, not an answer");
       assert.equal(tell.stderr, "");
-      const toldWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--timeout", "20s"], {
+      const toldWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--for", "20s"], {
         cwd: world,
         env,
       });
       assert.equal(toldWait.code, 0, toldWait.stderr);
-      assert.match(toldWait.stdout, /^completed$/mu, "the told Turn completes");
-      assert.match(
-        toldWait.stdout,
-        new RegExp(`^✓ ${finisherId!} — answered$`, "mu"),
-        "the told wait carries the settled answered outcome",
-      );
-      assert.match(
-        toldWait.stdout,
-        /^[ \t]*turn\/[1-9][0-9]* · answered$/mu,
-        "the told wait names its exact answered Turn",
-      );
+      const followingOutcome = toldWait.stdout.match(new RegExp(`^✓ ${finisherId} +done (turn/[1-9][0-9]*)$`, "mu"));
+      assert.ok(followingOutcome);
+      assert.notEqual(followingOutcome[1], openingOutcome[1], "wait named the later actual Turn");
       assert.match(
         toldWait.stdout,
         /^[ \t]*the answer$/mu,
         "the told answer stays whole in its own block",
       );
+      const waitedTell = await runPackagedCli(["-C", world, "tell", finisherId!, "--wait", "answer this too"], {
+        cwd: world,
+        env,
+      });
+      assert.equal(waitedTell.code, 0, waitedTell.stderr);
+      const exactTell = waitedTell.stdout.match(/done (turn\/[1-9][0-9]*)/u);
+      assert.ok(exactTell && exactTell[1] !== followingOutcome[1]);
+      assert.match(waitedTell.stdout, /^[ \t]*the answer$/mu);
 
       const silent = await runPackagedCli(
         ["-C", world, "spawn", "silent", "--bare", "--alias", "@silent", "prompt"],
@@ -369,15 +352,14 @@ test(
       );
       assert.equal(silent.code, 0, silent.stderr);
       assert.equal(silent.stderr, "");
-      const silentWait = await runPackagedCli(["-C", world, "wait", "@silent", "--timeout", "20s"], {
+      const silentWait = await runPackagedCli(["-C", world, "wait", "@silent", "--for", "20s"], {
         cwd: world,
         env,
       });
       assert.equal(silentWait.code, 0, silentWait.stderr);
-      assert.match(silentWait.stdout, /^completed$/mu);
       assert.match(
         silentWait.stdout,
-        /✓ aku\/silent\/[0-9a-f]{8}(?: \(@silent\))? — answered/u,
+        /✓ aku\/silent\/[0-9a-f]{8}(?: \(@silent\))? +done turn\/\d+/u,
         "the wait conclusion distinguishes an empty answer from silence",
       );
     } finally {
@@ -396,8 +378,8 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
       ["-C", world, "spawn", "worker", "--bare", "--alias", "@notes", "prompt"],
       { cwd: world, env },
     );
-    cleanupAliases.push("@notes");
     assert.equal(running.code, 0, running.stderr);
+    cleanupAliases.push("@notes");
     const settled = await runPackagedCli(
       ["-C", world, "spawn", "finisher", "--bare", "--alias", "@done", "prompt"],
       { cwd: world, env },
@@ -407,35 +389,35 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
       ["-C", world, "spawn", "slowcoach", "--bare", "--alias", "@slow", "prompt"],
       { cwd: world, env },
     );
-    cleanupAliases.push("@slow");
     assert.equal(slow.code, 0, slow.stderr);
-    const done = await runPackagedCli(["-C", world, "wait", "@done", "--timeout", "20s"], { cwd: world, env });
+    cleanupAliases.push("@slow");
+    const done = await runPackagedCli(["-C", world, "wait", "@done", "--for", "20s"], { cwd: world, env });
     assert.equal(done.code, 0, done.stderr);
-    assert.match(done.stdout, /^completed$/mu, "the finisher settles before the plural wait");
+    assert.match(done.stdout, /done turn\/\d+/u, "the finisher settles before the plural wait");
 
     // --any returns snapshots when a selected target completes.
-    const any = await runPackagedCli(["-C", world, "wait", "@notes", "@slow", "--any", "--timeout", "6s"], {
+    const any = await runPackagedCli(["-C", world, "wait", "@notes", "@slow", "--any", "--for", "6s"], {
       cwd: world,
       env,
     });
-    assert.equal(any.code, 0, any.stderr);
+    assert.equal(any.code, 75, any.stderr);
     assert.notEqual(any.stdout, "", "an --any plural wait writes status snapshots to stdout");
     assert.equal(any.stderr, "", "an --any snapshot wait writes no live progress");
     assert.match(any.stdout, /aku\/worker\/[0-9a-f]{8}/u, "--any includes the worker snapshot");
     assert.match(any.stdout, /aku\/slowcoach\/[0-9a-f]{8}/u, "--any includes the slowcoach snapshot");
-    assert.doesNotMatch(any.stdout, /retry note/u, "--any omits thought narration");
+    assert.match(any.stdout, /^resume: .* --any --for 6s$/mu);
 
     // `--all` outlives the running target: the already settled and the running one both close.
-    const all = await runPackagedCli(["-C", world, "wait", "@notes", "@done", "--all", "--timeout", "2s"], {
+    const all = await runPackagedCli(["-C", world, "wait", "@notes", "@done", "--all", "--for", "2s"], {
       cwd: world,
       env,
     });
-    assert.equal(all.code, 0, all.stderr);
+    assert.equal(all.code, 75, all.stderr);
     assert.notEqual(all.stdout, "", "an --all plural wait writes status snapshots to stdout");
     assert.equal(all.stderr, "", "an --all snapshot wait writes no live progress");
     assert.match(all.stdout, /aku\/worker\/[0-9a-f]{8}/u, "--all includes the worker snapshot");
     assert.match(all.stdout, /aku\/finisher\/[0-9a-f]{8}/u, "--all includes the finisher snapshot");
-    assert.match(all.stdout, /^deadline$/mu, "an --all wait that outlives its running target reports its deadline");
+    assert.match(all.stdout, /^resume: .*aku\/worker\/[a-f0-9]{8} --all --for 2s$/mu, "resume selects only the unfinished member");
     assert.match(
       all.stdout,
       /retry note|attempt \d+/u,

@@ -111,8 +111,8 @@ need no adapter projection or execution capability to inspect that evidence;
 an arbitrary foreign error property does not establish confirmed admission.
 
 Ordinary spawn confirms clean birth and, when an instruction is supplied, exact
-first-Tell submission through the same Akuma owner as ordinary Tell, without a
-second birth-readiness judgment. A prompt-free spawn invents no input or Turn. A child made durable before birth settlement fails
+first-Tell submission through the Akuma owner, without a second birth-readiness
+judgment. A prompt-free spawn invents no input or Turn. A child made durable before birth settlement fails
 is retained as partial creation, not clean birth. Explicit SDK answer observation
 instead watches the first Tell's text answer without withdrawing its admission
 at the deadline. Akuma execution owns admission and submission; Library composes
@@ -178,11 +178,10 @@ historical content and correlation independently of current associations.
 Latest-answer selection keeps the actual answered Turn coordinate beside its full
 answer from the same retained observation; a later report, failed or cancelled
 Turn cannot replace it. Composition never searches again to infer that coordinate.
-Selection uses one verb per meaning on both faces: `tell` admits a Tell and
-normally confirms its submission, or may explicitly observe its text answer;
-`ask` requires a JSON Schema document and observes the
-parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide
-work. Ask alone distinguishes invalid output; text observation reports it as
+Selection defers Tell admission and optional observation to the
+[native Akuma owner](akuma-public.md). `ask` requires a JSON Schema document and
+observes the parsed JSON answer bound to that admission; `wait` observes existing
+Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as
 failure with the same diagnostic. Schema belongs only to ask. Bounds and
 cancellation after admission stop observation, not admission.
 

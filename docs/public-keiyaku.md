@@ -52,8 +52,8 @@ Observation bounds share duration semantics and never stop the observed work.
 Native Akuma SDK inputs and CLI flag grammar remain independent of this
 model-facing vocabulary.
 Structured output is reserved for routing operations and retains the producing
-owner's declared wire answer, including an answered negative verdict or an
-unanswered or deadline observation. The same declaration serves discovery and
+owner's declared wire answer, including an answered negative verdict, an
+incomplete Wait, or an unanswered or deadline observation. The same declaration serves discovery and
 transport. Stops without a routing receipt remain classification-led text.
 A confirmed Spawn receipt follows [public-results.md](public-results.md); its
 transport does not change the failed disposition of a stopped Spawn.
@@ -75,10 +75,10 @@ Observation uses the dedicated Contract preview operation; submission uses nativ
 delivery admission. Both return their existing native answers without an envelope,
 and the selected mode supplies presentation context without becoming authority.
 
-Invocation spawn confirms birth and any first input's submission; Tell confirms
-submission of its exact input, and kill confirms the selected stops. Each
-returns the native action judgment without observing an answer. Wait observes
-existing work; Ask admits structured input and observes its exact answer.
+Invocation Spawn confirms birth and any first input's submission. Ordinary
+Tell acknowledges durable admission; explicit Tell observation follows only that
+input's retained Turn. Kill confirms selected stops. Wait observes existing
+work; Ask admits structured input and observes its exact answer.
 Standalone Akuma and Akumas SDK observation and hosting remain independent
 capabilities, not invocation conveniences.
 
@@ -183,29 +183,33 @@ retain their meaning in the composed answer.
 Selection freezes resolved identities once in first-seen caller order, including
 native Akuma selector expansion and deduplication. A Contract identity selects
 its journal, never its Dispatch roster. One invocation-wide any/all judgment and
-one monotonic deadline cover the whole set, including observation reads; already
-satisfied members count immediately. A zero deadline still requests an initial
-snapshot. Completion takes precedence when witnessed at the deadline edge.
-The answer retains ordered, identified native member evidence, including peers
-not yet observed when another member satisfies the wait. Neither deadline nor
-cancellation stops work; all owned read custody and timers retire before return
-or exceptional propagation. Contract-only observation requires no Akuma World.
+an optional monotonic bound cover the whole set, including observation reads;
+already satisfied members count immediately. A zero bound still requests an
+initial snapshot. Expiry admits no new observation. The answer retains ordered
+native states, including peers not yet observed when another member satisfies
+the wait. Expiry and cancellation stop no work; owned reads and timers retire
+before return or exceptional propagation. Caller cancellation does not replace
+independent failures of issued reads or their retirement. Contract-only
+observation requires no Akuma World.
 Native single-family SDK waits remain independent operations with their own
 interfaces. Composition retains the Akuma owner's lightweight completion
 observation discipline: waiting on unfinished work does not repeatedly load its
 full monitoring detail. Returned Contract members include thin journal-derived
 summary facts from their witnessed observation, without physical workspace or
-target enrichment. Akuma members preserve native life, available activity time
-and full exact-turn outcomes; optional association already known to the
-observation does not justify new joins. Running members keep any compact
+target enrichment. Akuma members preserve native work state, independent activity
+time, and exact retained outcomes without replacing current work with an old
+answer. Running members keep any compact
 current-Turn tail witnessed with that native observation, with local activity
 unavailability rather than loss of the member's outcome. Invocation wait also
 observes new retained progress reports from its frozen Akuma selection. Each
 wait starts from the report frontier it first observes for each member, so earlier
 reports do not wake it. A newer witnessed report interrupts observation in either
 completion mode but satisfies no member; witnessed group completion takes
-precedence. The reporting member carries the exact report address and a bounded
-preview. This is a read, not a stream or a delivery guarantee; it creates no
+precedence. The reporting member carries the exact report address and a bounded preview.
+Observed unfinished work makes the result incomplete even after an any-mode
+satisfaction or report. Otherwise failed, canceled, missing, or unavailable
+members make it a failure. The same judgment governs classification at the
+invocation edges; an incomplete answer remains a normal transport result. This is a read, not a stream or a delivery guarantee; it creates no
 facts and does not depend on optional notification. Standalone completion waits
 are unchanged. Waiting is not a full status read or reported-change observation.
 History selects one subject and either a bounded timeline page or one exact item.

@@ -431,10 +431,12 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
       answer: { ok: true },
       wake: { kind: "failed" as const, diagnostic: "historical wake refused" },
     };
-    const reason = withTellFailureReceipt(new Error(mode === "cancel" ? "caller canceled" : "read failed"), {
-      kind: "admitted",
+    const diagnostic = mode === "cancel" ? "caller canceled" : "read failed";
+    const reason = withTellFailureReceipt(new Error(diagnostic), {
+      result: "failed",
       akumaId: id,
       tellId: "tell/current",
+      failures: [{ stage: "observation", diagnostic }],
     });
     let now = 0;
     const clock = t.mock.method(performance, "now", () => now);
@@ -456,7 +458,7 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
         observe?.({
           kind: "live",
           observation: {
-            status: { ...status, life: "asleep", work: projectCurrentWork([]) },
+            status: { ...status, life: "asleep", work: { kind: "idle" } },
             rows: [],
           },
         });

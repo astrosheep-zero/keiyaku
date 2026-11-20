@@ -15,11 +15,16 @@ import {
   type LiveStatusObservation,
   type WaitReason,
 } from "./akuma-observe.js";
-import { executeWaitAkuma } from "./akuma-wait.js";
+import { executeWaitAkuma, isWaitAbort, startWaitClock } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
 import { observeLaunchPath, type BodyLauncher } from "./body-launch.js";
 import { evidencedTellWake, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
-import { pendingTellReceipt, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
+import {
+  pendingTellReceipt,
+  type CallInitialTell,
+  type CallInitialTellAdmission,
+  type TellSettlement,
+} from "./call-initial-tell.js";
 import { acquireLeash, confirmAction, confirmationTimedOut } from "./control.js";
 import {
   HeldAkumaLeash,
@@ -31,6 +36,7 @@ import {
   readSoul,
   readSoulForTell,
   readTellAction,
+  readTellBodyEnd,
   recordReport,
   recordSurveillance,
   recordTell,
@@ -41,6 +47,7 @@ import {
   type ResumeCoordinate,
   type SessionFact,
   type TellFact,
+  type TurnEndFact,
   type TurnOutcome,
   type PauseFact,
 } from "./heart/index.js";
@@ -52,8 +59,8 @@ import {
   type AkumaPaths,
 } from "./identity.js";
 import { HeartAuthorityCorruptionError, HeartUnbornError, type ReportAdmission } from "./heart/facts.js";
-import type { ActivityHistory, ExactHistory } from "./projection.js";
-import { projectFact, selectExactHistory, selectHistory } from "./projection.js";
+import type { ActivityHistory, ExactHistory, SettledTurn } from "./projection.js";
+import { projectFact, projectSettledTurn, selectExactHistory, selectHistory } from "./projection.js";
 import { compactTimelineItem } from "./timeline-text.js";
 import type { AkumaWaitItem } from "./selection-observation.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -106,7 +113,7 @@ export type ForkReceipt =
   | Readonly<{ kind: "provider-forked-local-birth-failed"; session: PublicSessionCoordinate; diagnostic: string }>;
 
 export type LastAnswer =
-  | Readonly<{ kind: "answer"; answer: string; historyId: `turn/${number}` }>
+  | (Readonly<{ kind: "answer" }> & Extract<SettledTurn, { state: "done" }>)
   | Readonly<{ kind: "no-answer" }>;
 
 type AdmittedTell = Readonly<{ tell: TellFact; barrier?: PauseFact; workdirUnavailable?: true }>;
@@ -255,7 +262,7 @@ export class AkumaOwner {
     validateAkumaInput(historyInputSchema, input);
     if (input.id !== undefined) {
       const exact = await this.exactHistory(input.id);
-      if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [`turn/${exact.outcome.turnSequence}`]);
+      if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [exact.outcome.turn]);
       return exact;
     }
     const limit = input.limit ?? 12;
@@ -280,7 +287,7 @@ export class AkumaOwner {
 
   async waitReceipt(
     options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
-  ): Promise<Readonly<{ reason: WaitReason; status: Extract<AkumaWaitItem, { kind: "observed" }> }>> {
+  ): Promise<Readonly<{ reason: WaitReason; status: Exclude<AkumaWaitItem, { state: "missing" | "unavailable" }> }>> {
     validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const waited = await executeWaitAkuma({
       path: this.worldPath,
@@ -290,12 +297,9 @@ export class AkumaOwner {
       ...(this.outcomeObserved === undefined ? {} : { outcomeObserved: this.outcomeObserved }),
     });
     const status = waited.results[0];
-    if (status?.kind === "missing") throw new AkumaNotBornError(this.id);
-    if (status?.kind !== "observed") {
-      throw new AkumaProviderError(
-        status?.kind === "unobserved" ? status.diagnostic : "Akuma wait returned no observation",
-      );
-    }
+    if (status?.state === "missing") throw new AkumaNotBornError(this.id);
+    if (status === undefined || status.state === "unavailable")
+      throw new AkumaProviderError(status?.reason ?? "Akuma wait returned no observation");
     return { reason: waited.reason, status };
   }
 
@@ -341,14 +345,13 @@ export class AkumaOwner {
     const soul = await readSoulForTell(this.paths, signal);
     if (soul === null) return { kind: "not-born" };
     if (soul.id !== this.id) throw new HeartAuthorityCorruptionError("Akuma soul does not match its coordinate");
-    const directory = await observeLaunchPath(soul.cwd);
-    const newTellStop =
-      directory === "present"
-        ? undefined
-        : directory === "absent"
-          ? { cause: new AkumaWorkdirMissingError(this.id, soul.cwd) }
-          : directory;
-    signal?.throwIfAborted();
+    const checkWorkdir = async () => {
+      const directory = await observeLaunchPath(soul.cwd);
+      signal?.throwIfAborted();
+      if (directory === "absent") return { cause: new AkumaWorkdirMissingError(this.id, soul.cwd) };
+      return directory === "present" ? undefined : directory;
+    };
+    let newTellStop = await checkWorkdir();
     const tell = {
       kind: "tell" as const,
       id: options.tellId ?? randomUUID(),
@@ -357,14 +360,24 @@ export class AkumaOwner {
       ...(initiator === undefined ? {} : { initiator }),
       ...(schemaJson === undefined ? {} : { schemaJson }),
     };
-    const admissionOptions = {
-      ...(signal === undefined ? {} : { signal }),
-      ...(newTellStop === undefined ? {} : { newTellStop }),
-    };
+    const cancellation = signal === undefined ? {} : { signal };
+    const admissionOptions = { ...cancellation, ...(newTellStop === undefined ? {} : { newTellStop }) };
+    const paths = this.paths;
     const admission =
       options.interrupt === true
-        ? await recordTell(this.paths, tell, { ...admissionOptions, interrupt: true })
-        : await recordTell(this.paths, tell, admissionOptions);
+        ? await recordTell(paths, tell, { ...admissionOptions, interrupt: true })
+        : await recordTell(paths, tell, {
+            ...admissionOptions,
+            async observeRetirement(sequence) {
+              await waitForObservation({
+                ...cancellation,
+                observe: () => readTellBodyEnd(paths, sequence, signal),
+                complete: (ended) => ended,
+              });
+              newTellStop = await checkWorkdir();
+              return newTellStop;
+            },
+          });
     return admission.kind === "recorded" && newTellStop !== undefined
       ? { ...admission, workdirUnavailable: true }
       : admission;
@@ -375,37 +388,73 @@ export class AkumaOwner {
     tellId: string,
     options: Readonly<{
       timeoutMs?: number;
+      boundStartedAt?: number;
       signal?: AbortSignal;
       observe?: (observation: LiveStatusObservation) => void | Promise<void>;
+      witness?: (end: TurnEndFact) => void;
       wake?: () => "launching" | "settled" | "failed";
     }> = {},
-  ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null }>> {
+  ): Promise<
+    Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null; end?: TurnEndFact }>
+  > {
     const reader = createLiveStatusReader(this.paths, this.id);
-    const { observe, signal } = options;
+    const { observe, boundStartedAt } = options;
+    const clock =
+      boundStartedAt === undefined ? undefined : startWaitClock(options.timeoutMs, options.signal, boundStartedAt);
+    const signal = clock?.signal ?? options.signal;
+    let witnessed: TurnEndFact | undefined;
+    let announced = false;
+    const witness = (end: TurnEndFact) => {
+      if (witnessed !== undefined) return;
+      witnessed = end;
+      options.witness?.(end);
+    };
+    const announce = async () => {
+      if (witnessed === undefined || announced) return;
+      announced = true;
+      await this.outcomeObserved?.(this.id, [`turn/${witnessed.turnSequence}`]);
+    };
+    const receipt = (reason: WaitReason) => ({
+      reason,
+      outcome: witnessed?.outcome ?? null,
+      completedAt: witnessed?.completedAt ?? null,
+      ...(witnessed === undefined ? {} : { end: witnessed }),
+    });
     try {
       const waited = await waitForObservation({
-        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(clock === undefined
+          ? options.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: options.timeoutMs }
+          : { remaining: clock.remaining }),
         ...(signal === undefined ? {} : { signal }),
         observe: async () => {
-          const { tell, end, life, live } = await reader.tellOutcome(tellId, observe !== undefined, signal);
+          clock?.beforeRead();
+          const { tell, life, live } = await reader.tellOutcome(
+            tellId,
+            observe !== undefined,
+            signal,
+            clock?.beforeRead,
+            witness,
+          );
           const progress = executionProgress(life, true, options.wake?.());
           if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-          if (end !== undefined) await this.outcomeObserved?.(this.id, [`turn/${end.turnSequence}`]);
+          await announce();
           if (live !== undefined) await observe?.(await live());
-          return {
-            outcome: end?.outcome ?? null,
-            completedAt: end?.completedAt ?? null,
-            terminalWithoutTurn: (tell.state === "told" && tell.binding === undefined) || progress === "stopped",
-          };
+          return (
+            witnessed !== undefined || (tell.state === "told" && tell.binding === undefined) || progress === "stopped"
+          );
         },
-        complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
+        complete: (settled) => settled,
       });
-      return {
-        reason: waited.reason,
-        outcome: waited.value.outcome,
-        completedAt: waited.value.completedAt,
-      };
+      return receipt(waited.reason);
+    } catch (error) {
+      if (options.signal !== undefined && isWaitAbort(error, options.signal)) options.signal.throwIfAborted();
+      if (clock?.expired() !== true || !isWaitAbort(error, clock.stop.signal)) throw error;
+      await announce();
+      return receipt(witnessed === undefined ? "deadline" : "completed");
     } finally {
+      clock?.close();
       reader.clear();
     }
   }
@@ -433,41 +482,47 @@ export class AkumaOwner {
     options: Readonly<{
       signal?: AbortSignal;
       observeAnswer?: boolean;
-      onProgress?: (receipt: TellResult) => void;
+      admissionOnly?: boolean;
+      onProgress?: (receipt: TellSettlement) => void;
     }> = {},
-  ): Promise<TellResult> {
+  ): Promise<TellSettlement> {
     const paths = this.paths;
     let receipt = pendingTellReceipt(tell, barrier);
     // An exact replay behind an unavailable directory is evidence, not a new wake attempt.
-    if (workdirUnavailable === true) {
-      const wake = evidencedTellWake(await readTellAction(paths, tell.id, options.signal));
-      return wake === null ? receipt : { ...receipt, wake };
+    if (workdirUnavailable) {
+      const action = await readTellAction(paths, tell.id, options.signal);
+      return { ...receipt, wake: evidencedTellWake(action) ?? receipt.wake };
     }
-    const interruption = (result: Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>) => {
-      receipt = { ...receipt, interruption: { ...result, bodySequence: barrier!.bodySequence } };
-      if (result.kind === "unavailable") {
-        receipt = {
-          ...receipt,
-          wake: {
-            kind: "confirmation-stopped",
-            reason: result.evidence,
-            diagnostic: `Could not complete interrupt: ${result.evidence} custody`,
-          },
-        };
-      }
+    const admissionOnly = options.admissionOnly === true;
+    const witness = (known: Partial<TellSettlement>) => {
+      receipt = { ...receipt, ...known };
       options.onProgress?.(receipt);
     };
-    const settle = async (signal: AbortSignal): Promise<TellResult> => {
+    const interruption = (result: Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>) => {
+      const wake =
+        result.kind === "unavailable"
+          ? {
+              kind: "confirmation-stopped" as const,
+              reason: result.evidence,
+              diagnostic: `Could not complete interrupt: ${result.evidence} custody`,
+            }
+          : receipt.wake;
+      witness({ wake, interruption: { ...result, bodySequence: barrier!.bodySequence } });
+    };
+    const settle = async (signal: AbortSignal): Promise<TellSettlement> => {
       if (barrier !== undefined) {
         const result = await awaitInterruptCompletion(paths, barrier, signal);
         interruption(result);
         if (result.kind === "unavailable") return receipt;
       }
-      const wake = await wakeRecordedTell(paths, tell.id, runtime, signal, options.observeAnswer !== true);
-      return { ...receipt, wake };
+      const owned = { ...runtime, admissionOnly, witness };
+      const submission = options.observeAnswer !== true && !admissionOnly;
+      const evidence = await wakeRecordedTell(paths, tell.id, owned, signal, submission);
+      return { ...receipt, ...evidence };
     };
     if (options.observeAnswer) return await settle(options.signal ?? new AbortController().signal);
     return await confirmAction(options.signal, settle, async (signal) => {
+      if (receipt.wake.kind === "failed") return receipt;
       let custody = "";
       try {
         if (barrier !== undefined && receipt.interruption?.kind === "pending") {
@@ -477,10 +532,12 @@ export class AkumaOwner {
             if (latest.kind === "unavailable") return receipt;
           }
         }
-        const observed = await readTellAction(paths, tell.id, signal);
-        const wake = evidencedTellWake(observed);
-        if (wake !== null && receipt.interruption?.kind !== "pending") return { ...receipt, wake };
-        if (observed.kind === "pending" && observed.control !== null) custody = ` (${observed.control} retained)`;
+        if (!admissionOnly) {
+          const observed = await readTellAction(paths, tell.id, signal);
+          const wake = evidencedTellWake(observed);
+          if (wake !== null && receipt.interruption?.kind !== "pending") return { ...receipt, wake };
+          if (observed.kind === "pending" && observed.control !== null) custody = ` (${observed.control} retained)`;
+        }
       } catch (error) {
         options.signal?.throwIfAborted();
         if (!confirmationTimedOut(error)) throw error;
@@ -490,7 +547,9 @@ export class AkumaOwner {
         wake: {
           kind: "confirmation-stopped",
           reason: "deadline",
-          diagnostic: `Tell submission not confirmed before the action deadline${custody}; admitted input can still advance`,
+          diagnostic: admissionOnly
+            ? `Tell ${receipt.interruption?.kind === "pending" ? "interrupt" : "wake"} did not settle; admitted input is retained`
+            : `Tell submission not confirmed before the action deadline${custody}; admitted input can still advance`,
         },
       };
     });
@@ -586,7 +645,9 @@ export class AkumaOwner {
     const turn = await readLastAnsweredTurn(this.paths);
     if (turn?.end?.outcome.kind !== "answered") return { kind: "no-answer" };
     await this.outcomeObserved?.(this.id, [`turn/${turn.sequence}`]);
-    return { kind: "answer", answer: turn.end.outcome.answer, historyId: `turn/${turn.sequence}` };
+    const outcome = projectSettledTurn(turn.end);
+    if (outcome.state !== "done") return { kind: "no-answer" };
+    return { kind: "answer", ...outcome };
   }
 }
 

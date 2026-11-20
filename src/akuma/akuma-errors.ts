@@ -3,10 +3,15 @@ import type { AkumaId } from "./identity.js";
 import type { AkumaTellResult } from "./selection-observation.js";
 import type { KillEvidence } from "./heart/facts.js";
 
-export function withTellFailureReceipt(reason: unknown, tell: AkumaTellResult, signal?: AbortSignal): KeiyakuError {
-  return new KeiyakuError(errorCategory(reason, signal), reason instanceof Error ? reason.message : String(reason), {
+export function withTellFailureReceipt(
+  reason: unknown,
+  tell: AkumaTellResult,
+  signal?: AbortSignal,
+  cause = reason,
+): KeiyakuError {
+  return new KeiyakuError(errorCategory(reason, signal), cause instanceof Error ? cause.message : String(cause), {
     ...(reason instanceof KeiyakuError ? { outcome: reason.outcome, spawn: reason.spawn } : {}),
-    cause: reason,
+    cause,
     tell,
   });
 }

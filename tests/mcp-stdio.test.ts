@@ -135,7 +135,7 @@ test("packaged stdio fixture cannot reach the launching caller's actor World", a
       assert.ok(text.includes(fixture.id) && text.includes(world), text);
       assert.doesNotMatch(text, /profile\s+unavailable/u);
       // The shipped Square wait deferral opens the ledger under the packaged server's own environment.
-      const waited = await client.callTool({ name: "wait", arguments: { selectors: [fixture.id], timeout: "1s" } });
+      const waited = await client.callTool({ name: "wait", arguments: { selectors: [fixture.id], for: "1s" } });
       assert.equal(waited.isError, false, JSON.stringify(waited));
       assert.equal(existsSync(join(world, "delivery.sqlite")), true);
     } finally {

@@ -1,7 +1,8 @@
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillAdmission } from "../../akuma/akuma-errors.js";
-import type { CurrentWork } from "../../akuma/status-projection.js";
-import { approvalLines, exactActivityText, outcomeText, renderDiffstat } from "../../akuma/timeline-text.js";
+import type { AddressedWork, CurrentWork } from "../../akuma/status-projection.js";
+import type { SettledTurn } from "../../akuma/projection.js";
+import { approvalLines, exactActivityText, renderDiffstat } from "../../akuma/timeline-text.js";
 import type {
   AkumaAskResult,
   AkumaTellResult,
@@ -98,8 +99,8 @@ function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
 
 type SnapshotView = AkumaObservation;
 
-export function currentWorkLines(work: CurrentWork): readonly string[] {
-  const { awaiting, summary } = work;
+export function currentWorkLines(work: CurrentWork | AddressedWork): readonly string[] {
+  const { awaiting, summary, outcome } = work;
   return [
     ...(awaiting !== undefined
       ? [`${awaiting.id} approval`, ...subordinateLines(approvalLines(awaiting.requests, awaiting.clipped))]
@@ -107,13 +108,24 @@ export function currentWorkLines(work: CurrentWork): readonly string[] {
         ? []
         : [`${summary.id} ${safeText(summary.text)}`]),
     ...(work.pending === undefined ? [] : [`pending input ${work.pending.map((item) => item.id).join(" ")}`]),
-    ...(work.outcome === undefined ? [] : [`${work.outcome.verdict} ${work.outcome.historyId}`]),
+    ...(outcome === undefined
+      ? []
+      : "state" in outcome
+        ? outcome.state === "running"
+          ? []
+          : [
+              `${outcome.state} ${outcome.turn}`,
+              ...("reason" in outcome ? exactIndentedLines(outcome.reason, "  ") : []),
+            ]
+        : [`${outcome.verdict} ${outcome.historyId}`]),
   ];
 }
 
 function snapshotConclusion(status: AkumaObservation): string {
   const conclusion = lifeConclusion(status.life, status.work.pending !== undefined);
-  return `${conclusion.mark} ${conclusion.verb}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
+  const outcome = status.work.outcome;
+  const turn = outcome?.state === "running" ? ` ${outcome.turn}` : "";
+  return `${conclusion.mark} ${conclusion.verb}${turn}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
 }
 
 export function snapshotText(
@@ -182,62 +194,47 @@ export function askRawAnswer(result: AkumaAskResult): string | undefined {
   return result.kind === "answered" ? JSON.stringify(result.answer) : undefined;
 }
 
-/**
- * The final public snapshot as one wait summary. A stopped life stays explicit over any older
- * outcome; pending input stays visible beside the life it belongs to; a sleeping member without
- * pending input shows its settled outcome, else completion. The mark reports the observed life,
- * never continuing liveness.
- */
-function waitSummary(
-  member: Extract<AkumaWaitItem, { kind: "observed" }>,
-): Readonly<{ mark: string; summary: string }> {
-  const pending = member.pending !== undefined;
-  const outcome = member.outcome;
-  const observed =
-    member.life === "asleep" && !pending && outcome !== undefined
-      ? outcome.kind === "answered"
-        ? { mark: "✓", verb: "answered" }
-        : outcome.kind === "canceled"
-          ? { mark: "○", verb: "canceled" }
-          : { mark: "!", verb: "failed" }
-      : lifeConclusion(member.life, pending);
-  const stopped = member.life !== "asleep";
-  return {
-    mark: observed.mark,
-    summary: [
-      observed.verb,
-      ...(pending && stopped ? ["pending tell"] : []),
-      ...(outcome?.kind === "failed" && (stopped || pending) ? ["failed"] : []),
-      ...(member.strandedReason === undefined ? [] : [member.strandedReason]),
-    ].join(FACT_SEPARATOR),
-  };
+export function waitStateMark(state: string): string {
+  if (state === "running" || state === "waiting") return "⧗";
+  if (state === "failed") return "✗";
+  if (state === "canceled") return "⊘";
+  if (state === "missing" || state === "unavailable") return "?";
+  return "✓";
 }
 
-/** Compact final facts, actual recent events, and an exact-turn full outcome; never a live frame. */
+function turnOutcomeLines(outcome: SettledTurn, indent: string, label = ""): string[] {
+  return [
+    `${indent}${label}${outcome.state} ${outcome.turn}`,
+    ...("answer" in outcome
+      ? exactIndentedLines(outcome.answer, `${indent}  `)
+      : "reason" in outcome
+        ? exactIndentedLines(outcome.reason, `${indent}  `)
+        : []),
+  ];
+}
+
+export function akumaWaitMemberText(member: AkumaWaitItem, alias?: string): string {
+  const { state } = member;
+  const recent = state === "running" ? member.events : undefined;
+  return [
+    `${waitStateMark(state)} ${identity(member.akuma, alias)}  ${state}${"turn" in member && member.turn !== undefined ? ` ${member.turn}` : ""}`,
+    ...("answer" in member
+      ? exactIndentedLines(member.answer, "  ")
+      : "reason" in member && member.reason !== undefined
+        ? exactIndentedLines(member.reason, "  ")
+        : []),
+    ...("last" in member && member.last !== undefined ? turnOutcomeLines(member.last, "  ", "last ") : []),
+    ...(recent === undefined
+      ? []
+      : "reason" in recent
+        ? diagnosticLines("recent activity", recent.reason)
+        : recent.map(({ text }) => text).filter(Boolean)),
+  ].join("\n");
+}
+
 export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation): string {
   const alias = result.results.length === 1 ? presentation.alias : undefined;
-  return result.results
-    .map((member) => {
-      const subject = identity(member.id, alias);
-      if (member.kind === "missing") return `! ${subject} — Akuma not found`;
-      if (member.kind === "unobserved") {
-        const cause = `! ${subject} — observation failed${FACT_SEPARATOR}${member.diagnostic}`;
-        return exactIndentedLines(cause, "").join("\n");
-      }
-      const { mark, summary } = waitSummary(member);
-      const outcome = member.outcome;
-      const payload =
-        outcome?.kind === "answered" ? outcome.answer : outcome?.kind === "failed" ? outcome.diagnostic : undefined;
-      return [
-        `${mark} ${subject} — ${summary}`,
-        ...(member.lastActivityAt === undefined ? [] : [`  activity ${safeText(member.lastActivityAt)}`]),
-        ...(member.events ?? []).map(({ text }) => text).filter(Boolean),
-        ...(member.eventsUnavailable === undefined ? [] : diagnosticLines("recent activity", member.eventsUnavailable)),
-        ...(outcome === undefined ? [] : [`  ${outcome.historyId} · ${outcome.kind}`]),
-        ...(payload === undefined ? [] : exactIndentedLines(payload, "  ")),
-      ].join("\n");
-    })
-    .join("\n");
+  return result.results.map((member) => akumaWaitMemberText(member, alias)).join("\n");
 }
 
 export function historyText(
@@ -245,7 +242,10 @@ export function historyText(
   presentation: AkumaPresentation & Readonly<{ id?: string; since?: number }>,
 ): string {
   if (result.kind === "akuma-activity") return exactActivityText(result.row);
-  if (result.kind === "akuma-exact") return outcomeText(result.outcome);
+  if (result.kind === "akuma-exact") {
+    const { outcome } = result;
+    return outcome.state === "done" ? outcome.answer : outcome.state === "failed" ? outcome.reason : "canceled";
+  }
   if (result.kind === "akuma-answer") return result.answer;
   if (result.kind === "akuma-report") return result.text;
   if (result.kind === "akuma-no-answer") return "no answer retained";
@@ -292,10 +292,10 @@ export function callFailureLines(
 
 export function tellControlLines(
   result: Readonly<{
-    action?: AkumaTellResult["action"];
+    action?: SpawnResult["action"];
     wake?: AkumaAskResult["wake"];
-    interrupt?: AkumaTellResult["interrupt"];
-    failures?: Extract<AkumaTellResult, { kind: "failed" }>["failures"];
+    interrupt?: Extract<AkumaTellResult, { result: "failed" }>["interrupt"];
+    failures?: Extract<AkumaTellResult, { result: "failed" }>["failures"];
   }>,
 ): readonly string[] {
   const lines: string[] = [];
@@ -310,36 +310,29 @@ export function tellControlLines(
   return [...lines, ...callFailureLines(result.failures ?? [])];
 }
 
-/** A confirmed ordinary Tell names the caller's selector and settled action, without a payload preview. */
 export function tellText(
   result: AkumaTellResult,
   prompt: string,
   alias: string | undefined,
   exceptional = false,
 ): string {
-  const action =
-    !exceptional &&
-    result.kind === "admitted" &&
-    result.wake === undefined &&
-    result.input === undefined &&
-    result.interrupt === undefined
-      ? result.action
-      : undefined;
-  if (action !== undefined) {
-    const selector = alias ?? result.akumaId;
-    const settled = action.kind === "started" ? "started" : "steered";
-    return `✓ ${selector} ${settled} ${action.historyId}`;
+  if ("result" in result) {
+    const turn = result.turn === undefined ? "" : ` ${result.turn}`;
+    if (result.result === "told" && !exceptional) return `▸ ${alias ?? result.akumaId}  told${turn}`;
+    const head = `! ${result.akumaId}  tell${turn}`;
+    const [preview] = previewLines(prompt, "", 1);
+    return [
+      preview ? `${head} — ${preview}` : head,
+      ...(result.result === "failed" ? subordinateLines(tellControlLines(result)) : []),
+      ...(result.result === "failed" && result.outcome !== undefined ? turnOutcomeLines(result.outcome, "  ") : []),
+    ].join("\n");
   }
-  const wake = result.wake;
-  const mark = result.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
-  const verb = result.kind === "failed" || wake?.kind === "pending" || result.action !== undefined ? "tell" : "told";
-  const head = actionReceipt({
-    mark,
-    verb,
-    id: result.akumaId,
-    ...(alias === undefined ? {} : { alias }),
-  })[0]!;
-  const [preview] = result.action === undefined ? previewLines(prompt, "", 1) : [];
-  const verdict = preview ? `${head} — ${preview}` : head;
-  return [verdict, ...subordinateLines(tellControlLines(result))].join("\n");
+  return [
+    `${waitStateMark(result.state)} ${alias ?? result.akumaId}  ${result.state}${"turn" in result ? ` ${result.turn}` : ""}`,
+    ...("answer" in result
+      ? exactIndentedLines(result.answer, "  ")
+      : "reason" in result
+        ? exactIndentedLines(result.reason, "  ")
+        : []),
+  ].join("\n");
 }

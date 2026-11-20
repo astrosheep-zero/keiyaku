@@ -6,7 +6,7 @@ import type { BodyLauncher } from "../../src/akuma/body-launch.js";
 import { driveAkumaBody } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
-import type { AkumaTellResult } from "../../src/akuma/selection-observation.js";
+import type { SpawnResult } from "../../src/library/akuma-creation.js";
 import {
   createProviderAttempt,
   type ProviderAdapter,
@@ -41,7 +41,7 @@ export async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): 
 }
 
 /** A settled observation carries its witnessed settlement instant; compare everything else exactly. */
-export function settledInput(input: AkumaTellResult["input"]): unknown {
+export function settledInput(input: SpawnResult["input"]): unknown {
   if (input?.kind !== "answered") assert.fail("expected an answered input");
   const { completedAt, ...settled } = input;
   assert.equal(typeof completedAt, "string");

@@ -24,8 +24,9 @@ owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the
 transport. Structured output is reserved for routing operations and carries the
 producing owner's native answer in JSON wire form, described by that owner's
-schema. A confirmed partial Spawn is a structured receipt of birth whether
-returned or carried by an exception. The receipt is not a transport error and
+schema. Incomplete Wait remains an ordinary structured observation. A
+confirmed partial Spawn is a structured receipt of birth whether returned or
+carried by an exception. The receipt is not a transport error and
 does not erase the invocation's failed disposition, stopped stages, or causes.
 Other returned refusals and operational stops, like unrelated thrown failures,
 retain their classification-led text and known effects and causes without
@@ -81,7 +82,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
-| wait | Adapt caller-selected Contracts and Akumas to the invocation-owned wait composition, with group-wide completion and one observation bound. | Preserve the global conclusion, including a progress interruption with its exact report address, and ordered native member evidence without judging completion at the edge. |
+| wait | Adapt caller-selected Contracts and Akumas to the invocation-owned wait composition, with group-wide completion and an optional observation bound. | Preserve ordered native member states and any witnessed progress report without judging completion at the edge. |
 | spawn, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
@@ -162,8 +163,10 @@ usage boundary rather than returning a misleading empty list.
 The ask edge acquires a required JSON Schema from a caller-selected file and
 passes its document to the public Akuma surface. Schema acquisition failures are
 usage or input failures. Ask returns parsed JSON; tell and spawn admit text only.
-Spawn and Tell return the owner's action judgment, not merely admission or an
-answer. Kill returns native stop evidence. Wait observes existing work; Ask
+Spawn keeps its native creation and submission judgment. Ordinary Tell reports
+admission; observing its outcome is a separate caller intent. Tell and Wait
+have no implicit observation bound. Kill returns native stop evidence. Wait
+observes existing work; Ask
 observes its exact structured answer. Deadlines bound observation only.
 
 Spawn, fork, tell, ask, and surveillance use the invocation facet's existing

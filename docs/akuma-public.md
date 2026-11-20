@@ -105,9 +105,12 @@ An exact activity read recovers the independently retained fact at that identity
 It creates no outcome, fork point, or durable fact, and never substitutes a nearby
 row or another result. Provider capture and retention still bound recovery;
 unretained and non-activity coordinates remain unknown.
-It retains exact answered outcome bytes, including an empty answer, and
-the public history identity for a retained answered Turn. Latest-answer selection
-returns both from one retained observation; later non-answer facts do not replace it.
+Addressed status, waiting, and exact or latest-answer history use the same
+retained Turn outcome wherever they describe that Turn. Settlement time comes
+from Heart, independently of last activity or the observer's clock. An open
+Turn has no settlement time. Exact answers include every retained byte, even an
+empty answer. Latest-answer selection keeps that exact identity and time from
+one read; later non-answer facts do not replace it.
 Fork accepts only an exact answered point. Pruned history remains unavailable;
 observations fabricate neither cursor nor result nor loss marker.
 
@@ -158,26 +161,27 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, spawn, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message. Ordinary `tell` reports the exact Turn to which
-that input was submitted, distinguishing start from steering. It does not await
-an answer or claim continuing execution. No pending submission or interrupt is
-ordinary success. A confirmation stop or exceptional cancellation keeps known
-admission and control evidence and the native cause, without exposing Body
-identity or promising that pending work cannot advance. A proved missing frozen
-execution directory refuses new input with the exact Akuma and directory; the
-Akuma cannot be woken there. Fresh work requires a new Akuma in a live directory.
+A Tell is the admitted message. Ordinary Tell acknowledges that admission
+without needing submission confirmation or waiting for an answer. It names a
+Turn only when that input's exact association was already witnessed. Pending
+submission alone is neither failure nor proof of progress. A control or wake
+stop keeps known admission and control evidence and the native cause, without
+exposing Body identity or promising that pending work cannot advance.
+
+A proved missing frozen execution directory refuses new input with the exact
+Akuma and directory; fresh work requires a new Akuma in a live directory.
 When that directory instead disappears after admission and the exact input is
 proved undelivered, the wake receipt retains the diagnosis. Status and Wait
 observe the settled input as no longer pending without inventing a Turn.
 `ask` admits a Tell under a required JSON Schema document and observes its parsed
 JSON answer. Only Ask distinguishes invalid output from execution failure; a
 text observer of invalid schema output sees the same failure diagnostic as the
-timeline. Tell may explicitly observe the exact text answer instead of using the
-ordinary confirmation window. Both answer observations distinguish answer,
-failure, absence, and deadline. A deadline or caller signal stops observation
-without retracting the input. Schema belongs only to ask. The first Tell of a
-spawn is admitted only after clean prompt-free birth; later submission or
-observation failure does not withdraw that input.
+timeline. Tell may explicitly observe the exact retained text outcome; without
+a caller-supplied bound that observation has no product time limit. Ask keeps
+its own observation semantics. Ending observation does not retract input.
+Schema belongs only to Ask. The first input of a Spawn is admitted only after
+clean prompt-free birth; later submission or observation failure does not
+withdraw that input.
 
 Ordinary Tell uses native live submission when available; otherwise its input
 can drain in another Turn under the same Body. Failed execution
@@ -188,33 +192,23 @@ completion is not proven, the Tell stays admitted and recoverable; cancellation
 after admission stops observation only. Kill is the pure stop and launches no
 successor.
 
-`wait` observes Akuma-wide idle work until its Akuma-owned completion judgment or
-a caller deadline. Running execution keeps observation open. Normally sleeping execution
-completes only without pending Tell; without witnessed invocation-owned launch
-failure, pending input keeps the conservative wait judgment.
-Stranded, killed, hung, or untidy execution ends observation even with pending
-Tell: unsubmitted input remains retained, but is not evidence of execution that
-can advance it. Completion names the end of observation, not successful work;
-the final status preserves the lifecycle cause, outcome, and pending input.
-Standalone `idle` and plural
-or CLI `wait` name this same judgment for their respective caller contexts, and
-one set-observation owner serves standalone, plural, and invocation waits:
-frozen caller order, any/all completion, transient unreadable peers, and honest
-final observed/unobserved evidence. Each caller consumes compact native member
-evidence, without an intermediate full-status collection or a private alternate
-completion predicate. Wait returns stopped life, pending input, concurrent
-failure, and the exact retained outcome and answer, distinguishing missing from
-unreadable subjects. Lightweight probes read life and pending input without
-narration. Lifecycle-only waits do not decode retained activity. When a caller
-requests bounded activity, only a witnessed running member carries a compact
-tail of its current Turn, never a previous settled Turn's tail or a substitute
-for an exact answer. Life, outcome, and requested detail share one observation.
-Activity failure remains local; final processing stays bounded and cancellable
-after the deadline.
-Every return says whether it completed
-or reached the deadline; completion wins when the final deadline-edge observation
-satisfies the judgment. A deadline
-remains a current observation rather than manufacturing a lifecycle arm.
+Wait observes the native Akuma completion judgment, optionally within a bound.
+Actual running work keeps observation open. A sleeping Akuma waits only when
+it has witnessed durable pending input: this is incomplete but neither a
+running Turn nor a running activity tail. Stranded, killed, hung, or untidy
+execution ends observation even with pending Tell; retained input does not prove
+execution can advance it. The evidence distinguishes a stopped cause from a
+settled Turn and keeps a relevant earlier conclusion separate from new work.
+
+One native observer serves standalone, plural, and invocation waiting, keeping
+ordered identities and distinguishing missing authority from unavailable reads.
+Lifecycle-only waits do not decode retained activity. A requested running tail
+selects only a bounded membership of the witnessed current Turn before decoding;
+it is not a full status observation or an exact answer. Activity failure stays
+local. An expired bound does not authorize another read; evidence already
+witnessed remains usable. If expiry prevents a fresh life judgment, a retained
+outcome already verified for that identity remains separate from the unavailable
+current observation.
 The interrupt flag and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
@@ -224,15 +218,16 @@ Input-bound answer observation shares the execution-progress judgment, but never
 substitutes another input's outcome. An exact retained answer or failure wins;
 a historical failed wake remains visible with its usable diagnostic and log
 coordinates even when an exact Ask answer wins the invocation judgment.
-Without one, stopped execution returns unanswered and retains the input. An exact
-canceled Turn likewise returns unanswered immediately, even when successor work
-is already running; that later work never supplies the canceled Ask's answer.
-Cancellation is a retained terminal in status, history, and stream, with its own
-outcome identity but no answer and no fork point. An invocation's unsettled wake
+Without one, stopped execution retains the input and supplies no answer. An
+exact canceled Turn ends answer observation even when successor work is already
+running. Tell exposes that exact terminal; Ask returns unanswered. Cancellation
+retains its own outcome identity with no answer or fork point. An invocation's unsettled wake
 preserves its launch gap; an explicitly failed wake
 ends waiting when no execution is running and retains its admission diagnostic.
 Unexpected wake rejection remains an exceptional failure, not a fabricated
-provider outcome. Observation neither retries nor changes Tell facts. Without
+provider outcome. An exceptional Tell retains its already witnessed exact
+terminal even when a callback or retirement fails. Observation neither retries
+nor changes Tell facts. Without
 invocation-owned wake evidence, sleeping execution with pending input retains
 the conservative pending-input wait rather than guessing that launch has failed.
 

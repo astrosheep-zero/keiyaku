@@ -1,16 +1,24 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
 import {
+  canceledTurnSchema,
+  doneTurnSchema,
+  failedTurnSchema,
+  settledTurnSchema,
+  turnHistoryIdSchema,
+  type SettledTurn,
+} from "./projection.js";
+import {
   failedWakeSchema,
   pendingWakeSchema,
   tellActionSchema,
   tellConfirmationStopSchema,
-  type TellResult,
+  type TellSettlement,
 } from "./call-initial-tell.js";
 import { dispatchAssociationSchema } from "./dispatch-association.js";
 import { killEvidenceSchema } from "./heart/facts.js";
 import { akumaAliasSchema } from "../identity/selector.js";
-import { akumaIdSchema, turnHistoryIdSchema, type AkumaId } from "./identity.js";
+import { akumaIdSchema, type AkumaId } from "./identity.js";
 
 export const akumaCatalogueRowSchema = z
   .strictObject({
@@ -47,30 +55,40 @@ export const akumaObservationSchema = nativeStatus
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),
   })
   .readonly();
-// A wait reports the settled outcome, not the timeline row that carries its event coordinates.
-const waitOutcomeSchema = z.union([
-  z.strictObject({ kind: z.literal("answered"), historyId: turnHistoryIdSchema, answer: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("failed"), historyId: turnHistoryIdSchema, diagnostic: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("canceled"), historyId: turnHistoryIdSchema }).readonly(),
+const waitIdentity = { akuma: akumaIdSchema };
+const observedWait = { ...waitIdentity, lastActivityAt: nativeStatus.shape.lastActivityAt };
+const previousTurn = { last: settledTurnSchema.exactOptional() };
+export const observedAkumaWaitItemSchema = z.union([
+  ...settledTurnSchema.options.map((schema) => schema.unwrap().extend(observedWait).readonly()),
+  z
+    .strictObject({
+      ...observedWait,
+      ...previousTurn,
+      state: z.literal("running"),
+      turn: turnHistoryIdSchema.exactOptional(),
+      events: z
+        .union([nativeStatus.shape.recent.unwrap(), z.strictObject({ reason: z.string() }).readonly()])
+        .exactOptional(),
+    })
+    .readonly(),
+  z.strictObject({ ...observedWait, ...previousTurn, state: z.literal("waiting") }).readonly(),
+  z
+    .strictObject({ ...observedWait, ...previousTurn, state: z.enum(["failed", "canceled"]), reason: z.string() })
+    .readonly(),
+  z.strictObject({ ...observedWait, state: z.literal("idle") }).readonly(),
 ]);
-export type AkumaWaitOutcome = z.output<typeof waitOutcomeSchema>;
-export const observedAkumaWaitItemSchema = z
+export const akumaUnavailableWaitSchema = z
   .strictObject({
-    kind: z.literal("observed"),
-    id: akumaIdSchema,
-    life: nativeStatus.shape.life,
-    lastActivityAt: nativeStatus.shape.lastActivityAt,
-    events: nativeStatus.shape.recent,
-    eventsUnavailable: z.string().exactOptional(),
-    pending: z.literal(true).exactOptional(),
-    outcome: waitOutcomeSchema.exactOptional(),
-    strandedReason: z.literal("resume-unsupported").exactOptional(),
+    ...observedWait,
+    ...previousTurn,
+    state: z.literal("unavailable"),
+    reason: z.string().exactOptional(),
   })
   .readonly();
 export const akumaWaitItemSchema = z.union([
-  observedAkumaWaitItemSchema,
-  z.strictObject({ kind: z.literal("unobserved"), id: akumaIdSchema, diagnostic: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("missing"), id: akumaIdSchema }).readonly(),
+  ...observedAkumaWaitItemSchema.options,
+  akumaUnavailableWaitSchema,
+  z.strictObject({ ...waitIdentity, state: z.literal("missing") }).readonly(),
 ]);
 function waitResultSchema<Item extends z.ZodType>(item: Item) {
   return z
@@ -129,23 +147,33 @@ export const completedTextObservationSchema = z.union([
   akumaTextObservationSchema.options[3],
 ]);
 const askSubject = { akumaId: akumaIdSchema, tellId: z.string(), interrupt: interruptSchema.exactOptional() };
-const tellAnswer = {
-  ...askSubject,
-  action: tellActionSchema.exactOptional(),
-  wake: pendingWakeSchema.exactOptional(),
-  input: completedTextObservationSchema.exactOptional(),
-  interrupt: interruptReceiptSchema.exactOptional(),
-};
-export const akumaTellResultSchema = z.union([
-  z.strictObject({ kind: z.literal("admitted"), ...tellAnswer }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("failed"),
-      ...tellAnswer,
-      failures: z.tuple([tellFailureSchema], tellFailureSchema).readonly(),
-    })
-    .readonly(),
+const tellSubject = { akumaId: akumaIdSchema, tellId: z.string() };
+const toldSchema = z
+  .strictObject({ result: z.literal("told"), ...tellSubject, turn: turnHistoryIdSchema.exactOptional() })
+  .readonly();
+const noTellOutcome = z.strictObject({ ...tellSubject, state: z.enum(["idle", "waiting"]) }).readonly();
+const tellFailedSchema = z
+  .strictObject({
+    result: z.literal("failed"),
+    ...tellSubject,
+    turn: turnHistoryIdSchema.exactOptional(),
+    interrupt: interruptReceiptSchema.exactOptional(),
+    failures: z.tuple([tellFailureSchema], tellFailureSchema).readonly(),
+    outcome: settledTurnSchema.exactOptional(),
+  })
+  .readonly();
+export const akumaTellNormalResultSchema = z.union([
+  toldSchema,
+  doneTurnSchema.unwrap().extend(tellSubject).readonly(),
+  canceledTurnSchema.unwrap().extend(tellSubject).readonly(),
+  noTellOutcome,
 ]);
+export const akumaTellResultSchema = z.union([
+  ...akumaTellNormalResultSchema.options,
+  failedTurnSchema.unwrap().extend(tellSubject).readonly(),
+  tellFailedSchema,
+]);
+
 export const akumaAskObservationSchema = z.union([
   z.strictObject({ kind: z.literal("answered"), answer: z.json(), completedAt: z.string().exactOptional() }).readonly(),
   akumaTextObservationSchema.options[1],
@@ -191,9 +219,10 @@ type TellAdmissionEvidence = Readonly<{
 }>;
 
 /** Project this invocation's already observed admission, never reread it. */
-export function tellAdmissionEvidence(akumaId: AkumaId, tell: TellResult): TellAdmissionEvidence {
-  const { interruption, wake } = tell;
+export function tellAdmissionEvidence(akumaId: AkumaId, tell: TellSettlement): TellAdmissionEvidence {
+  const { interruption, wake, action } = tell;
   const subject = {
+    ...(action === undefined ? {} : { action }),
     akumaId,
     tellId: tell.admission.tellId,
     ...(interruption === undefined
@@ -210,12 +239,8 @@ export function tellAdmissionEvidence(akumaId: AkumaId, tell: TellResult): TellA
     : { ...subject, wake: wake as NonNullable<TellAdmissionEvidence["wake"]> };
 }
 
-/** Tell judges wake and observation together; an answer cannot erase a failed wake. */
-export function completeTell(
-  receipt: ReturnType<typeof tellAdmissionEvidence>,
-  observation?: z.output<typeof akumaTextObservationSchema>,
-  exceptional = false,
-): AkumaTellResult {
+/** Keep wake and control evidence shared with Spawn's independent initial-input receipt. */
+export function completeTell(receipt: TellAdmissionEvidence) {
   const { wake, interrupt, ...subject } = receipt;
   const failures: TellFailure[] = [];
   if (wake?.kind === "failed") {
@@ -224,20 +249,61 @@ export function completeTell(
   } else if (wake?.kind === "confirmation-stopped") {
     failures.push({ stage: "confirmation", reason: wake.reason, diagnostic: wake.diagnostic });
   }
-  if (observation?.kind === "failed") failures.push({ stage: "observation", diagnostic: observation.diagnostic });
-  const answer = {
-    ...subject,
-    ...(wake?.kind === "pending" ? { wake } : {}),
-    ...(observation === undefined || observation.kind === "failed" ? {} : { input: observation }),
-  };
+  const answer = { ...subject, ...(wake?.kind === "pending" ? { wake } : {}) };
   const [first, ...rest] = failures;
-  const result: AkumaTellResult =
-    first === undefined
-      ? {
-          kind: "admitted",
-          ...answer,
-          ...(interrupt === undefined || (!exceptional && interrupt.kind === "completed") ? {} : { interrupt }),
-        }
-      : { kind: "failed", ...answer, ...(interrupt === undefined ? {} : { interrupt }), failures: [first, ...rest] };
-  return exceptional ? akumaTellResultSchema.parse(result) : result;
+  return first === undefined
+    ? { kind: "admitted" as const, ...answer }
+    : {
+        kind: "failed" as const,
+        ...answer,
+        ...(interrupt === undefined ? {} : { interrupt }),
+        failures: [first, ...rest] as const,
+      };
+}
+
+export function tellAnswerResult(
+  id: AkumaId,
+  receipt: TellSettlement,
+  observed?: SettledTurn | Readonly<{ state: "idle" | "waiting" }>,
+): AkumaTellResult {
+  const evidence = tellAdmissionEvidence(id, receipt);
+  return projectTellAnswer(evidence, observed);
+}
+
+export function interruptedTellAnswer(
+  id: AkumaId,
+  receipt: TellSettlement,
+  reason: unknown,
+  outcome?: SettledTurn,
+): AkumaTellResult {
+  const diagnostic = reason instanceof Error ? reason.message : String(reason);
+  return projectTellAnswer(tellAdmissionEvidence(id, receipt), outcome, { stage: "observation", diagnostic });
+}
+
+function projectTellAnswer(
+  admission: TellAdmissionEvidence,
+  observed?: SettledTurn | Readonly<{ state: "idle" | "waiting" }>,
+  stopped?: TellFailure,
+): AkumaTellResult {
+  const evidence = completeTell(admission);
+  const subject = { akumaId: evidence.akumaId, tellId: evidence.tellId };
+  const action = evidence.action === undefined ? {} : { turn: evidence.action.historyId };
+  const failures: [TellFailure, ...TellFailure[]] | undefined =
+    evidence.kind === "failed"
+      ? [...evidence.failures, ...(stopped === undefined ? [] : [stopped])]
+      : stopped === undefined
+        ? undefined
+        : [stopped];
+  if (failures !== undefined) {
+    for (const failure of failures) Object.freeze(failure);
+    return {
+      result: "failed",
+      ...subject,
+      ...action,
+      failures: Object.freeze(failures),
+      ...(admission.interrupt === undefined ? {} : { interrupt: admission.interrupt }),
+      ...(observed !== undefined && "turn" in observed ? { outcome: observed } : {}),
+    };
+  }
+  return observed === undefined ? { result: "told", ...subject, ...action } : { ...subject, ...observed };
 }

@@ -43,10 +43,10 @@ const answer = (n: number, sequence: number, text = "done"): Row => ({ kind: "ou
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 const deliveredTell = (sequence: number, turnSequence: number, tellId: string, text: string): Row => ({ kind: "tell",
   sequence, at, tellId, text, state: "told", deliveries: [{ route: "launch", turnSequence, deliveredAt: at }] });
-function receipt(id: string, wake = false, failed = false): TellAdmission {
+function receipt(id: string, failed = false): TellAdmission {
   const subject = { akumaId: AKUMA_ID, tellId: id };
-  return failed ? { kind: "failed", ...subject, failures: [{ stage: "wake", diagnostic: "test wake failed" }] }
-    : { kind: "admitted", ...subject, ...(wake ? { wake: { kind: "pending" as const } } : {}) };
+  return failed ? { result: "failed", ...subject, failures: [{ stage: "wake", diagnostic: "test wake failed" }] }
+    : { result: "told", ...subject };
 }
 
 /** One bridge mutation as the typed transport sees it; there is no command line left to record. */
@@ -296,7 +296,7 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
     if (n === 1) h.setRows([deliveredTell(1, 2, `id-${n}`, text), turn(2)]);
-    return receipt(`id-${n}`, n === 1, n > 1 && failed);
+    return receipt(`id-${n}`, n > 1 && failed);
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
   assert.deepEqual(await h.send("steering", "steering"), { disposition: "steered" });
@@ -472,7 +472,7 @@ test("a Turn transition during Tell keeps its captured acknowledgement and does 
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
     began(); await blocked; return receipt("steering");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
@@ -490,7 +490,7 @@ test("a transition before plugin receipt can still make the host reject the ackn
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
     return receipt("accepted-on-transition");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
@@ -507,7 +507,7 @@ test("a transition before plugin receipt can still make the host reject the ackn
 test("pending recovery Tell completes only its host command before a later real Turn", async (t) => {
   const pending: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 438, at, tellId: "recovery",
     text: "Resume working.", state: "pending", deliveries: [] };
-  const h = await harness(t, { tell: async () => { h.setRows([turn(303), pending]); return receipt(pending.tellId, true); } }, [turn(303)]);
+  const h = await harness(t, { tell: async () => { h.setRows([turn(303), pending]); return receipt(pending.tellId); } }, [turn(303)]);
   await h.send(pending.text, "recovery"); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
   assert.deepEqual(h.events.filter((event) => event.type === "turn_started" || event.type === "turn_completed").map((event) => [event.type, event.turnId]), [
@@ -542,9 +542,9 @@ test("combined best-effort Steer, explicit Stop, and later Tell preserve the sam
     stop: async () => stopAttempt("killed", AKUMA_ID),
     tell: async (_world, _akuId, _signal, text) => {
       n++;
-      if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+      if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
       if (n === 2) return receipt("accepted");
-      h.setRows([turn(2), deliveredTell(3, 4, "after-stop", text), turn(4)]); return receipt("after-stop", true);
+      h.setRows([turn(2), deliveredTell(3, 4, "after-stop", text), turn(4)]); return receipt("after-stop");
     },
   });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
@@ -609,7 +609,7 @@ test("uncertain steer fails honestly without host replacement, retry, or touchin
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial"); }
     throw new Error("lost receipt after possible admission");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);

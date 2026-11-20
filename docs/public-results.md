@@ -8,33 +8,29 @@ belong to the producing owners and executable specifications.
 ## Structural Boundary
 
 Every described verb retains its complete structural schema beside its producing
-native owner. An owner also declares the normal subset used by structured
+native owner. An owner also declares the wire answer used by structured
 invocation consumers, sharing the same structural leaves with the complete
 answer. Normality constrains nested required work as well as the outer decision;
 it is a description of the owner's existing judgment, never a second classifier
 or a runtime parse of trusted results. Observation declarations preserve the
-reason-specific evidence and consistent availability of their members without
-proving completion over a selected set; that judgment remains with the native
-producer. Native callers and CLI JSON retain the complete answer,
-including refusal, retry, and stops after confirmed effects. Invocation wait owns
-only the cross-product group conclusion and ordered member composition; its
-member observations reuse native evidence and never replace either product's
-completion judgment. A report wake requires a report on a member, and other
-conclusions carry none. The producer chooses the single reporter without
-changing member order. One native observer supplies standalone, plural, and
-invocation Akuma waiting with compact final evidence, without a parallel full
-status retained for later compaction. Exact settled answers retain their outcome
-identity and complete text. Bounded Akuma activity snapshots share the
-producer's compact declaration and native value across consumers. Exact activity
+availability and native state without proving completion over a selected set;
+that judgment remains with the producer. Native callers and CLI JSON retain the
+complete answer, including refusal, retry, and stops after confirmed effects.
+An invocation Wait presents ordered member evidence rather than a separate
+outer stop reason. Its single reporter, if any, keeps its position. The same
+retained Turn outcome serves status, waiting and exact history: settlement,
+identity, answer or known failure are native evidence, not a second result
+vocabulary. A separately retained older outcome is not the current result.
+Bounded Akuma activity snapshots share the producer's compact declaration and
+native value across consumers. Exact activity
 is a distinct typed result, not a single-row snapshot page; the continuous
 typed observation is independent of that snapshot declaration.
 An unavailable activity observation never reverses the wait's conclusion or
 hides independently observed outcomes. Unobserved peers remain explicit even
-when the group completes. A standalone
-transport publishes normal routing answers with their producing owner's normal
-structural declaration. It serializes the native answer directly, consuming the
-existing owner judgment without reparsing trusted answers or declaring a second
-result model. Spawn also publishes a confirmed partial as a structured receipt,
+when the group completes. A standalone transport publishes routing answers with
+their producing owner's declaration, including incomplete Wait. It serializes
+the native answer directly, without reparsing it or declaring a second result
+model. Spawn also publishes a confirmed partial as a structured receipt,
 whether returned or carried by an exception. This is successful receipt
 transport, not successful completion of the stopped operation. Pre-birth
 failures do not establish such a receipt.

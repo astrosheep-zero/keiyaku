@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { verbs, type VerbCompletion, type VerbDisposition, type VerbName, type VerbOutput } from "./keiyaku-verbs.js";
+import {
+  verbDispositionIsError,
+  verbs,
+  type VerbCompletion,
+  type VerbDisposition,
+  type VerbName,
+  type VerbOutput,
+} from "./keiyaku-verbs.js";
 
 /** Routing tools publish native wire answers; Spawn includes confirmed partials. */
 export const modelOutputSchemas = {
@@ -25,16 +32,16 @@ export function modelToolOutput(
   disposition: VerbDisposition,
   exceptionalSpawn?: VerbOutput<"spawn">,
 ) {
-  const normal = disposition === "accepted" || disposition === "unsatisfied";
+  const isError = verbDispositionIsError(disposition);
   const value =
     completion.kind === "returned"
       ? completion.value
       : name === "spawn" && exceptionalSpawn?.kind === "failed"
         ? exceptionalSpawn
         : undefined;
-  return value !== undefined && hasOutputSchema(name) && (normal || name === "spawn")
+  return value !== undefined && hasOutputSchema(name) && (!isError || name === "spawn")
     ? { isError: false, structuredContent: JSON.parse(JSON.stringify(value)) }
-    : { isError: !normal };
+    : { isError };
 }
 
 const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report", "surveil"]);

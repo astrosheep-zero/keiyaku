@@ -236,7 +236,9 @@ test("World selects active Akumas before bounding and exposes native work under 
       assert.ok(row?.work && row.work.kind !== "unavailable");
       assert.equal(row.work.summary?.text, `run $ ${command}`);
       const exact = await Akumas.of(world).status({ akuma: row.id });
-      assert.deepEqual(exact.work, row.work);
+      const { outcome, ...sharedWork } = exact.work;
+      assert.deepEqual(sharedWork, row.work);
+      assert.deepEqual(outcome, { state: "running", turn: `turn/${row.work.turn!.sequence}` });
       const retained = await Akumas.of(world).history({ akuma: row.id, id: String(row.work.summary!.id) });
       assert.ok(retained.kind === "akuma-activity" && retained.row.kind === "tool");
       assert.equal(retained.row.toolId, command);

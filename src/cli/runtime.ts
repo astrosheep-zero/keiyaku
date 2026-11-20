@@ -179,7 +179,8 @@ function writeFailure(error: unknown, command: ParsedCommand): CliOutcome {
 }
 
 export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
-  return cliExitCode(await runCommand(invocation, input));
+  const result = await runCommand(invocation, input);
+  return typeof result === "number" ? result : cliExitCode(result);
 }
 
 function invocationCoordinates(
@@ -199,7 +200,7 @@ function invocationCoordinates(
 }
 
 // eslint-disable-next-line complexity -- dispatch keeps acquisition, the facet, and process outcome in one edge.
-async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
+async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome | number> {
   const command = invocation.command;
   const environment = { ...(input.environment ?? process.env) };
   const home = environment.KEIYAKU_HOME?.trim() || undefined;
@@ -242,6 +243,23 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
           ? await acquireAkumaRequest(command, invocation.workdir, runtime)
           : await acquireContractRequest(command, runtime)
         : command;
+    if (request.name === "wait") {
+      const value = await runtime.facet.run("wait", request.input, { signal: runtime.signal });
+      const completion = { kind: "returned", value } as const;
+      const disposition = classifyVerb("wait", request.input, completion);
+      emit(
+        request.output,
+        value,
+        () =>
+          renderVerb("wait", request.input, completion, {
+            ...displayContext(),
+            disposition,
+            recoveryCoordinates,
+          }),
+        disposition,
+      );
+      return disposition === "failed" ? 1 : cliExitCode(disposition);
+    }
     if (request.name === "ask") return await runAsk(request, runtime);
     if (request.name === "history" && !request.input.selector.startsWith("kei/"))
       return await runAkumaHistory(request, runtime);

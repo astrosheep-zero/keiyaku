@@ -1,10 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { contractIdSchema } from "../git/identity.js";
+import { contractIdSchema, contractJournalPaths } from "../git/identity.js";
 import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
-import { contractJournal, observeContractsAt } from "../git/observe.js";
-import { withGitDecodeChannel } from "../git/read-observation.js";
+import { contractJournal, observeContractJournals } from "../git/observe.js";
+import { withGitDecodeChannel, withGitTargetedReadObservation } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { callerContractId, optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
@@ -145,6 +145,7 @@ function waitResult(members: readonly WaitObservation[], reason: ContractWaitRes
 /** One invocation's journal baselines and witnessed progress, shared with mixed observation. */
 export function createContractWaitObserver(scope: RepositoryScope, ids: readonly ContractId[]) {
   let initialized = false;
+  const paths = ids.flatMap(contractJournalPaths);
   let members: WaitObservation[] = ids.map((id) => ({
     id,
     baseline: null,
@@ -159,36 +160,27 @@ export function createContractWaitObserver(scope: RepositoryScope, ids: readonly
 
     async observe(signal?: AbortSignal): Promise<void> {
       const reading = { ...scope, ...(signal === undefined ? {} : { signal }) };
-      const states = await readContractValue(() =>
-        withGitDecodeChannel(reading, async (channel) => {
-          const observed = await observeContractsAt(reading, channel, ids);
-          return ids.map((id) => {
-            const record = contractJournal(observed.journals, id);
-            return {
-              state: record.state,
-              ...(record.state === null
-                ? {}
-                : {
-                    summary: summaryFor({ state: record.state, bindAt: record.entries[0]!.at }),
-                  }),
-            };
-          });
-        }),
+      await readContractValue(() =>
+        withGitDecodeChannel(reading, (channel) =>
+          withGitTargetedReadObservation(reading, channel, { paths }, async (read) => {
+            const journals = await observeContractJournals(read, ids);
+            // Evidence already decoded belongs to this round, even if another
+            // owner stopped the observation before the read scope retired.
+            members = members.map(({ id, baseline, changed }) => {
+              const { state, entries } = contractJournal(journals, id);
+              return {
+                id,
+                baseline: initialized ? baseline : (state?.head ?? null),
+                changed: changed || (initialized && state !== null && state.head !== baseline),
+                present: state !== null,
+                terminal: state?.terminal?.kind ?? null,
+                ...(state === null ? {} : { summary: summaryFor({ state, bindAt: entries[0]!.at }) }),
+              };
+            });
+            initialized = true;
+          }),
+        ),
       );
-      signal?.throwIfAborted();
-      members = members.map((member, index) => {
-        const { state, summary } = states[index]!;
-        const { summary: _previous, ...prior } = member;
-        return {
-          ...prior,
-          ...(summary === undefined ? {} : { summary }),
-          baseline: initialized ? member.baseline : (state?.head ?? null),
-          changed: member.changed || (initialized && state !== null && state.head !== member.baseline),
-          present: state !== null,
-          terminal: state?.terminal?.kind ?? null,
-        };
-      });
-      initialized = true;
     },
   };
 }

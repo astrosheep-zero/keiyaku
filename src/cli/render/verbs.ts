@@ -5,13 +5,14 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.j
 import {
   classifyVerb,
   type VerbCompletion,
+  type VerbDisposition,
   type VerbInput,
   type VerbName,
   type VerbOutput,
 } from "../../library/keiyaku-verbs.js";
 import { KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure, type FailureProjection } from "../../library/outcome.js";
-import { historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
+import { akumaWaitMemberText, historyText, killResultText, snapshotText, tellText } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
@@ -27,6 +28,8 @@ import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
 import { exactIndentedLines, formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
+
+export type RenderVerbContext = TextRenderContext & Readonly<{ alias?: string; disposition?: VerbDisposition }>;
 
 export function aliasSelector(selector: string | undefined): string | undefined {
   return selector?.startsWith("@") === true ? selector : undefined;
@@ -111,25 +114,59 @@ function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">):
   return renderRegionText(result, input);
 }
 
-function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">): string {
+function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, context: RenderVerbContext): string {
   const selectedAlias = input.selectors.length === 1 ? aliasSelector(input.selectors[0]) : undefined;
+  const incomplete =
+    (context.disposition ?? classifyVerb("wait", input, { kind: "returned", value: result })) === "incomplete";
   const rows = result.members.map((member) => {
-    if (member.kind === "contract") return contractWaitMemberText(member.observation);
-    const row =
-      member.observation.kind === "unknown"
-        ? `? ${member.observation.id} (unobserved)`
-        : waitText(
-            {
-              kind: "akuma",
-              reason: result.reason === "deadline" ? "deadline" : "completed",
-              results: [member.observation],
-            },
-            selectedAlias === undefined ? {} : { alias: selectedAlias },
-          );
+    if ("contract" in member) return contractWaitMemberText(member);
+    const row = akumaWaitMemberText(member, selectedAlias);
     if (member.report === undefined) return row;
     return [row, `  ${member.report.report}`, ...exactIndentedLines(member.report.text, "    ")].join("\n");
   });
-  return [result.reason, ...rows].join("\n");
+  const done = result.members.filter(({ state }) =>
+    ["done", "idle", "changed", "accepted", "abandoned"].includes(state),
+  ).length;
+  const head =
+    incomplete || rows.length > 1
+      ? [
+          `${incomplete ? "⧗ " : ""}${done} of ${rows.length} done${result.elapsedMs === undefined ? "" : ` after ${Math.floor(result.elapsedMs / 1000)}s`}`,
+        ]
+      : [];
+  const coordinates = context.recoveryCoordinates;
+  const selectors = result.members.flatMap((member) =>
+    member.state === "waiting" || member.state === "running"
+      ? ["contract" in member ? member.contract : member.akuma]
+      : [],
+  );
+  const resume =
+    incomplete &&
+    selectors.length > 0 &&
+    coordinates !== undefined &&
+    !result.members.some(({ state }) => state === "unavailable" || state === "missing")
+      ? (() => {
+          const completion = input.completion ?? "any";
+          const { cwd } = coordinates;
+          const repo = selectors.some((selector) => selector.startsWith("kei/")) ? coordinates.repo : undefined;
+          const bound = input.for;
+          if (context.surface === "mcp")
+            return `wait ${JSON.stringify({ cwd, repo, selectors, completion, for: bound })}`;
+          const argv = [
+            "keiyaku",
+            "-C",
+            cwd,
+            ...(repo === undefined ? [] : ["--repo", repo]),
+            "wait",
+            ...selectors,
+            `--${completion}`,
+            ...(bound === undefined ? [] : ["--for", bound]),
+          ];
+          return argv.every((word) => /^[a-zA-Z0-9_./:@-]+$/u.test(word)) ? argv.join(" ") : undefined;
+        })()
+      : undefined;
+  return [...head, ...rows, ...(resume === undefined || safeText(resume) !== resume ? [] : [`resume: ${resume}`])].join(
+    "\n",
+  );
 }
 
 function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">): string {
@@ -181,8 +218,7 @@ function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">): string
 
 function renderInput(input: VerbInput<"ask" | "tell">, result: VerbOutput<"ask" | "tell">): string {
   const selectedAlias = aliasSelector(input.akuma);
-  if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
-    return tellText(result, input.prompt, selectedAlias);
+  if (!("kind" in result)) return tellText(result, input.prompt, selectedAlias);
   return renderAskText(result, selectedAlias);
 }
 
@@ -218,7 +254,7 @@ export function renderVerb<K extends VerbName>(
   name: K,
   input: VerbInput<K>,
   completion: VerbCompletion<VerbOutput<K>>,
-  context: TextRenderContext & Readonly<{ alias?: string }>,
+  context: RenderVerbContext,
 ): string {
   switch (name) {
     case "bind":
@@ -283,7 +319,7 @@ export function renderVerb<K extends VerbName>(
     case "kill":
       return renderKill(input as VerbInput<"kill">, value as VerbOutput<"kill">);
     case "wait":
-      return renderWait(input as VerbInput<"wait">, value as VerbOutput<"wait">);
+      return renderWait(input as VerbInput<"wait">, value as VerbOutput<"wait">, context);
     case "history":
       return renderHistory(input as VerbInput<"history">, value as VerbOutput<"history">);
     case "report":

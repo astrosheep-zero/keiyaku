@@ -138,7 +138,7 @@ test("retired status guidance is a usage refusal before World or guidance acquis
   assert.equal(read.mock.callCount(), 0);
 });
 
-test("CLI ask returns JSON and invalid-output while Tell confirms exact submission", { timeout: 60_000 }, async (t) => {
+test("CLI Tell admits input and Ask retains its JSON and invalid-output results", { timeout: 60_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-tell-"));
   const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
   const world = await World.at(root);
@@ -161,8 +161,8 @@ test("CLI ask returns JSON and invalid-output while Tell confirms exact submissi
     const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
     const text = await runCli(["-C", root, "tell", born.id, "-"], runtime);
     assert.equal(text.exit, 0, text.stderr);
-    assert.match(text.stdout, new RegExp(`^✓ ${born.id} started turn/[1-9][0-9]*\\n$`, "u"));
-    const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "30s"], runtime);
+    assert.match(text.stdout, new RegExp(`^▸ ${born.id} +told(?: turn/[1-9][0-9]*)?\\n$`, "u"));
+    const waited = await runCli(["-C", root, "wait", born.id, "--for", "30s"], runtime);
     assert.equal(waited.exit, 0, waited.stderr);
     assert.ok(waited.stdout.includes(answer), waited.stdout);
     const decoded = await cliJson<{ kind: string; answer: unknown }>(
@@ -237,8 +237,8 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
     assert.equal(result.exit, 0, result.stderr);
     assert.equal(denied, true, "the first wake probe met actual observation custody");
     await observation;
-    assert.match(result.stdout, new RegExp(`^✓ ${born.id} started turn/[1-9][0-9]*\\n$`, "u"));
-    const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "60s"], {
+    assert.match(result.stdout, new RegExp(`^▸ ${born.id} +told(?: turn/[1-9][0-9]*)?\\n$`, "u"));
+    const waited = await runCli(["-C", root, "wait", born.id, "--for", "60s"], {
       environment: { KEIYAKU_HOME: home }, signal: t.signal,
     });
     assert.equal(waited.exit, 0, waited.stderr);

@@ -12,7 +12,7 @@ import {
 } from "../library/keiyaku-verbs.js";
 import { describeModelTools, modelCoordinates, modelToolOutput } from "../library/model-tools.js";
 import { projectFailure } from "../library/outcome.js";
-import { renderVerb } from "../cli/render/verbs.js";
+import { renderVerb, type RenderVerbContext } from "../cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
 import { SERVER_DESCRIPTION } from "../mcp/description.js";
 
@@ -52,6 +52,7 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
         const value = business as VerbInput<VerbName>;
         let environment: NodeJS.ProcessEnv = {};
         let completion: VerbCompletion<VerbOutput<VerbName>>;
+        let recoveryCoordinates: RenderVerbContext["recoveryCoordinates"];
         try {
           const parsed = modelCoordinates(name).safeParse({
             ...(cwd === undefined ? {} : { cwd }),
@@ -60,11 +61,9 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
           if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
           const invocation = invocationContext(ctx);
           environment = invocation.environment;
-          const facet = Keiyaku.for({
-            ...invocation,
-            cwd: resolve(invocation.cwd, parsed.data.cwd ?? "."),
-            ...(!("repo" in parsed.data) || parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),
-          });
+          const coordinates = { ...parsed.data, cwd: resolve(invocation.cwd, parsed.data.cwd ?? ".") };
+          if (name === "wait") recoveryCoordinates = coordinates;
+          const facet = Keiyaku.for({ ...invocation, ...coordinates });
           completion = {
             kind: "returned",
             value: await facet.run(name, value, signal === undefined ? {} : { signal }),
@@ -77,6 +76,8 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
         const output = modelToolOutput(name, completion, disposition, failure?.spawn);
         const text = renderVerb(name, value, completion, {
           surface: "mcp",
+          disposition,
+          ...(recoveryCoordinates === undefined ? {} : { recoveryCoordinates }),
           columns: DEFAULT_CLI_COLUMNS,
           color: false,
           now: Date.now(),

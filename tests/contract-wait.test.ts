@@ -120,18 +120,19 @@ test("terminal baselines satisfy any and all without inventing changes", async (
     assert.deepEqual(changed(result), [false, true]);
   });
   for (const [id, label] of [[claimed.id, "accepted"], [second.id, "abandoned"]] as const) {
-    const text = await runCli(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
+    const argv = ["--repo", repository.path, "wait", id, "--for", "0ms"];
+    const text = await runCli(argv, { cwd: repository.path });
     assert.equal(text.exit, 0);
-    assert.match(text.stdout, new RegExp(`completed\\n.*\\(${label}\\)`, "u"));
+    assert.match(text.stdout, new RegExp(`✓ ${id} +${label}`, "u"));
     assert.doesNotMatch(text.stdout, /changed/u);
-    const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
+    const json = await cliJson<InvocationWaitResult>(argv, { cwd: repository.path });
     assert.equal(json.exit, 0);
     assert.equal(json.value.kind, "wait");
-    assert.equal(json.value.reason, "completed");
-    assert.ok(json.value.members[0]?.kind === "contract");
-    assert.equal(json.value.members[0].observation.id, id);
-    assert.equal(json.value.members[0].observation.terminal, label === "accepted" ? "claimed" : label);
-    assert.equal(json.value.members[0].observation.summary?.phase, label === "accepted" ? "claimed" : label);
+    const member = json.value.members[0];
+    assert.ok(member && "contract" in member);
+    assert.equal(member.contract, id);
+    assert.equal(member.state, label);
+    assert.equal(member.phase, label === "accepted" ? "claimed" : label);
   }
 });
 
@@ -192,11 +193,11 @@ test("initial reads honor deadlines and cancellation; inputs and Akuma selectors
     assertWireConformance(contractWaitNormalResultSchema, result);
     assertWireConformance(contractWaitNormalResultSchema, { ...result, contracts: [{ id: first.id }, result.contracts[1]] }, false);
     assert.ok(performance.now() - started < 5000);
-    const cli = await runCli(["--repo", repository.path, "wait", first.id, "--timeout", "150ms"], {
+    const cli = await runCli(["--repo", repository.path, "wait", first.id, "--for", "150ms"], {
       cwd: repository.path, environment: { KEIYAKU_GIT_PATH: gitPath },
     });
-    assert.equal(cli.exit, 0);
-    assert.match(cli.stdout, /unobserved/u);
+    assert.equal(cli.exit, 1);
+    assert.match(cli.stdout, /unavailable/u);
   });
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
@@ -222,23 +223,23 @@ test("CLI Contract waits need no Akuma World", async (context) => {
   writeFileSync(join(cwd, ".keiyaku"), "not a World directory");
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const environment = { KEIYAKU_GIT_PATH: barrier.gitPath };
-    const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "0ms"], { environment, cwd });
-    assert.equal(json.exit, 0);
-    assert.equal(json.value.reason, "deadline");
-    assert.ok(json.value.members[0]?.kind === "contract");
-    assert.equal(json.value.members[0].observation.id, first.id);
-    assert.equal(json.value.members[0].observation.summary?.title, "First wait subject");
+    const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--for", "0ms"], { environment, cwd });
+    assert.equal(json.exit, 75);
+    const waiting = json.value.members[0];
+    assert.ok(waiting && "contract" in waiting && waiting.state === "waiting");
+    assert.equal(waiting.contract, first.id);
+    assert.equal(waiting.title, "First wait subject");
     barrier.reset();
-    const observing = cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "10s"], { environment, cwd });
+    const observing = cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--for", "10s"], { environment, cwd });
     await barrier.reads();
     await amend(first.handle, "CLI witnessed journal admission.");
     const result = await observing;
     assert.equal(result.exit, 0);
-    assert.equal(result.value.reason, "completed");
-    assert.ok(result.value.members[0]?.kind === "contract");
-    assert.equal(result.value.members[0].observation.changed, true);
-    assert.equal(result.value.members[0].observation.summary?.id, first.id);
-    const missing = await runCli(["--repo", repository.path, "wait", "kei/not-present", "--timeout", "0ms"], { environment, cwd });
+    const changed = result.value.members[0];
+    assert.ok(changed && "contract" in changed);
+    assert.equal(changed.state, "changed");
+    assert.equal(changed.contract, first.id);
+    const missing = await runCli(["--repo", repository.path, "wait", "kei/not-present", "--for", "0ms"], { environment, cwd });
     assert.notEqual(missing.exit, 0);
     assert.match(missing.stdout + missing.stderr, /kei\/not-present/u);
 

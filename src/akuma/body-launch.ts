@@ -37,6 +37,7 @@ export type ChildBodyLaunch = Readonly<{
 /** Live launch evidence only; Heart and leash alone judge birth and settlement. */
 export type BodyLaunchEnd = Readonly<{
   diagnostic: string;
+  failed?: boolean;
   held?: boolean;
   child?: Readonly<{ log: Readonly<{ path: string }> }>;
 }>;
@@ -101,7 +102,8 @@ export async function observeBodyLaunch<T>(
   observe: () => Promise<T | null>,
   schedule: (milliseconds: number, signal: AbortSignal) => Promise<void> = abortableDelay,
   signal?: AbortSignal,
-): Promise<Readonly<{ kind: "observed"; value: T }> | Readonly<{ kind: "completed"; end: BodyLaunchEnd }>> {
+  witnessFailure?: (end: BodyLaunchEnd) => void,
+): Promise<Readonly<{ value: T; end?: BodyLaunchEnd }> | Readonly<{ value: null; end: BodyLaunchEnd }>> {
   let end: BodyLaunchEnd | undefined;
   let polling: AbortController | undefined;
   const complete = (value: BodyLaunchEnd): void => {
@@ -109,23 +111,27 @@ export async function observeBodyLaunch<T>(
     polling?.abort();
   };
   void child.completed.then(complete, (error: unknown) => {
-    complete({ diagnostic: error instanceof Error ? error.message : String(error) });
+    complete({ failed: true, diagnostic: error instanceof Error ? error.message : String(error) });
   });
-  for (;;) {
-    signal?.throwIfAborted();
-    const completed = end;
-    const value = await observe();
-    if (value !== null) return { kind: "observed", value };
-    if (completed !== undefined) return { kind: "completed", end: completed };
-    if (end !== undefined) continue;
-    const poll = (polling = new AbortController());
-    try {
-      await schedule(100, signal === undefined ? poll.signal : AbortSignal.any([poll.signal, signal]));
-    } catch (error) {
+  try {
+    for (;;) {
       signal?.throwIfAborted();
-      if (!poll.signal.aborted) throw error;
-    } finally {
-      polling = undefined;
+      const completed = end;
+      const value = await observe();
+      if (value !== null) return { value, ...(end === undefined ? {} : { end }) };
+      if (completed !== undefined) return { value: null, end: completed };
+      if (end !== undefined) continue;
+      const poll = (polling = new AbortController());
+      try {
+        await schedule(100, signal === undefined ? poll.signal : AbortSignal.any([poll.signal, signal]));
+      } catch (error) {
+        if (!poll.signal.aborted || error !== poll.signal.reason) throw error;
+      } finally {
+        polling = undefined;
+      }
     }
+  } catch (error) {
+    if (end?.failed) witnessFailure?.(end);
+    throw error;
   }
 }

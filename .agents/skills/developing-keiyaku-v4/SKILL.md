@@ -148,7 +148,7 @@ accepted commit.
 The default Akuma observation window is one foreground wait of five minutes:
 
 ```bash
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 wait <projection> --timeout 5m
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 wait <projection> --for 5m
 ```
 
 Treat that command as a blocking foreground operation, not a polling tick. If

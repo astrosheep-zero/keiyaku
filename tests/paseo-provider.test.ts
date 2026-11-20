@@ -463,7 +463,7 @@ test("a natural outcome held by Tell correlation is not overwritten by concurren
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const h = await harness(t, { window: async () => rows,
     stop: async () => stopAttempt("already-stopped", "aku/test/1"),
-    tell: async () => { await blocked; return tellReceipt({ kind: "pending" }); } });
+    tell: async () => { await blocked; return tellReceipt(); } });
   await h.open();
   const submitting = h.connection.send(promptInput());
   try {
@@ -662,8 +662,8 @@ const promptInput = (id = "client-1", text = "change direction"): Extract<Provid
     input: { type: "message", content: [{ type: "text", text }] },
   },
 });
-function tellReceipt(wake?: TellAdmission["wake"], tellId = "new-tell"): TellAdmission {
-  return { kind: "admitted", akumaId: akumaId({ akumaName: "test", suffix: "00000001" }), tellId, ...(wake === undefined ? {} : { wake }) };
+function tellReceipt(tellId = "new-tell"): TellAdmission {
+  return { result: "told", akumaId: akumaId({ akumaName: "test", suffix: "00000001" }), tellId };
 }
 const promptResults = (events: ProviderEvent[]) => events.filter((event) => event.type === "session.prompt_result");
 const notices = (events: ProviderEvent[]) => items(events).flatMap((event) => event.item.type === "notification" ? [event.item.message] : []);
@@ -706,7 +706,7 @@ test("live steering correlates the optimistic message before racing history and 
 });
 
 test("pending admission and failed wake acknowledge success without inventing Akuma lifecycle or pending UI", async (t) => {
-  let receipt = tellReceipt({ kind: "pending" });
+  let receipt = tellReceipt();
   let rows: Row[] = [];
   const h = await harness(t, { window: async () => rows, tell: async () => receipt });
   await h.open();
@@ -716,7 +716,7 @@ test("pending admission and failed wake acknowledge success without inventing Ak
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
   assert.deepEqual(notices(h.events), []);
   assert.equal(turns(h.events).length, 0, "admission does not start or finish an Akuma Turn");
-  receipt = { kind: "failed", akumaId: receipt.akumaId, tellId: "failed-wake", failures: [{ stage: "wake", diagnostic: "frozen directory is missing" }] };
+  receipt = { result: "failed", akumaId: receipt.akumaId, tellId: "failed-wake", failures: [{ stage: "wake", diagnostic: "frozen directory is missing" }] };
   const second = request(); second.prompt.clientMessageId = "client-2";
   await h.connection.send(second);
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
@@ -725,7 +725,7 @@ test("pending admission and failed wake acknowledge success without inventing Ak
 });
 
 test("an auto prompt never adopts an older open Turn while its Tell waits for wake", async (t) => {
-  const receipt = tellReceipt({ kind: "pending" }, "recovery-tell");
+  const receipt = tellReceipt("recovery-tell");
   const pending: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 438, tellId: receipt.tellId,
     text: "Resume working.", state: "pending", at, deliveries: [] };
   let rows: Row[] = [turn(303)];
@@ -755,7 +755,7 @@ test("an auto prompt never adopts an older open Turn while its Tell waits for wa
 });
 
 test("auto prompts correlate only their exact delivery and acknowledge already-completed work", async (t) => {
-  let receipt = tellReceipt({ kind: "pending" }, "launch-tell");
+  let receipt = tellReceipt("launch-tell");
   const delivered = (sequence: number, tellId: string, turnSequence: number): Row => ({ kind: "tell", sequence,
     at, tellId, text: "work", state: "told", deliveries: [{ route: "launch", turnSequence, deliveredAt: at }] });
   let rows: Row[] = [];
@@ -766,7 +766,7 @@ test("auto prompts correlate only their exact delivery and acknowledge already-c
   await h.connection.send(request);
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "turn", turnId: "turn/439" },
     "another Tell's newer Turn is not this submission's execution");
-  receipt = tellReceipt({ kind: "pending" }, "fast-tell");
+  receipt = tellReceipt("fast-tell");
   rows = [...rows, delivered(442, receipt.tellId, 443), turn(443), answer(446, 443)];
   const fast = promptInput("fast", "work"); fast.prompt.delivery = "auto";
   await h.connection.send(fast);

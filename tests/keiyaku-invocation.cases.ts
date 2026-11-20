@@ -156,13 +156,15 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.region({ contract }), await nativeRegion({ kind: "contract", contract }));
   assert.deepEqual(await facet.region({ paths: ["src/**"] }), await nativeRegion({ kind: "path", patterns: ["src/**"] }));
   await assert.rejects(facet.region({ contract, paths: ["src/**"] }), KeiyakuUsageError);
+  const contractWait = (await facet.wait({ selectors: [contract], for: "0ms" })).members[0];
+  assert.ok(contractWait && "contract" in contractWait);
+  const native = (await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 })).contracts[0];
+  assert.equal(contractWait.contract, native?.id);
+  assert.equal(contractWait.phase, native?.summary?.phase);
+  assert.equal(contractWait.state, "waiting");
   assert.deepEqual(
-    await facet.wait({ selectors: [contract], timeout: "0ms" }),
-    { kind: "wait", reason: "deadline", members: (await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 })).contracts.map(observation => ({ kind: "contract", observation })) },
-  );
-  assert.deepEqual(
-    await facet.wait({ selectors: [worker.id], timeout: "0ms" }),
-    { kind: "wait", reason: "completed", members: (await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 })).results.map(observation => ({ kind: "akuma", observation })) },
+    (await facet.wait({ selectors: [worker.id], for: "0ms" })).members,
+    (await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 })).results,
   );
   const short = `@${contract.slice("kei/".length)}`;
   assert.deepEqual(await facet.show({ selector: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
@@ -276,7 +278,7 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
   }
 });
 
-test("typed and generic waits omit timeout for terminal Contracts and idle Akumas", { timeout: 15_000 }, async (t) => {
+test("typed and generic waits need no bound for terminal Contracts and idle Akumas", { timeout: 15_000 }, async (t) => {
   const home = temporaryDirectory(t, "keiyaku-wait-omitted-home-");
   const repository = repositoryWithCommit();
   const world = await World.at(repository.path);
@@ -286,12 +288,12 @@ test("typed and generic waits omit timeout for terminal Contracts and idle Akuma
   const worker = await bornLineageAkuma({
     root: world, akumaName: "worker", draw: "feed0025", createdAt: "2026-10-30T00:00:00.000Z",
   });
-  for (const selector of [bound.contractId, worker.id]) {
+  for (const [selector, state] of [[bound.contractId, "abandoned"], [worker.id, "idle"]] as const) {
     const input = { selectors: [selector] };
     assert.equal(Keiyaku.verbs.wait.input.safeParse(input).success, true);
     const typed = await facet.wait(input, { signal: t.signal });
-    assert.equal(typed.reason, "completed");
-    assert.deepEqual(await facet.run("wait", input, { signal: t.signal }), typed);
+    assert.equal(typed.members[0]?.state, state);
+    assert.deepEqual((await facet.run("wait", input, { signal: t.signal })).members, typed.members);
   }
 });
 

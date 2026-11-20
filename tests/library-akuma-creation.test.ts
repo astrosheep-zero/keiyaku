@@ -280,7 +280,8 @@ test("prompt-free spawn settles before immediate Ask and retains native config t
     const reopened = PublicAkuma.select(await World.at(world), result.akumaId);
     await reopened.idle({ timeoutMs: 10_000 });
     const continued = await reopened.tell("continue", { wait: true, timeoutMs: 10_000 });
-    assert.deepEqual(settledInput(continued.input), { kind: "answered", answer: '{"ok":true}' });
+    assert.ok("state" in continued && continued.state === "done");
+    assert.equal(continued.answer, '{"ok":true}');
     assert.deepEqual((await readSoul(pathsForAkumaId(world, result.akumaId)))?.provider.config, configured.config);
     assert.ok(answeredTurn);
     const fork = await api.fork({ akuma: result.akumaId, at: answeredTurn });
@@ -631,7 +632,8 @@ test("native birth retains its captured host callback for the resulting handle",
       throw new Error("mutated callback must not run");
     };
     const result = await child.tell("answer", { wait: true, signal: t.signal });
-    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
+    assert.ok("state" in result && result.state === "done");
+    assert.equal(result.answer, '{"ok":true}');
     await child.history();
     assert.deepEqual(diagnostics, [
       "plugin fail signal: birth observer failed",

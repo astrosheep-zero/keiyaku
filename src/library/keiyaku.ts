@@ -287,7 +287,7 @@ export class Keiyaku {
         ...(at.repo === undefined ? {} : { repo: at.repo }),
       });
     },
-    wait: async ({ selectors, timeout, ...input }, controls) => {
+    wait: async ({ selectors, for: bound, ...input }, controls) => {
       const hasContracts = selectors.some((selector) => selector.startsWith("kei/"));
       const contractOnly = selectors.every((selector) => selector.startsWith("kei/"));
       const at = await this.#coordinates(hasContracts ? "required" : "optional", contractOnly);
@@ -299,7 +299,7 @@ export class Keiyaku {
         ...executionSignal(controls),
         ...(at.repo === undefined ? {} : { repo: at.repo }),
         ...(at.world === null ? {} : { world: at.world }),
-        ...(timeout === undefined ? {} : { timeoutMs: observationTimeout(timeout) }),
+        ...(bound === undefined ? {} : { timeoutMs: observationTimeout(bound) }),
       });
     },
     history: async ({ selector, item, before, since, limit }) => {
@@ -562,8 +562,13 @@ export class Keiyaku {
         ...(timeout === undefined ? {} : { timeoutMs: observationTimeout(timeout) }),
       });
     }
-    const { prompt: _prompt, ...input } = request.input;
-    return akumas.tell({ ...input, ...common });
+    const { prompt: _prompt, wait, ...input } = request.input;
+    return akumas.tell({
+      ...input,
+      ...common,
+      ...(wait === undefined ? {} : { wait: true }),
+      ...(typeof wait === "string" ? { timeoutMs: observationTimeout(wait) } : {}),
+    });
   }
 
   async #resolveLsCaller(mine: boolean | undefined): Promise<AkumaCaller | undefined> {

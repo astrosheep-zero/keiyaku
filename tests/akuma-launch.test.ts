@@ -4,10 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { Akuma } from "../src/akuma/index.js";
-import { readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
+import { breakBody, HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
 import { runProcess } from "../src/runtime/proc/run.js";
-import { appendNodeOptionsImport, temporaryDirectory, waitForCondition } from "./support/process.js";
-import { bornWorld, settledInput } from "./support/akuma-tell.js";
+import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.js";
+import { answering, bornWorld, settledInput } from "./support/akuma-tell.js";
+import { spawnAkumaBody } from "../src/akuma/detached-body.js";
 import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -16,6 +17,7 @@ import { fixtureAdapter } from "./support/akuma-tell.js";
 import { createProviderAttempt, type DriveInput } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
 import { World } from "../src/world.js";
+import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
@@ -168,17 +170,15 @@ test("an ordinary Tell waits for provider closure and drains under the same Body
     const opening = (await readTell(paths, result.tellId))!.deliveries[0]!;
     assert.deepEqual(result.action, { kind: "started", historyId: `turn/${opening.turnSequence}` });
     assert.equal((await readTurn(paths, opening.turnSequence))?.end, undefined);
-    const submitting = api.tell({ akuma: result.akumaId, body: "second", signal: context.signal });
-    let returned = false;
-    void submitting.then(() => { returned = true; }, () => { returned = true; });
-    await waitForCondition("second Tell admitted", async () => (await readHeart(paths)).pending.length === 1);
-    assert.equal(returned, false, "an admitted Tell behind an open Turn is not successful submission");
+    const next = await api.tell({ akuma: result.akumaId, body: "second", signal: context.signal });
+    assert.deepEqual(next, { result: "told", akumaId: result.akumaId, tellId: next.tellId });
+    const queued = await readTell(paths, next.tellId);
+    assert.equal(queued?.state, "pending", "durable admission does not require provider submission");
+    assert.deepEqual(queued?.deliveries, []);
     assert.deepEqual(inputs, [["first"]]);
     answer.resolve();
     firstClosed = true;
     closed.resolve();
-    const next = await submitting;
-    assert.equal(next.kind, "admitted");
     await Promise.all(bodies);
 
     assert.equal(aborts, 0);
@@ -189,7 +189,7 @@ test("an ordinary Tell waits for provider closure and drains under the same Body
     assert.equal(second?.state, "told");
     assert.ok(first?.binding && second?.binding);
     assert.ok(first.binding.turnSequence < second.binding.turnSequence);
-    assert.deepEqual(next.action, { kind: "started", historyId: `turn/${second.binding.turnSequence}` });
+    assert.equal(second.deliveries[0]?.turnSequence, second.binding.turnSequence);
     const firstTurn = await readTurn(paths, first.binding.turnSequence);
     const secondTurn = await readTurn(paths, second.binding.turnSequence);
     assert.equal(firstTurn?.bodySequence, current.sequence);
@@ -321,6 +321,181 @@ test("a neutral launch completion cannot prove Tell delivery or Body settlement"
   );
 });
 
+test("an ended successor without this Tell cannot hide its known launch failure", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-ended-tell-successor-");
+  const { world, allocated } = await bornWorld(root, "b0000012");
+  const at = "2026-11-11T00:00:00.000Z";
+  const launch = t.mock.fn(async () => {
+    const leash = await HeldAkumaLeash.try(allocated.paths);
+    assert.ok(leash);
+    try {
+      const body = await leash.recordBody(allocated.paths, { leashTakenAt: at });
+      await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at });
+    } finally { leash.release(); }
+    return {
+      completed: Promise.resolve({ diagnostic: "successor exited before binding", child: { log: { path: allocated.paths.log } } }),
+      async cancel() { assert.fail("the exited launch must not be canceled"); },
+      release() {},
+    };
+  });
+  const response = await akumasWithLauncher(world, launch).tell({ akuma: allocated.id, body: "remember this" });
+  assert.ok("result" in response && response.result === "failed");
+  assert.equal(response.turn, undefined);
+  assert.deepEqual(response.failures, [{ stage: "wake", diagnostic: "successor exited before binding", logPath: allocated.paths.log }]);
+  assert.equal(launch.mock.callCount(), 1);
+  const admitted = await readTell(allocated.paths, response.tellId);
+  assert.equal(admitted?.body, "remember this");
+  assert.equal(admitted.state, "pending");
+  assert.equal(admitted.binding, undefined);
+});
+
+test("a rejected wake stays failed when another Body delivers the exact admitted Tell", async (t) => {
+  const { world, allocated } = await bornWorld(temporaryDirectory(t, "keiyaku-rejected-tell-wake-"), "b0000013");
+  const api = akumasWithLauncher(world, async (launch) => {
+    await driveAkumaBody(launch, answering("delivered independently"));
+    throw new Error("original wake rejected");
+  });
+  const result = await api.tell({ akuma: allocated.id, body: "admitted before wake" });
+  const tell = await readTell(allocated.paths, result.tellId);
+  assert.equal(tell?.state, "told");
+  assert.ok(tell.binding);
+  assert.ok("result" in result && result.result === "failed");
+  assert.equal(result.turn, `turn/${tell.binding.turnSequence}`);
+  assert.deepEqual(result.failures, [{ stage: "wake", diagnostic: "original wake rejected" }]);
+});
+
+test("native wake exits do not replace an independent exact answer or erase an actual failure", async (t) => {
+  for (const code of [7, 0, 75]) {
+    await t.test(`native exit ${code}`, async (t) => {
+      const root = temporaryDirectory(t, "keiyaku-exited-tell-wake-");
+      const { world, allocated } = await bornWorld(root, "b0000014");
+      const priorOptions = process.env.NODE_OPTIONS;
+      if (code === 7) {
+        const preload = join(root, "exit.mjs");
+        writeFileSync(preload, 'if (process.argv.some(arg => /akuma-body\\.[jt]s$/u.test(arg))) process.exit(7);\n');
+        process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
+      }
+      const at = "2026-11-20T00:00:00.000Z";
+      const answer = "independent answer";
+      const ready = deferred<void>();
+      const api = akumasWithLauncher(world, async (launch) => {
+        const deliver = () => driveAkumaBody(launch, answering(answer), { now: () => at });
+        try {
+          if (code === 0) await deliver();
+          const held = code === 75 ? await HeldAkumaLeash.try(launch.paths) : null;
+          if (code === 75) assert.ok(held);
+          let child: Awaited<ReturnType<typeof spawnAkumaBody>>;
+          try {
+            child = await spawnAkumaBody(launch);
+            assert.equal((await child.completed).diagnostic, `pre-admission exit ${code}`);
+          } finally {
+            held?.release();
+          }
+          if (code !== 0) await deliver();
+          return child;
+        } finally {
+          ready.resolve();
+        }
+      });
+      try {
+        const result = await api.tell({ akuma: allocated.id, body: "same input", wait: true, observe: { admitted: () => ready.promise } });
+        const tell = await readTell(allocated.paths, result.tellId);
+        assert.equal(tell?.state, "told");
+        assert.ok(tell.binding);
+        const turn = `turn/${tell.binding.turnSequence}` as const;
+        const outcome = { state: "done", turn, at, answer };
+        if (code === 7) {
+          assert.ok("result" in result && result.result === "failed");
+          assert.equal(result.turn, turn);
+          assert.deepEqual(result.outcome, outcome);
+          assert.deepEqual(result.failures, [{ stage: "wake", diagnostic: "pre-admission exit 7", logPath: allocated.paths.log }]);
+        } else {
+          assert.deepEqual(result, { akumaId: allocated.id, tellId: result.tellId, ...outcome });
+        }
+      } finally {
+        if (priorOptions === undefined) delete process.env.NODE_OPTIONS;
+        else process.env.NODE_OPTIONS = priorOptions;
+      }
+    });
+  }
+});
+
+test("a clean native exit without a Turn leaves admission pending rather than reporting a failed wake", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-clean-pending-wake-");
+  const { akuma, allocated } = await bornWorld(root, "b0000016", spawnAkumaBody);
+  const preload = join(root, "clean.mjs");
+  writeFileSync(preload, 'if (process.argv.some(arg => /akuma-body\\.[jt]s$/u.test(arg))) process.exit(0);\n');
+  const priorOptions = process.env.NODE_OPTIONS;
+  process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
+  try {
+    const result = await akuma.tell("remain admitted");
+    assert.deepEqual(result, { result: "told", akumaId: allocated.id, tellId: result.tellId });
+    const tell = await readTell(allocated.paths, result.tellId);
+    assert.equal(tell?.state, "pending");
+    assert.equal(tell.binding, undefined);
+  } finally {
+    if (priorOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = priorOptions;
+  }
+});
+
+test("a clean native exit without submission retains the existing Ask and first-Spawn stop", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-clean-no-submission-");
+  const { world, allocated } = await bornWorld(root, "b0000017", spawnAkumaBody);
+  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  const preload = join(root, "clean-wake.mjs");
+  writeFileSync(preload, `if (process.argv.some(arg => /akuma-body\\.[jt]s$/u.test(arg))) {
+    const launch = JSON.parse(Buffer.from(process.argv[2], "base64url").toString("utf8"));
+    if (launch.seed === undefined) process.exit(0);
+  }\n`);
+  const priorOptions = process.env.NODE_OPTIONS;
+  process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
+  const api = akumasWithLauncher(world, spawnAkumaBody);
+  try {
+    const spawned = await api.spawn({ akumaName: "worker", body: "initial input", signal: t.signal });
+    assert.ok(spawned.kind === "failed", "a clean native exit alone does not confirm the first Tell");
+    assert.ok(spawned.tellId);
+    assert.equal(spawned.action, undefined);
+    assert.equal((await readTell(pathsForAkumaId(world, spawned.akumaId), spawned.tellId))?.state, "pending");
+    assert.deepEqual(spawned.failures.map(({ stage }) => stage), ["wake"]);
+    const asked = await api.ask({ akuma: allocated.id, body: "no exact answer", schema: {}, timeoutMs: 3000, signal: t.signal });
+    assert.equal(asked.kind, "unanswered");
+    assert.equal(asked.wake?.kind, "failed");
+    assert.equal((await readTell(allocated.paths, asked.tellId))?.state, "pending");
+  } finally {
+    if (priorOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = priorOptions;
+  }
+});
+
+test("finite Tell releases its live wake observer without canceling the admitted input", async (t) => {
+  const { world, allocated } = await bornWorld(temporaryDirectory(t, "keiyaku-finite-tell-wake-"), "b0000015");
+  const controller = new AbortController();
+  const completed = deferred<{ diagnostic: string }>();
+  const acquired = deferred<void>();
+  const release = t.mock.fn();
+  const cancel = t.mock.fn(async () => {});
+  const api = akumasWithLauncher(world, async () => {
+    acquired.resolve();
+    return { completed: completed.promise, release, cancel };
+  });
+  try {
+    const pending = api.tell({ akuma: allocated.id, body: "retain this", wait: true, timeoutMs: 500, signal: controller.signal });
+    await Promise.race([acquired.promise, pending.then(() => assert.fail("wake never reached the launcher"))]);
+    const result = await pending;
+    assert.ok("state" in result && result.state === "waiting");
+    assert.equal(release.mock.callCount(), 1);
+    assert.equal(cancel.mock.callCount(), 0);
+    assert.equal((await readTell(allocated.paths, result.tellId))?.state, "pending");
+    await driveAkumaBody({ paths: allocated.paths }, answering("still works"));
+    assert.equal((await readTell(allocated.paths, result.tellId))?.state, "told");
+  } finally {
+    controller.abort();
+    completed.resolve({ diagnostic: "fixture exited" });
+  }
+});
+
 test("detached wake retains native exit, signal, and bounded log evidence", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-detached-launch-evidence-");
   const priorOptions = process.env.NODE_OPTIONS;
@@ -345,8 +520,8 @@ test("detached wake retains native exit, signal, and bounded log evidence", asyn
       process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
       writeFileSync(allocated.paths.log, "prior log\n");
       const result = await Akuma.select(world, allocated.id).tell("pending");
-      assert.equal(result.kind, "failed");
-      if (result.kind !== "failed") throw new Error("missing detached evidence");
+      assert.ok("result" in result && result.result === "failed", "missing detached evidence");
+      assert.equal((await readTell(allocated.paths, result.tellId))?.state, "pending");
       const wake = result.failures[0];
       assert.equal(wake.stage, "wake");
       if (wake.stage !== "wake") throw new Error("missing wake evidence");

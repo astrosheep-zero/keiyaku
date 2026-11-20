@@ -451,9 +451,9 @@ test("wait accepts a plural selection without an explicit completion mode", () =
     input: { selectors: ["aku/claude/1234abcd", "aku/claude/5678ef90"] },
     output: "text",
   });
-  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--timeout", "5m"]), {
+  assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--for", "5m"]), {
     name: "wait",
-    input: { selectors: ["aku/claude/1234abcd", "@peer"], timeout: "5m" },
+    input: { selectors: ["aku/claude/1234abcd", "@peer"], for: "5m" },
     output: "text",
   });
   assert.deepEqual(command(["wait", "aku/*/*", "--all"]), {
@@ -500,7 +500,21 @@ test("tell admits text without observation and ask requires a schema document", 
     acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
-  assert.throws(() => command(["tell", "@worker", "--wait", "0ms", "continue"]), /option --wait is not valid for tell/u);
+  for (const [tokens, wait] of [[[], true], [["0ms"], "0ms"]] as const) {
+    assert.deepEqual(command(["tell", "@worker", "--wait", ...tokens, "continue"]), {
+      name: "tell", input: { akuma: "@worker", wait },
+      acquire: { prompt: { kind: "argument", value: "continue" } }, output: "text",
+    });
+  }
+  const overflow = "9007199254740992ms";
+  assert.throws(() => command(["tell", "@worker", "--wait", overflow]), /duration exceeds/u);
+  assert.deepEqual(command(["tell", "@worker", "--wait", "--", overflow]), {
+    name: "tell", input: { akuma: "@worker", wait: true },
+    acquire: { prompt: { kind: "argument", value: overflow } }, output: "text",
+  });
+  assert.deepEqual(command(["tell", "@worker", "--wait", "-"]), {
+    name: "tell", input: { akuma: "@worker", wait: true }, acquire: { prompt: { kind: "stdin" } }, output: "text",
+  });
   assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
     name: "ask",
     input: { akuma: "aku/worker/1234abcd", timeout: "5m" },
@@ -511,7 +525,7 @@ test("tell admits text without observation and ask requires a schema document", 
     name: "ask", input: { akuma: "@worker" },
     acquire: { prompt: { kind: "stdin" }, schema: "answer.json" }, output: "text",
   });
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /option --wait is not valid for tell/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /requires a prompt/u);
   assert.throws(() => parseArgv(["ask", "@worker", "continue"]), CliUsageError);
 
   assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);

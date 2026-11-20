@@ -32,7 +32,8 @@ test("frozen KeiyakuError receipts merge into a fresh error retaining the origin
   const original = new KeiyakuError("internal", "frozen failure", {
     cause,
     spawn: { kind: "spawned", akumaId: parseAkumaId("aku/worker/11111111").id },
-    tell: { kind: "admitted", akumaId: parseAkumaId("aku/worker/11111111").id, tellId: "original-tell" },
+    tell: { result: "failed", akumaId: parseAkumaId("aku/worker/11111111").id, tellId: "original-tell",
+      failures: [{ stage: "observation", diagnostic: cause.message }] },
     outcome: { kind: "contract", contractId: contractId("kei/frozen-error"), admitted: [admitted], effects: [effect] },
   });
   Object.freeze(original);

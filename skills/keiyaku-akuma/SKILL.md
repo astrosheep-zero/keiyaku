@@ -20,18 +20,17 @@ research.
   that `@alias` to a replacement worker. Spawning an akumaName name (`worker`,
   `review-akuma`) always spawns a new instance — address the existing `@alias`
   or `AkuId` with `tell` to continue with the same worker.
-- **`spawn` and `tell` admit; `wait` observes:** `spawn` returns after birth and
-  optional first `Tell` admission, and `tell` returns after submission. Neither
-  waits for an answer. Supervise with a separate
-  `wait <aku/...|@name|kei/...>... --timeout <duration>`: it wakes on any
+- **`spawn`, `tell`, and `wait`:** `spawn` observes birth and submission of
+  optional first input. Ordinary `tell` confirms admission, not submission.
+  Neither waits for an answer. Supervise with a separate
+  `wait <aku/...|@name|kei/...>... --for <duration>`: it wakes on any
   settlement by default (or every selected member with `--all`), accepts mixed
   Contract and Akuma selectors, and a deadline never kills workers. A
   `kei/...` member waits for the `Contract`'s next journal change or terminal
   state.
-- **Use `ask` for answers:** `ask` submits a prompt plus a JSON Schema answer
-  contract and observes the answer; `ask --wait <duration>` bounds that
-  observation. Follow an admission-only `tell` with `wait` when you need its
-  settlement.
+- **Observe the exact input's answer:** use `tell --wait [<duration>]` for
+  text. Use `ask` for a JSON Schema answer contract; `ask --wait <duration>`
+  bounds that observation. Use a separate `wait` for worker-wide completion.
 - **`tell` vs. interrupting `tell`:** `tell` queues steering instructions
   without blocking; request an interrupt only when the worker is on the wrong
   track and should yield its current attempt first.

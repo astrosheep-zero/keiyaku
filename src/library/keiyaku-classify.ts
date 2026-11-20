@@ -11,14 +11,18 @@ import type {
 } from "../debt/index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
-import type { InvocationWaitResult } from "./keiyaku-wait.js";
+import { waitDisposition, type InvocationWaitResult } from "./keiyaku-wait.js";
 import { KeiyakuArcDocumentError } from "./keiyaku-coordinates.js";
 import { errorCategory, KeiyakuError } from "../errors.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
 import { contractOutcomeDisposition, invocationIssueIsFailure } from "./outcome.js";
 import { resetIssueIsRequired } from "./nuke.js";
 
-export type VerbDisposition = "accepted" | "unsatisfied" | "refused" | "retryable" | "failed" | "usage";
+export type VerbDisposition = "accepted" | "incomplete" | "unsatisfied" | "refused" | "retryable" | "failed" | "usage";
+
+export function verbDispositionIsError(disposition: VerbDisposition): boolean {
+  return disposition !== "accepted" && disposition !== "incomplete" && disposition !== "unsatisfied";
+}
 
 export type VerbCompletion<O> = Readonly<{ kind: "returned"; value: O }> | Readonly<{ kind: "threw"; error: unknown }>;
 
@@ -47,7 +51,6 @@ function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
 
 const akumaCallDisposition = {
   spawned: "accepted",
-  admitted: "accepted",
   forked: "accepted",
   answered: "accepted",
   unanswered: "accepted",
@@ -77,17 +80,6 @@ function classifyReconcile(result: VerbOutput<"reconcile">): VerbDisposition {
         ? "failed"
         : "accepted";
   }
-}
-
-function classifyWait(result: InvocationWaitResult): VerbDisposition {
-  if (
-    result.members.some(
-      (member) =>
-        member.kind === "akuma" && (member.observation.kind === "unobserved" || member.observation.kind === "missing"),
-    )
-  )
-    return "failed";
-  return result.reason === "missing" ? "refused" : "accepted";
 }
 
 function classifyHistory(value: VerbOutput<"history">): VerbDisposition {
@@ -131,9 +123,20 @@ export function classifyVerb<K extends VerbName>(
     }
     case "spawn":
     case "fork":
-    case "tell":
     case "ask":
-      return akumaCallDisposition[(value as SpawnResult | ForkResult | AkumaTellResult | AkumaAskResult).kind];
+      return akumaCallDisposition[(value as SpawnResult | ForkResult | AkumaAskResult).kind];
+    case "tell": {
+      const tell = value as AkumaTellResult;
+      return "result" in tell
+        ? tell.result === "failed"
+          ? "failed"
+          : "accepted"
+        : tell.state === "failed"
+          ? "failed"
+          : tell.state === "waiting"
+            ? "incomplete"
+            : "accepted";
+    }
     case "kill":
       return (value as AkumaKillResult).results.some(
         ({ outcome }) => outcome === "unavailable" || outcome === "hung" || outcome === "untidy",
@@ -141,7 +144,7 @@ export function classifyVerb<K extends VerbName>(
         ? "failed"
         : "accepted";
     case "wait":
-      return classifyWait(value as InvocationWaitResult);
+      return waitDisposition(value as InvocationWaitResult);
     case "history":
       return classifyHistory(value as VerbOutput<"history">);
     case "show": {

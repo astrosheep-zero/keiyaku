@@ -245,7 +245,7 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     assert.deepEqual(mine.rows.map((row) => row.id), [id]);
     await native.run(`
       text(await tools.keiyaku_status({selector: ${JSON.stringify(id)}}));
-      text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], timeout: "0ms"}));
+      text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], for: "0ms"}));
     `);
     for (const name of ["keiyaku_ls", "keiyaku_status", "keiyaku_wait"]) {
       const result = resultFor(native.results, name);
@@ -264,7 +264,7 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
         ? await facet.ls({ selector: "aku/*", mine: true })
         : name === "keiyaku_status"
           ? await facet.status({ selector: id })
-          : await facet.wait({ selectors: [id], timeout: "0ms" });
+          : await facet.wait({ selectors: [id], for: "0ms" });
       const withoutObservationTime = (key: string, value: unknown) => key === "observedAt" ? undefined : value;
       assert.deepEqual(
         JSON.parse(JSON.stringify(result.structuredContent, withoutObservationTime)),
@@ -293,7 +293,7 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       return prepare.call(this, sql);
     });
     try {
-      const waiting = native.run(`text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], timeout: "10s"}));`);
+      const waiting = native.run(`text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], for: "10s"}));`);
       await Promise.race([baseline.promise, waiting.then(() => assert.fail("wait stopped before its report baseline"))]);
       const milestone = `worker reached the checkpoint\n${"work in progress ".repeat(50)}\nexact report tail`;
       const recorded = await child.report(milestone);
@@ -305,12 +305,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.ok(schema);
       const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(wake.structuredContent);
       assert.equal(validation.valid, true, validation.errorMessage);
-      const { reason, members: [member] } = Keiyaku.verbs.wait.normal.parse(wake.structuredContent);
-      assert.equal(reason, "reported");
-      assert.ok(member);
-      assert.equal(member.kind, "akuma");
-      assert.ok(member.report);
-      assert.equal(member.observation.id, id);
+      const { members: [member] } = Keiyaku.verbs.wait.normal.parse(wake.structuredContent);
+      assert.ok(member?.state === "running" && member.report);
+      assert.equal(member.akuma, id);
       assert.equal(member.report.report, recorded.reportId);
       assert.match(member.report.text, /…$/u);
       assert.ok(milestone.startsWith(member.report.text.slice(0, -1)) && member.report.text.length < milestone.length);

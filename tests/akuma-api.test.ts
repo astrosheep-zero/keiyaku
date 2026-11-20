@@ -30,7 +30,7 @@ import { executeWaitAkuma, createAkumaWaitObserver } from "../src/akuma/akuma-wa
 import { DatabaseSync } from "node:sqlite";
 import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { executeAskAkuma, executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { KeiyakuError } from "../src/index.js";
 import {
   deferred,
@@ -138,14 +138,15 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
     const selected = akumaWithLauncher(value.world, value.allocated.id, value.spawn);
     assert.equal((await selected.status()).id, value.allocated.id);
     assert.equal(Array.isArray((await selected.history()).rows), true);
-    assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
+    assert.equal((await selected.idle({ timeoutMs: 0 })).status.akuma, value.allocated.id);
     const asked = await selected.tell("standalone", { wait: true, timeoutMs: 5_000 });
-    assert.deepEqual(settledInput(asked.input), { kind: "answered", answer: "standalone answer" });
+    assert.ok("state" in asked && asked.state === "done");
+    assert.equal(asked.answer, "standalone answer");
     assert.ok(["killed", "already-stopped", "already-killed"].includes(await selected.kill()));
   });
 });
 
-import { answering, bornWorld, fixtureLauncher, settleFixtureBodies, settledInput } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import type { BodyLauncher } from "../src/akuma/body-launch.js";
 
@@ -209,26 +210,31 @@ const dormantTellRuntime: TellWakeRuntime = {
 
 test("bounded Tell and zero window preserve exact admission through waited Tell cancellation", async () => {
   await withWaitedTellFixture(async ({ born, settle }) => {
+    const observe = ({ allocated, spawn, world }: WaitedTellWorld, options: WaitedTellOptions) =>
+      executeTellAkuma({ ...options, spawn, path: world, id: allocated.id, wait: true });
     const answered = await born("a1000010", answering("exact answer"));
-    const observed = await waitTell(answered, { body: "answer this", timeoutMs: 1_000 });
+    const observed = await observe(answered, { body: "answer this", timeoutMs: 1_000 });
     assert.equal(typeof observed.tellId, "string");
-    assert.equal(observed.kind, "answered");
-    if (observed.kind !== "answered") throw new Error("expected answer");
+    assert.ok("state" in observed && observed.state === "done");
     assert.equal(observed.answer, "exact answer");
 
     const late = deferred<string>();
     const delayed = await born("a1000018", gatedAnswer(late.promise));
     const forced = setTimeout(() => late.resolve("forced"), 400);
     const startedAt = performance.now();
-    const deadline = await waitTell(delayed, { body: "late", timeoutMs: 0 });
-    const elapsed = performance.now() - startedAt;
-    clearTimeout(forced);
-    assert.equal(deadline.kind, "deadline");
-    assert.ok(elapsed < 200, `an expired window must not wait for delivery (waited ${elapsed}ms)`);
-    assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.body, "late");
-    late.resolve("too late");
-    await settle();
-    assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.state, "told");
+    try {
+      const deadline = await observe(delayed, { body: "late", timeoutMs: 0 });
+      const elapsed = performance.now() - startedAt;
+      assert.ok("state" in deadline && deadline.state === "waiting");
+      assert.ok(elapsed < 200, `an expired window must not wait for delivery (waited ${elapsed}ms)`);
+      assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.body, "late");
+      late.resolve("too late");
+      await settle();
+      assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.state, "told");
+    } finally {
+      clearTimeout(forced);
+      late.resolve("too late");
+    }
 
     const started = deferred<void>();
     const finish = deferred<string>();
@@ -236,29 +242,36 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     const controller = new AbortController();
     const reason = Object.freeze(new Error("stop observing the admitted Tell"));
     const tellId = "waited-cancel-tell";
-    const pending = waitTell(canceled, { body: "finish later", tellId, timeoutMs: 5_000, signal: controller.signal });
-    await started.promise;
-    await waitForCondition(
-      "the admitted Tell to bind its Turn",
-      async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined,
-    );
-    controller.abort(reason);
-    await assert.rejects(pending, (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.cause, reason);
-      assert.equal(error.category, "aborted");
-      assert.equal(error.tell?.tellId, tellId);
-      assert.equal(error.tell?.akumaId, canceled.allocated.id);
-      assert.ok(Object.isFrozen(error.tell));
-      const action = error.tell?.action ?? error.tell?.wake;
-      assert.ok(action !== undefined && Object.isFrozen(action));
-      assert.throws(() => Object.assign(error, { tell: undefined }), TypeError);
-      return true;
-    });
-    const admitted = await readTell(canceled.allocated.paths, tellId);
-    assert.equal(admitted?.body, "finish later");
-    assert.notEqual(admitted?.binding, undefined, "cancellation does not retract the admitted Tell");
-    finish.resolve("late answer");
+    const pending = observe(canceled, { body: "finish later", tellId, timeoutMs: 5_000, signal: controller.signal });
+    try {
+      await Promise.race([
+        started.promise,
+        pending.then(() => assert.fail("Waited Tell returned before the provider started")),
+      ]);
+      await waitForCondition(
+        "the admitted Tell to bind its Turn",
+        async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined,
+      );
+      controller.abort(reason);
+      await assert.rejects(pending, (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.cause, reason);
+        assert.equal(error.category, "aborted");
+        assert.equal(error.tell?.tellId, tellId);
+        assert.equal(error.tell?.akumaId, canceled.allocated.id);
+        assert.ok(Object.isFrozen(error.tell));
+        assert.ok(error.tell && "result" in error.tell && error.tell.result === "failed");
+        assert.ok(Object.isFrozen(error.tell.failures));
+        assert.deepEqual(error.tell.failures, [{ stage: "observation", diagnostic: reason.message }]);
+        assert.throws(() => Object.assign(error, { tell: undefined }), TypeError);
+        return true;
+      });
+      const admitted = await readTell(canceled.allocated.paths, tellId);
+      assert.equal(admitted?.body, "finish later");
+      assert.notEqual(admitted?.binding, undefined, "cancellation does not retract the admitted Tell");
+    } finally {
+      finish.resolve("late answer");
+    }
     await settle();
     const settled = await readTell(canceled.allocated.paths, tellId);
     assert.equal(settled?.state, "told");
@@ -420,7 +433,12 @@ test("standalone tell admits and optionally observes its text answer", async () 
     await settle();
     const second = await born("a1000021", answering("second answer"));
     const asked = await second.akuma.tell("await answer", { wait: true });
-    assert.deepEqual(settledInput(asked.input), { kind: "answered", answer: "second answer" });
+    assert.ok("state" in asked && asked.state === "done");
+    assert.equal(asked.answer, "second answer");
+    assert.equal(asked.at, WAITED_TELL_NOW);
+    const recorded = await readTell(second.allocated.paths, asked.tellId);
+    assert.ok(recorded?.binding);
+    assert.equal(asked.turn, `turn/${recorded.binding.turnSequence}`);
   });
 });
 
@@ -558,8 +576,9 @@ test("idle resolves the settling life with the final status", async () => {
     await settleFixtureBodies(bodies);
     const settled: AkumaIdleResult = await akuma.idle();
     assert.equal(settled.reason, "completed");
-    assert.equal(settled.status.life, "asleep");
-    assert.equal(settled.status.id, allocated.id);
+    assert.equal(settled.status.state, "done");
+    assert.equal(settled.status.akuma, allocated.id);
+    assert.equal((await akuma.status()).life, "asleep");
   } finally {
     await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
@@ -608,8 +627,9 @@ test("idle after kill names the killed life", async () => {
     );
     const killed = await akuma.idle();
     assert.equal(killed.reason, "completed");
-    assert.equal(killed.status.life, "killed");
-    assert.equal(killed.status.id, allocated.id);
+    assert.equal(killed.status.state, "canceled");
+    assert.equal(killed.status.akuma, allocated.id);
+    assert.equal((await akuma.status()).life, "killed");
   } finally {
     release?.();
     await body?.catch(() => undefined);
@@ -628,9 +648,10 @@ test("idle returns untidy execution while preserving a pending tell", async (con
   });
   const timed = await akuma.idle({ timeoutMs: 100 });
   assert.equal(timed.reason, "completed");
-  assert.equal(timed.status.life, "untidy");
-  assert.equal(timed.status.id, allocated.id);
-  assert.equal(timed.status.pending, true, "the compact observation names pending input without a full status");
+  assert.ok(timed.status.state === "failed");
+  assert.equal(timed.status.reason, "untidy");
+  assert.equal(timed.status.akuma, allocated.id);
+  assert.equal((await readTell(allocated.paths, "queued"))?.state, "pending");
   assert.ok(queued.kind === "recorded");
   assert.equal((await akuma.status()).work.pending?.[0]?.id, queued.tell.sequence);
 });
@@ -779,8 +800,7 @@ test("a native wait completes on a Turn closure and keeps the latest Turn's tail
   const result = await waiting;
   assert.equal(result.reason, "completed");
   const item = result.results[0];
-  assert.ok(item?.kind === "observed");
-  assert.equal(item.life, "asleep");
+  assert.deepEqual(item, { akuma: member.id, state: "failed", turn: `turn/${member.turn.sequence}`, reason: "done", at: LIVE_WAIT_AT, lastActivityAt: LIVE_WAIT_AT });
   const reader = createLiveStatusReader(member.paths, member.id);
   context.after(reader.clear);
   const final = await reader.read();
@@ -789,7 +809,7 @@ test("a native wait completes on a Turn closure and keeps the latest Turn's tail
   assert.equal(final.rows.filter((row) => row.text.includes("reuse-wait-")).length, 12);
   assert.deepEqual(final.status.recent, final.rows.slice(-3));
   assert.match(final.status.recent?.at(-1)?.text ?? "", /^! turn\/\d+\n +done/u);
-  assert.equal(final.status.work.outcome?.verdict, "failed");
+  assert.equal(final.status.work.outcome?.state, "failed");
 });
 
 test("a live reader surfaces failed read, decode, schema, and commit attempts without retaining them", async (context) => {
@@ -940,18 +960,14 @@ test("plural wait keeps an unreadable member local and reads it anew when it rec
     }
     return prepare.call(this, sql);
   });
-  const observer = createAkumaWaitObserver(root, members.map((member) => member.id), { includeRecent: true });
+  const observer = createAkumaWaitObserver(root, members.map((member) => member.id), true);
   try {
     await observer.observe(AbortSignal.timeout(1_000));
     const [readable, unreadable] = members.map((member) => observer.items.get(member.id));
-    assert.equal(readable?.kind, "observed", "the readable peer still reports its own evidence");
-    assert.ok(readable?.kind === "observed" && readable.events?.length === 3);
-    assert.equal(unreadable?.kind, "observed", "an unreadable tail leaves the member's life intact");
-    assert.equal(unreadable?.kind === "observed" ? unreadable.events : undefined, undefined);
-    assert.match(
-      unreadable?.kind === "observed" ? (unreadable.eventsUnavailable ?? "") : "",
-      /transient selected read failure/u,
-    );
+    assert.ok(readable?.state === "running" && Array.isArray(readable.events) && readable.events.length === 3);
+    assert.ok(unreadable?.state === "running", "an unreadable tail leaves the member's work intact");
+    assert.ok(unreadable.events && "reason" in unreadable.events);
+    assert.match(unreadable.events.reason, /transient selected read failure/u);
   } finally {
     injected.mock.restore();
   }
@@ -959,9 +975,8 @@ test("plural wait keeps an unreadable member local and reads it anew when it rec
     await observer.observe(AbortSignal.timeout(1_000));
     for (const member of members) {
       const item = observer.items.get(member.id);
-      assert.equal(item?.kind, "observed");
-      assert.equal(item?.kind === "observed" ? item.life : undefined, "running");
-      assert.equal(item?.kind === "observed" ? item.events?.length : undefined, 3, "a later read replaces the failure");
+      assert.ok(item?.state === "running" && Array.isArray(item.events));
+      assert.equal(item.events.length, 3, "a later read replaces the failure");
     }
   } finally {
     observer.clear();

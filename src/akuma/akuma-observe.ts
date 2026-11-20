@@ -12,6 +12,7 @@ import {
   readSeal,
   type HeartSnapshot,
   type Soul,
+  type TurnEndFact,
   type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
@@ -68,6 +69,7 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   expected: AkumaId,
   read: (leash: LeashProbe) => Promise<T>,
   snapshot?: T,
+  witness?: (snapshot: T) => void,
 ) {
   const fresh = async (leash: LeashProbe) => {
     try {
@@ -77,14 +79,22 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
       throw error;
     }
   };
-  snapshot ??= await fresh("held");
-  if (snapshot.soul === null) throw new AkumaNotBornError(expected);
-  const claim = await HeldAkumaLeash.try(paths);
-  try {
-    if (claim !== null) snapshot = await fresh("free");
-    const soul = snapshot.soul;
+  const identify = (facts: T): Soul => {
+    const soul = facts.soul;
     if (soul === null) throw new AkumaNotBornError(expected);
     if (soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
+    // Exact retained evidence can outlive an unavailable fresh life judgment.
+    witness?.(facts);
+    return soul;
+  };
+  snapshot ??= await fresh("held");
+  let soul = identify(snapshot);
+  const claim = await HeldAkumaLeash.try(paths);
+  try {
+    if (claim !== null) {
+      snapshot = await fresh("free");
+      soul = identify(snapshot);
+    }
     const currentLife = observedLife(snapshot, claim === null ? "held" : "free");
     return { snapshot, soul, currentLife };
   } finally {
@@ -110,7 +120,8 @@ export async function observeOutcomeRows(
   if (ids.length > 0) await observer?.(id, ids);
 }
 export async function observeStatusOutcome(status: AkumaStatus, observer?: OutcomeObserver): Promise<void> {
-  if (status.work.outcome !== undefined) await observer?.(status.id, [status.work.outcome.historyId]);
+  const outcome = status.work.outcome;
+  if (outcome !== undefined && outcome.state !== "running") await observer?.(status.id, [outcome.turn]);
 }
 
 export type LiveStatusObservation = Readonly<{ status: AkumaStatus; rows: readonly TimelineItem[] }>;
@@ -162,10 +173,27 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
   };
   return {
     clear: reader.clear,
-    async tellOutcome(id: string, includeLive: boolean, signal?: AbortSignal) {
-      const observed = await bornObservation(paths, expected, () => reader.tellOutcome(id, includeLive, signal));
-      const { tell, end, live } = observed.snapshot;
-      const exact = { tell, end, life: observed.currentLife };
+    async tellOutcome(
+      id: string,
+      includeLive: boolean,
+      signal?: AbortSignal,
+      beforeRead?: () => void,
+      witness?: (end: TurnEndFact) => void,
+    ) {
+      const observed = await bornObservation(
+        paths,
+        expected,
+        () => {
+          beforeRead?.();
+          return reader.tellOutcome(id, includeLive, signal);
+        },
+        undefined,
+        ({ end }) => {
+          if (end !== undefined) witness?.(end);
+        },
+      );
+      const { tell, live } = observed.snapshot;
+      const exact = { tell, life: observed.currentLife };
       if (live === undefined) return { ...exact, live };
       return {
         ...exact,
@@ -178,29 +206,23 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
       };
     },
     async wait(
-      includeRecent: boolean,
+      includeTail: boolean,
       reportAfter: number | null | undefined,
-      skipAdvancing: boolean,
-      signal?: AbortSignal,
+      signal: AbortSignal | undefined,
+      beforeRead: () => void,
+      witness: (snapshot: Pick<WaitFacts, "outcome" | "reportFrontier" | "lastActivityAt">) => void,
     ): Promise<WaitStatusObservation> {
-      const observed = await bornObservation(paths, expected, (leash) =>
-        reader.wait(
-          reportAfter,
-          (snapshot) => {
-            const life = observedLife(snapshot, leash);
-            return {
-              outcome: !skipAdvancing || waitComplete(life, snapshot.hasPendingTell),
-              recent: includeRecent && life === "running",
-            };
-          },
-          signal,
-        ),
+      const observed = await bornObservation<WaitFacts>(
+        paths,
+        expected,
+        (leash) => {
+          beforeRead();
+          return reader.wait(reportAfter, (value) => observedLife(value, leash) === "running", includeTail, signal);
+        },
+        undefined,
+        witness,
       );
       return { ...observed.snapshot, id: expected, life: observed.currentLife };
-    },
-    async complete(signal?: AbortSignal): Promise<boolean> {
-      const observed = await bornObservation(paths, expected, () => reader.life(signal));
-      return waitComplete(observed.currentLife, observed.snapshot.hasPendingTell);
     },
     async status(): Promise<AkumaStatus> {
       return (await readStatus()).status;
@@ -266,35 +288,24 @@ export function defaultWaitComplete(status: AkumaStatus): boolean {
 export type WaitReason = "completed" | "deadline";
 export const OBSERVATION_POLL_MS = 100;
 
-/** A final deadline-edge observation always precedes the completion judgment. */
+/** Ask may do a final edge read; a caller-supplied read guard can close it. */
 export async function waitForObservation<T>(
   input: Readonly<{
     timeoutMs?: number;
-    pollMs?: number;
+    remaining?: () => number;
     signal?: AbortSignal;
-    probe?(): Promise<boolean>;
     observe(): Promise<T>;
     complete(value: T): boolean;
-    onObserve?(value: T): void | Promise<void>;
   }>,
 ): Promise<Readonly<{ reason: WaitReason; value: T }>> {
-  const deadline = input.timeoutMs === undefined ? undefined : performance.now() + input.timeoutMs;
+  const deadline = input.timeoutMs === undefined ? Infinity : performance.now() + input.timeoutMs;
+  const remaining = input.remaining ?? (() => deadline - performance.now());
   for (;;) {
     input.signal?.throwIfAborted();
-    const ready = input.probe === undefined || (await input.probe());
+    const value = await input.observe();
     input.signal?.throwIfAborted();
-    if (ready || (deadline !== undefined && performance.now() >= deadline)) {
-      const value = await input.observe();
-      input.signal?.throwIfAborted();
-      await input.onObserve?.(value);
-      if (input.complete(value)) return { reason: "completed", value };
-      if (deadline !== undefined && performance.now() >= deadline) return { reason: "deadline", value };
-    }
-    await abortableDelay(
-      deadline === undefined
-        ? (input.pollMs ?? OBSERVATION_POLL_MS)
-        : Math.min(input.pollMs ?? OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
-      input.signal,
-    );
+    if (input.complete(value)) return { reason: "completed", value };
+    if (remaining() <= 0) return { reason: "deadline", value };
+    await abortableDelay(Math.min(OBSERVATION_POLL_MS, Math.max(0, remaining())), input.signal);
   }
 }

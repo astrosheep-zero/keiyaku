@@ -11,7 +11,7 @@ import { KeiyakuError } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
-import { fixtureAdapter, settledInput } from "./support/akuma-tell.js";
+import { fixtureAdapter } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
@@ -151,21 +151,21 @@ test(
         () => existsSync(join(world, "first.ready")) && existsSync(join(world, "second.ready")),
       );
       assert.equal(await first.kill({ signal: t.signal }), "killed");
-      assert.equal((await firstAsk).input?.kind, "unanswered");
+      const stopped = await firstAsk;
+      assert.ok("state" in stopped && stopped.state === "canceled");
       assert.equal((await api.status({ akuma: second.akumaId })).life, "running");
       const paths = pathsForAkumaId(world, second.akumaId);
       const running = await readLatestTurnForBody(paths, (await readHeart(paths)).latestBody!.sequence);
       assert.ok(running);
-      const telling = api.tell({ akuma: second.akumaId, body: "keep going", signal: t.signal });
-      await waitForCondition("second host admitted follow-up work", async () =>
-        (await readHeart(paths)).pending.some((tell) => tell.body === "keep going"),
-      );
+      const telling = await api.tell({ akuma: second.akumaId, body: "keep going", signal: t.signal });
+      assert.ok("result" in telling && telling.result === "told");
+      assert.equal((await readTell(paths, telling.tellId))?.body, "keep going");
       writeFileSync(join(world, "second.release"), "release");
-      assert.ok((await telling).action, "the follow-up confirms exact submission");
       const secondHandle = Akuma.select(world, second.akumaId, { hosting: "in-process" });
       assert.ok(secondHandle instanceof Akuma);
       assert.equal((await secondHandle.idle({ timeoutMs: 20_000, signal: t.signal })).reason, "completed");
       assert.equal((await readHeart(paths)).pending.length, 0);
+      assert.ok((await readTell(paths, telling.tellId))?.binding);
       const outcome = (await readTurn(paths, running.sequence))?.end?.outcome;
       assert.equal(outcome?.kind, "answered");
       if (outcome?.kind !== "answered") throw new Error("second Body lost its answer");
@@ -179,7 +179,8 @@ test(
         timeoutMs: 20_000,
         signal: t.signal,
       });
-      assert.deepEqual(settledInput(selectedAnswer.input), { kind: "answered", answer: "selected-answer" });
+      assert.ok("state" in selectedAnswer && selectedAnswer.state === "done");
+      assert.equal(selectedAnswer.answer, "selected-answer");
       const events = nativeEvents(world);
       assert.equal(new Set(events.map((event) => event.pid)).size, 1);
       assert.ok(events.every((event) => event.pid === process.pid));
@@ -235,8 +236,8 @@ console.log(JSON.stringify({
     assert.equal(first.current.kind, "recorded");
     const handle = Akuma.select(world, called.akumaId, host);
     const next = await handle.tell(reporting("wake report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
-    if (next.input?.kind !== "answered") assert.fail(JSON.stringify(next));
-    const resumed = JSON.parse(next.input.answer);
+    assert.ok("state" in next && next.state === "done", JSON.stringify(next));
+    const resumed = JSON.parse(next.answer);
     const reportSequence = (reportId: string) => Number(reportId.slice("report/".length));
     assert.ok(reportSequence(resumed.current.reportId) > reportSequence(first.current.reportId));
     assert.equal(resumed.current.kind, "recorded");
@@ -254,8 +255,8 @@ console.log(JSON.stringify({
     }
     const bare = await Akuma.birth("worker", { root: world, cwd: world, host, bare: true });
     const bareAnswer = await bare.tell(reporting("bare report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
-    if (bareAnswer.input?.kind !== "answered") assert.fail(JSON.stringify(bareAnswer));
-    assert.equal(JSON.parse(bareAnswer.input.answer).current.kind, "recorded");
+    assert.ok("state" in bareAnswer && bareAnswer.state === "done", JSON.stringify(bareAnswer));
+    assert.equal(JSON.parse(bareAnswer.answer).current.kind, "recorded");
     assert.equal((await readHeart(pathsForAkumaId(world, bare.id))).soul?.bare, true);
     assert.equal(runtime().at(-1)!.prompt.includes("<keiyaku>"), false);
     assert.ok(runtime().at(-1)!.prompt.includes("Fixture."), "bare preserves personality");
@@ -293,7 +294,7 @@ const who = run("whoami");
 const debt = run("debt", "add", "Local Body operation");
 const review = run("review", ${JSON.stringify(id)}, "--unsatisfied", "--summary", "fixture");
 const child = run("spawn", "worker", ${JSON.stringify(prompt("printf child-answer"))});
-const waited = run("wait", child.akumaId, "--timeout", "20s");
+const waited = run("wait", child.akumaId, "--for", "20s");
 console.log(JSON.stringify({ who, debt, review, child, waited }));
 `,
     );
@@ -302,14 +303,14 @@ console.log(JSON.stringify({ who, debt, review, child, waited }));
       timeoutMs: 40_000,
       signal: t.signal,
     });
-    assert.equal(answer.input?.kind, "answered", JSON.stringify(answer));
-    if (answer.input?.kind !== "answered") return;
-    const result = JSON.parse(answer.input.answer);
+    assert.ok("state" in answer && answer.state === "done", JSON.stringify(answer));
+    const result = JSON.parse(answer.answer);
     assert.equal(result.debt.kind, "accepted");
     assert.equal(result.review.kind, "accepted");
     assert.equal(result.child.input, undefined);
     assert.equal(typeof result.child.tellId, "string");
-    assert.equal(result.waited.reason, "completed");
+    assert.equal(result.waited.members[0].state, "done");
+    assert.equal(result.waited.members[0].answer, "child-answer");
     const child = await readHeart(pathsForAkumaId(world, result.child.akumaId));
     assert.equal(child.soul?.origin.kind, "direct");
     assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: parent.id });
@@ -346,8 +347,12 @@ test(
         false,
       );
       const stopped = await asking;
-      assert.equal(stopped.kind, "failed");
-      if (stopped.kind === "failed") assert.equal(stopped.failures[0].stage, "observation");
+      assert.ok("state" in stopped && stopped.state === "failed");
+      const binding = (await readTell(paths, stopped.tellId))?.binding;
+      assert.equal(stopped.turn, `turn/${binding?.turnSequence}`);
+      const end = binding === undefined ? undefined : (await readTurn(paths, binding.turnSequence))?.end;
+      assert.ok(end?.outcome.kind === "failed");
+      assert.equal(stopped.reason, end.outcome.diagnostic);
     } finally {
       writeFileSync(join(world, "stall.release"), "release");
       await waitForCondition("native tool's actual retirement", () =>
@@ -555,8 +560,11 @@ test(
       writeFileSync(join(world, "first.release"), "release");
       await waitForCondition("second ACP Turn", () => existsSync(join(world, "second.ready")));
       const tell = await telling;
-      assert.equal(tell.action?.kind, "started");
-      assert.equal((await readTell(paths, tell.tellId))?.state, "told");
+      assert.ok("result" in tell && tell.result === "told");
+      const second = await readTell(paths, tell.tellId);
+      assert.equal(second?.state, "told");
+      assert.ok(second.binding);
+      assert.equal((await readTurn(paths, second.binding.turnSequence))?.bodySequence, before);
       assert.equal((await readHeart(paths)).latestBody?.sequence, before);
       writeFileSync(join(world, "hold-body-end"), String(before));
       const closing = scope.close();
@@ -624,8 +632,8 @@ export default pi => {
     assert.equal(existsSync(join(world, "late-prompt")), false);
     assert.equal(await probeLeash(pathsForAkumaId(world, called.akumaId)), "free");
     const retained = await api.tell({ akuma: called.akumaId, body: "retained, but no host launch" });
-    assert.equal(retained.kind, "failed");
-    if (retained.kind === "failed") assert.match(retained.failures[0].diagnostic, /scope is closed/u);
+    assert.ok("result" in retained && retained.result === "failed");
+    assert.match(retained.failures[0].diagnostic, /scope is closed/u);
     assert.ok(
       (await readHeart(pathsForAkumaId(world, called.akumaId))).pending.length > 0,
       "scope closure is not Tell rollback",

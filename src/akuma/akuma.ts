@@ -19,7 +19,7 @@ import {
 } from "./identity.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { timelineItemSchema } from "./projection.js";
-import { currentWorkSchema, reportedFileChangeSchema } from "./status-projection.js";
+import { addressedWorkSchema, reportedFileChangeSchema } from "./status-projection.js";
 import { boundedMap } from "./read-pool.js";
 
 type BornLife = AkumaStatus["life"];
@@ -70,7 +70,7 @@ export const akumaStatusSchema = z
     model: z.string().exactOptional(),
     surveillants: surveillanceAudienceSchema.exactOptional(),
     lastActivityAt: z.string().exactOptional(),
-    work: currentWorkSchema,
+    work: addressedWorkSchema,
     recent: z.array(timelineItemSchema).max(3).readonly().exactOptional(),
     changes: z.array(reportedFileChangeSchema).nonempty().readonly().exactOptional(),
     moreChanges: z.literal(true).exactOptional(),

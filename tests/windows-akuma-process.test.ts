@@ -232,15 +232,16 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
         .filter((line) => line.length > 0),
       ["request"],
     );
-    assert.equal(status.life, "asleep", JSON.stringify(status));
-    assert.ok(status.outcome?.kind === "answered");
-    assert.equal(status.outcome.answer, "fixture answer");
-    const exact = await Akumas.of(worldRoot).history({ akuma: handle.id, id: status.outcome.historyId });
+    assert.equal((await handle.status()).life, "asleep");
+    assert.ok(status.state === "done", JSON.stringify(status));
+    assert.equal(status.answer, "fixture answer");
+    const exact = await Akumas.of(worldRoot).history({ akuma: handle.id, id: status.turn });
     assert.ok(exact.kind === "akuma-exact");
-    assert.deepEqual(exact.outcome, { kind: "answered", answer: status.outcome.answer });
+    assert.deepEqual(exact.outcome, { turn: status.turn, state: status.state, at: status.at, answer: status.answer });
     const page = await handle.history();
-    assert.equal(page.rows.at(-1)?.id, exact.sequence);
-    assert.ok(page.rows.at(-1)?.text.includes(status.outcome.historyId));
+    const terminal = page.rows.at(-1);
+    assert.ok(terminal && terminal.text.includes(status.turn));
+    assert.match(terminal.text, /fixture answer/u);
     operationFailed = false;
   } finally {
     try {

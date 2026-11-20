@@ -7,7 +7,7 @@ import { deferred, temporaryDirectory } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
 import { observeAdmittedTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { pendingTellReceipt } from "../src/akuma/call-initial-tell.js";
-import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, readHeart, readTell } from "../src/akuma/heart/index.js";
+import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, finishBodyIfIdle, HeldAkumaLeash, readHeart, readTell, recordTellDeliveries } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
 import { createHeartReader, HeartAbsentError } from "../src/akuma/heart/storage.js";
@@ -115,11 +115,14 @@ test("live Ask shares its exact witness and retires the retained Heart reader", 
       timeoutMs: 3000,
       observe: async ({ status }) => {
         assert.equal(status.work.turn?.sequence, turnSequence, "notification may run after the snapshot, not split it");
-        if (status.work.outcome === undefined) await endTurn(paths, { turnSequence, outcome, completedAt: AT });
-        else assert.equal(status.work.outcome.historyId, exact);
+        if (status.work.outcome?.state === "running") await endTurn(paths, { turnSequence, outcome, completedAt: AT });
+        else assert.deepEqual(status.work.outcome, { turn: exact, at: AT, state: "failed", reason: outcome.diagnostic });
       },
     });
-    assert.deepEqual(result, { reason: "completed", outcome, completedAt: AT });
+    assert.equal(result.reason, "completed");
+    assert.deepEqual(result.outcome, outcome);
+    assert.equal(result.completedAt, AT);
+    assert.equal(result.end?.turnSequence, turnSequence);
     assert.equal(connections.size, 1);
     assert.equal([...connections][0]!.isOpen, false);
     refuseDetail = true;
@@ -129,6 +132,52 @@ test("live Ask shares its exact witness and retires the retained Heart reader", 
   } finally {
     leash.release();
   }
+});
+
+test("bounded Tell keeps its exact terminal when the free-leash recheck hits expiry", async (t) => {
+  const root = await World.at(temporaryDirectory(t, "kei-tell-expiry-recheck-"));
+  const { id, paths, leash } = await born(root);
+  const tellId = "before-expiry";
+  const answer = "exact answer\n";
+  let receipt: ReturnType<typeof pendingTellReceipt>;
+  let sequence: number;
+  try {
+    const admitted = await recordTell(paths, { kind: "tell", id: tellId, body: "work", recordedAt: AT });
+    assert.ok(admitted.kind === "recorded");
+    receipt = pendingTellReceipt(admitted.tell);
+    const body = await leash.recordBody(paths, { leashTakenAt: AT });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: AT });
+    sequence = turn.sequence;
+    await bindTellsToTurn(paths, { turnSequence: sequence, tellIds: [tellId], boundAt: AT });
+    await recordTellDeliveries(paths, [{ tellId, turnSequence: sequence, route: "launch", fence: "exact", deliveredAt: AT }]);
+    await endTurn(paths, { turnSequence: sequence, outcome: { kind: "answered", answer, session: { sessionId: "exact" } }, completedAt: AT });
+    assert.equal((await finishBodyIfIdle(paths, { sequence: body.sequence, at: AT })).kind, "finished");
+  } finally { leash.release(); }
+
+  let expired = false;
+  let readsAfterExpiry = 0;
+  const duration = 10_000;
+  const now = performance.now.bind(performance);
+  const prepare = DatabaseSync.prototype.prepare;
+  t.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, ...args: Parameters<typeof prepare>) {
+    if (expired) readsAfterExpiry++;
+    return prepare.apply(this, args);
+  });
+  t.mock.method(performance, "now", () => now() + (expired ? duration : 0));
+  const acquire = HeldAkumaLeash.try;
+  t.mock.method(HeldAkumaLeash, "try", async (selected: typeof paths) => {
+    const claim = await acquire.call(HeldAkumaLeash, selected);
+    if (selected.heart === paths.heart) {
+      assert.ok(claim, "read reaches the real free-leash recheck");
+      expired = true;
+    }
+    return claim;
+  });
+  const { observation, end } = await observeAdmittedTellAkuma({ path: root, id, receipt, closeAtBound: true, timeoutMs: duration });
+  assert.ok(expired);
+  assert.equal(readsAfterExpiry, 0);
+  assert.equal(end?.turnSequence, sequence);
+  assert.deepEqual(observation, { kind: "answered", answer, completedAt: AT });
 });
 
 test("ask stops on an abandoned bound Turn without inventing an answer", async (context) => {

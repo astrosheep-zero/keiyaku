@@ -62,7 +62,7 @@ worktree path, and current `Arc` in the prompt:
 | `Reviewer` (`@reviewer`) | `Contract` ID, appointed worktree, and instruction to inspect and record `review`. | `review` receipt. |
 
 - **Unmet gates or review findings:** steer `@deliverer` with `tell`, then
-  observe its settlement with `wait @deliverer --timeout <duration>`; or open
+  observe its settlement with `wait @deliverer --for <duration>`; or open
   the next `arc`.
 - **Terms change within the same objective and boundary:** run `amend`.
 - **Objective or acceptance boundary changes:** `abandon` and `bind` a new `kei`.

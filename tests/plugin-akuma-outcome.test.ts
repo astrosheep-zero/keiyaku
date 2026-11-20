@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { DeliveryLedger, deliveryKeyPrefix, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { type TestContext } from "node:test";
-import { Akuma, Akumas, KeiyakuError, World, type WorldRoot } from "../src/index.js";
-import type { FailureProjection } from "../src/library/outcome.js";
+import { Akuma, Akumas, KeiyakuError, World, type AkumaTellResult, type WorldRoot } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -16,7 +15,7 @@ import { beginTurn, endTurn, finishBodyIfIdle, readHeart, readTell, recordTell }
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { bornBody, driveWithTell } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
-import { deferred, restoreEnvironmentValues, temporaryDirectory, waitForCondition } from "./support/process.js";
+import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
@@ -411,7 +410,8 @@ test("public status observes committed identity, not idle or incidental internal
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
   assert.equal(open.work.kind, "open");
-  assert.equal(open.work.outcome?.historyId, `turn/${failed.sequence}`);
+  assert.equal(open.work.outcome?.turn, `turn/${failed.sequence}`);
+  assert.equal(open.work.outcome?.state, "failed");
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)],
     "status exposes its latest retained outcome even while a newer Turn is open");
 });
@@ -427,7 +427,7 @@ test("history page, exact and last use the identity of the actual retained resul
   const last = await api.history({ akuma: value.allocated.id, last: true });
   assert.equal(last.kind, "akuma-answer");
   assert.ok(last.kind === "akuma-answer");
-  assert.equal(last.historyId, `turn/${answered.sequence}`);
+  assert.equal(last.turn, `turn/${answered.sequence}`);
   assert.deepEqual(
     recorded.signals(),
     [signal(value.allocated.id, answered.sequence)],
@@ -541,26 +541,17 @@ test("coalesced Tell and standing Owners receive reports and outcomes through on
     ["requester-session", observed.owner],
     ["other-session", observed.other],
   ] as const) {
-    const controller = new AbortController();
     const prompt = `input ${session}`;
-    const pending = cliJson<FailureProjection>(["-C", world, "tell", target.allocated.id, prompt], {
-      signal: controller.signal,
+    const result = await cliJson<AkumaTellResult>(["-C", world, "tell", id, prompt], {
       environment: { PI_SESSION_ID: session, SQUARE_DELIVERY: process.env.SQUARE_DELIVERY },
     });
-    try {
-      await waitForCondition("CLI Tell admission in held custody", async () =>
-        (await readHeart(target.allocated.paths)).pending.some((tell) => tell.body === prompt),
-      );
-    } finally {
-      controller.abort(new Error("CLI observer disconnected"));
-    }
-    const result = await pending;
-    assert.equal(result.exit, 3, result.stderr);
-    assert.equal(result.value.category, "aborted");
-    assert.ok(result.value.tell);
-    const fact = await readTell(target.allocated.paths, result.value.tell.tellId);
-    assert.equal(fact?.initiator, owner);
-    receipts.push(result.value.tell.tellId);
+    assert.equal(result.exit, 0, result.stderr);
+    assert.ok("result" in result.value && result.value.result === "told");
+    const fact = await readTell(target.allocated.paths, result.value.tellId);
+    assert.equal(fact?.state, "pending");
+    assert.equal(fact.body, prompt);
+    assert.equal(fact.initiator, owner);
+    receipts.push(result.value.tellId);
   }
   target.holder.release();
   const ready = deferred<void>();
@@ -609,7 +600,11 @@ test("coalesced Tell and standing Owners receive reports and outcomes through on
   assert.ok(turns[0] !== undefined);
   assert.equal(turns[0], turns[1], "withdrawal does not change the original binding");
   const retained = await cliJson(["-C", world, "history", id, "--answer"], { environment: { KEIYAKU_INITIATOR: observed.other } });
-  assert.deepEqual(retained.value, { kind: "akuma-answer", akumaId: id, historyId: `turn/${turns[0]}`, answer: "coalesced result" });
+  assert.ok(retained.value && typeof retained.value === "object");
+  assert.ok("kind" in retained.value && retained.value.kind === "akuma-answer");
+  assert.ok("turn" in retained.value && "answer" in retained.value);
+  assert.equal(retained.value.turn, `turn/${turns[0]}`);
+  assert.equal(retained.value.answer, "coalesced result");
 
   const { paths } = target.allocated;
   await recordTell(paths, { kind: "tell", id: "queued-after-withdrawal", body: "try to resume", initiator: observed.other, recordedAt: AT });

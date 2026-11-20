@@ -141,8 +141,9 @@ test("standalone public status shares one direct current-work observation and ke
     assert.equal(exact.row.toolId, "native-long-tool");
     const running = await aku.idle({ timeoutMs: 0 });
     assert.equal(running.reason, "deadline");
-    assert.equal(running.status.kind, "observed");
-    assert.equal(running.status.life, active.life);
+    assert.equal(running.status.state, "running");
+    assert.ok(running.status.state === "running");
+    assert.equal(running.status.turn, `turn/${turn.sequence}`);
 
     const resource = `/outside/${"nested/".repeat(28)}target.txt`;
     const request = { id: "per_read", action: "external_directory", tool: "read", resources: [resource] };
@@ -163,15 +164,15 @@ test("standalone public status shares one direct current-work observation and ke
     const idle = await aku.status();
     assertWireRoundTrip(akumaStatusSchema, idle);
     assert.equal(idle.work.kind, "idle");
-    assert.equal(idle.work.outcome?.verdict, "answered");
-    assert.equal(idle.work.outcome?.historyId, `turn/${turn.sequence}`);
+    const outcome = { state: "done", turn: `turn/${turn.sequence}`, at: "2026-10-30T00:00:04.000Z", answer };
+    assert.deepEqual(idle.work.outcome, outcome);
     const waited = await aku.idle({ timeoutMs: 0 });
     assertWireRoundTrip(akumaIdleResultSchema, waited);
-    assert.equal(waited.status.kind, "observed");
-    assert.equal(waited.status.id, born.allocated.id);
-    assert.equal(waited.status.life, idle.life);
-    assert.equal(waited.status.outcome?.historyId, `turn/${turn.sequence}`);
-    assert.deepEqual(waited.status.outcome, { kind: "answered", historyId: `turn/${turn.sequence}`, answer });
+    const betweenTurns = waited.status;
+    assert.ok(betweenTurns.state === "running");
+    assert.equal(betweenTurns.akuma, born.allocated.id);
+    assert.equal(betweenTurns.turn, undefined);
+    assert.deepEqual(betweenTurns.last, outcome);
     const stream = aku.stream()[Symbol.asyncIterator]();
     try {
       const window = activityStreamSnapshotSchema.parse((await stream.next()).value);
@@ -275,7 +276,7 @@ test("recorded and refused reports retain their wire evidence", async (context) 
     assert.equal(wait.reason, "deadline");
     assertWireRoundTrip(akumaWaitResultSchema, wait);
     const ask = await api.tell({ akuma: born.allocated.id, body: "queued", wait: true, timeoutMs: 0 });
-    assert.equal(ask.input?.kind, "deadline");
+    assert.ok("state" in ask && ask.state === "waiting");
     assertWireRoundTrip(akumaTellResultSchema, ask);
     const report = await akuma.report("working");
     assert.equal(report.kind, "recorded");
@@ -374,7 +375,7 @@ test("spawn and fork results describe real creation and refusal", async (context
   try {
     const latest = await akumas.history({ akuma: observed.akumaId, last: true });
     assert.ok(latest.kind === "akuma-answer");
-    const forked = await akumas.fork({ akuma: observed.akumaId, at: latest.historyId });
+    const forked = await akumas.fork({ akuma: observed.akumaId, at: latest.turn });
     assert.equal(forked.kind, "forked");
     assertWireRoundTrip(forkResultSchema, forked);
     assertWireConformance(root.Keiyaku.verbs.fork.normal, forked);

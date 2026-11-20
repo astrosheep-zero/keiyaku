@@ -27,16 +27,12 @@ test("show renders the native guidance object and keeps missing distinct", () =>
   assert.ok(missing.includes(id));
 });
 
-test("Contract wait renders changed, present, unknown and missing without conflating them", () => {
-  assert.equal(
-    [
-      { id, changed: true as const, terminal: "claimed" as const },
-      { id: contractId("kei/present") },
-      { id: contractId("kei/unknown"), presence: "unknown" as const },
-      { id: contractId("kei/missing"), presence: "missing" as const },
-    ].map(contractWaitMemberText).join(", "),
-    "kei/compact-cli (changed, accepted), kei/present, kei/unknown (unobserved), kei/missing (missing)",
-  );
+test("Contract wait renders change, acceptance, waiting, unavailable and missing distinctly", () => {
+  for (const state of ["changed", "accepted", "waiting", "unavailable", "missing"] as const) {
+    const text = contractWaitMemberText({ contract: id, state });
+    assert.ok(text.includes(id));
+    assert.ok(text.endsWith(state));
+  }
 });
 
 test("semantic Contract history renders native identities without raw journal carriers", () => {

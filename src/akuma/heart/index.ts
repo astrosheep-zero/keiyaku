@@ -70,6 +70,7 @@ import {
 import {
   ACTIVITY_LIMIT,
   activityFactSlice,
+  currentTurnTailFacts,
   statusFacts,
   timelineDataVersion,
   lastActivityAt as readLastActivityAt,
@@ -81,6 +82,7 @@ import {
   createHeartReader,
   isHeartAbsent,
   type HeartRead,
+  probeLeash,
   readSealFromLeash,
   recordPendingTell,
   withHeartTransaction,
@@ -174,6 +176,7 @@ export async function appendActivity(
 type ActivitySlice = ActivityFactSlice;
 export type { TimelineFact } from "./timeline.js";
 import type { TimelineFact } from "./timeline.js";
+export { CURRENT_TURN_TAIL_LIMIT } from "./timeline.js";
 
 export type CurrentModelUpdate = "recorded" | "unchanged" | "not-current-body";
 
@@ -246,28 +249,29 @@ export function createTimelineReader(paths: AkumaPaths): Readonly<{
 export function createStatusFactReader(paths: AkumaPaths) {
   const reader = createHeartReader(paths);
   return {
-    life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
     wait: (
       reportAfter: number | null | undefined,
-      detail: (snapshot: LifeSnapshot) => Readonly<{ outcome: boolean; recent: boolean }>,
+      running: (snapshot: LifeSnapshot) => boolean,
+      includeTail: boolean,
       signal?: AbortSignal,
     ): Promise<WaitFacts> =>
       reader.read((heart) => {
         const snapshot = lifeSnapshot(heart);
         const reportFrontier = reportAfter === undefined ? undefined : waitReportFrontier(heart, reportAfter);
-        const { outcome: needsOutcome, recent } = detail(snapshot);
-        const outcomeRead = reportFrontier?.report !== undefined || needsOutcome;
-        const outcome = outcomeRead ? latestTurnEndFact(heart) : undefined;
+        const outcome = latestTurnEndFact(heart);
+        const body = snapshot.latestBody;
+        const turn = body !== null && running(snapshot) ? latestTurnFactForBody(heart, body.sequence) : null;
+        const openTurn = turn !== null && turn.end === undefined ? turn.sequence : undefined;
         let activity: readonly TimelineFact[] | undefined;
         let activityDiagnostic: string | undefined;
-        if (outcomeRead && recent) {
+        if (includeTail && openTurn !== undefined) {
           try {
-            activity = statusFacts(heart);
+            activity = currentTurnTailFacts(heart, openTurn);
           } catch (error) {
             activityDiagnostic = error instanceof Error ? error.message : String(error);
           }
         }
-        return { ...snapshot, reportFrontier, outcomeRead, outcome, activity, activityDiagnostic };
+        return { ...snapshot, reportFrontier, outcome, openTurn, activity, activityDiagnostic };
       }, signal),
     tellOutcome: (id: string, includeLive: boolean, signal?: AbortSignal) =>
       reader.read((heart) => {
@@ -304,8 +308,8 @@ export type WaitReportFrontier = ReturnType<typeof waitReportFrontier>;
 export type WaitFacts = LifeSnapshot &
   Readonly<{
     reportFrontier: WaitReportFrontier;
-    outcomeRead: boolean;
     outcome: TurnEndFact | undefined;
+    openTurn: number | undefined;
     activity: readonly TimelineFact[] | undefined;
     activityDiagnostic: string | undefined;
   }>;
@@ -385,7 +389,46 @@ function judgeExistingTell(inputs: TellAdmissionInputs, existing: TellFact): Tel
   };
 }
 
-function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTellAdmission {
+type TellJudgment = InterruptTellAdmission | Readonly<{ kind: "retiring"; bodySequence: number }>;
+
+function hasTellControl(heart: DatabaseSync): boolean {
+  return pauseFact(heart) !== null || stopFact(heart) !== null;
+}
+
+function hasOnlyTerminalWork(heart: DatabaseSync, sequence: number): boolean {
+  return (
+    !hasPendingTell(heart) &&
+    latestTurnFactForBody(heart, sequence)?.end !== undefined &&
+    openTurnsForBody(heart, sequence).length === 0
+  );
+}
+
+function retiringPredecessor(heart: DatabaseSync, sequence: number): BodyFact {
+  const body = bodyFact(heart, sequence);
+  if (body === null || body.hung !== undefined || hasTellControl(heart)) throw new AkumaBusyError();
+  return body;
+}
+
+/** A free leash without the predecessor's own end is not retirement. */
+export async function readTellBodyEnd(paths: AkumaPaths, sequence: number, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
+  const leash = await probeLeash(paths);
+  const id = akumaIdFromDirectoryName(basename(paths.directory)).id;
+  return await withReadOnlyHeart(
+    paths,
+    (heart) => {
+      if (soulAt(heart, id) === null) throw new AkumaBusyError();
+      const body = retiringPredecessor(heart, sequence);
+      if (body.end !== undefined) return true;
+      if (leash === "free" || latestBodyFact(heart)?.sequence !== sequence || !hasOnlyTerminalWork(heart, sequence))
+        throw new AkumaBusyError();
+      return false;
+    },
+    signal,
+  );
+}
+
+function judgeNewTell(inputs: TellAdmissionInputs, mayWait: boolean): TellJudgment {
   const { heart, tell, body, pause, interrupt } = inputs;
   if (interrupt) {
     if (body?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
@@ -402,7 +445,11 @@ function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTel
     return { ...admitted, barrier };
   }
   const running = body !== null && body.end === undefined && body.hung === undefined;
-  if (tell.schemaJson !== undefined && running) throw new AkumaBusyError();
+  if (tell.schemaJson !== undefined && running) {
+    if (mayWait && !hasTellControl(heart) && hasOnlyTerminalWork(heart, body.sequence))
+      return { kind: "retiring", bodySequence: body.sequence };
+    throw new AkumaBusyError();
+  }
   return recordPendingTell(heart, tell);
 }
 
@@ -413,7 +460,11 @@ function soulAt(heart: DatabaseSync, id: Soul["id"]): Soul | null {
   return soul;
 }
 
-type TellAdmissionOptions = Readonly<{ signal?: AbortSignal; newTellStop?: Readonly<{ cause: unknown }> }>;
+type NewTellStop = Readonly<{ cause: unknown }>;
+type TellAdmissionOptions = Readonly<{ signal?: AbortSignal; newTellStop?: NewTellStop }>;
+type RetirementObservation = Readonly<{
+  observeRetirement?: (bodySequence: number) => Promise<NewTellStop | undefined>;
+}>;
 
 export function recordTell(
   paths: AkumaPaths,
@@ -423,27 +474,41 @@ export function recordTell(
 export function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
-  options?: TellAdmissionOptions & Readonly<{ interrupt?: false }>,
+  options?: TellAdmissionOptions & RetirementObservation & Readonly<{ interrupt?: false }>,
 ): Promise<TellAdmission>;
 export async function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
-  options: TellAdmissionOptions & Readonly<{ interrupt?: boolean }> = {},
+  options: TellAdmissionOptions & RetirementObservation & Readonly<{ interrupt?: boolean }> = {},
 ): Promise<TellAdmission | InterruptTellAdmission> {
   const interrupt = options.interrupt === true;
-  return await withHeartTransaction(
-    paths,
-    (heart) => {
-      if (soulAt(heart, akumaIdFromDirectoryName(basename(paths.directory)).id) === null) return { kind: "not-born" };
-      const existing = tellFact(heart, tell.id);
-      if (existing === null && options.newTellStop !== undefined) throw options.newTellStop.cause;
-      const body = latestBodyFact(heart);
-      const pause = interrupt ? pauseFact(heart) : null;
-      const inputs: TellAdmissionInputs = { heart, tell, body, pause, interrupt };
-      return existing === null ? judgeNewTell(inputs) : judgeExistingTell(inputs, existing);
-    },
-    options.signal,
-  );
+  const { observeRetirement } = options;
+  const judge = (newTellStop: NewTellStop | undefined, predecessor?: number) =>
+    withHeartTransaction<TellJudgment>(
+      paths,
+      (heart) => {
+        if (soulAt(heart, akumaIdFromDirectoryName(basename(paths.directory)).id) === null) return { kind: "not-born" };
+        const existing = tellFact(heart, tell.id);
+        if (existing === null && newTellStop !== undefined) throw newTellStop.cause;
+        const body = latestBodyFact(heart);
+        const pause = interrupt ? pauseFact(heart) : null;
+        const inputs: TellAdmissionInputs = { heart, tell, body, pause, interrupt };
+        if (existing !== null) return judgeExistingTell(inputs, existing);
+        if (
+          predecessor !== undefined &&
+          (retiringPredecessor(heart, predecessor).end === undefined || body?.hung !== undefined)
+        )
+          throw new AkumaBusyError();
+        return judgeNewTell(inputs, predecessor === undefined && observeRetirement !== undefined);
+      },
+      options.signal,
+    );
+  const first = await judge(options.newTellStop);
+  if (first.kind !== "retiring") return first;
+  const newTellStop = await observeRetirement?.(first.bodySequence);
+  const final = await judge(newTellStop, first.bodySequence);
+  if (final.kind === "retiring") throw new AkumaBusyError();
+  return final;
 }
 
 export async function recordSurveillance(

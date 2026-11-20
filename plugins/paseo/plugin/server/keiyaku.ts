@@ -66,27 +66,23 @@ export const historySchema = z.strictObject({
 const subject = {
   akumaId: text.regex(/^aku\/[^/\s]+\/[0-9a-f]{8}$/u).transform((value) => value as AkumaId),
   tellId: text,
-  interrupt: z.discriminatedUnion("kind", [
-    z.strictObject({ kind: z.literal("pending") }),
-    z.strictObject({ kind: z.literal("completed") }),
-    z.strictObject({ kind: z.literal("unavailable"), evidence: z.enum(["hung", "untidy"]) }),
-  ]).exactOptional(),
-  action: z.strictObject({ kind: z.enum(["started", "steering"]), historyId: turnHistoryId }).exactOptional(),
-  wake: z.strictObject({ kind: z.literal("pending") }).exactOptional(),
-  input: z.discriminatedUnion("kind", [
-    z.strictObject({ kind: z.literal("answered"), answer: text }),
-    z.strictObject({ kind: z.literal("unanswered") }),
-    z.strictObject({ kind: z.literal("deadline") }),
-  ]).exactOptional(),
+  turn: turnHistoryId.exactOptional(),
 };
 const failure = z.discriminatedUnion("stage", [
   z.strictObject({ stage: z.literal("wake"), diagnostic: text, reason: z.literal("undelivered").exactOptional(), logPath: text.exactOptional() }),
   z.strictObject({ stage: z.literal("confirmation"), reason: z.enum(["deadline", "hung", "untidy", "stopped"]), diagnostic: text }),
   z.strictObject({ stage: z.literal("observation"), diagnostic: text }),
 ]);
-export const tellSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("admitted"), ...subject }),
-  z.strictObject({ kind: z.literal("failed"), ...subject, failures: z.tuple([failure], failure).readonly() }),
-]) satisfies z.ZodType<AkumaTellResult>;
+export const tellSchema = z.discriminatedUnion("result", [
+  z.strictObject({ result: z.literal("told"), ...subject }),
+  z.strictObject({ result: z.literal("failed"), ...subject,
+    interrupt: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("pending") }),
+      z.strictObject({ kind: z.literal("completed") }),
+      z.strictObject({ kind: z.literal("unavailable"), evidence: z.enum(["hung", "untidy"]) }),
+    ]).exactOptional(),
+    failures: z.tuple([failure], failure).readonly(),
+  }),
+]) satisfies z.ZodType<Extract<AkumaTellResult, { result: string }>>;
 export type History = z.output<typeof historySchema>;
 export type Row = History["rows"][number];

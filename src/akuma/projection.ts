@@ -195,6 +195,46 @@ export type TurnStartRow = z.output<typeof turnRowSchema>;
 export type ReportRow = z.output<typeof reportFactSchema>;
 export type PermissionRow = z.output<typeof permissionRowSchema>;
 export type OutcomeRow = z.output<typeof outcomeRowSchema>;
+export const turnHistoryIdSchema = z.templateLiteral(["turn/", z.number().int().positive().safe()]);
+const terminalTurn = { turn: turnHistoryIdSchema, at: timestampSchema };
+export const doneTurnSchema = z
+  .strictObject({ ...terminalTurn, state: z.literal("done"), answer: z.string() })
+  .readonly();
+export const failedTurnSchema = z
+  .strictObject({ ...terminalTurn, state: z.literal("failed"), reason: z.string() })
+  .readonly();
+export const canceledTurnSchema = z.strictObject({ ...terminalTurn, state: z.literal("canceled") }).readonly();
+export const settledTurnSchema = z
+  .union([doneTurnSchema, failedTurnSchema, canceledTurnSchema])
+  .meta({ id: "SettledTurn" });
+export const turnOutcomeSchema = z.union([
+  ...settledTurnSchema.options,
+  z.strictObject({ turn: turnHistoryIdSchema, state: z.literal("running") }).readonly(),
+]);
+export type SettledTurn = z.output<typeof settledTurnSchema>;
+
+export function retainedTurnOutcome(row: OutcomeRow): SettledTurn;
+export function retainedTurnOutcome(
+  row: TurnStartRow,
+): Extract<z.output<typeof turnOutcomeSchema>, { state: "running" }>;
+export function retainedTurnOutcome(row: OutcomeRow | TurnStartRow): z.output<typeof turnOutcomeSchema> {
+  if (row.kind === "turn") return { turn: `turn/${row.sequence}`, state: "running" };
+  const { turnSequence, at, outcome } = row;
+  const turn = `turn/${turnSequence}` as const;
+  switch (outcome.kind) {
+    case "answered":
+      return { turn, at, state: "done", answer: outcome.answer };
+    case "failed":
+      return { turn, at, state: "failed", reason: outcome.diagnostic };
+    case "canceled":
+      return { turn, at, state: "canceled" };
+  }
+}
+
+export function projectSettledTurn(end: TurnEndFact): SettledTurn {
+  return retainedTurnOutcome(projectFact(end));
+}
+
 export type ToolRow = z.output<typeof toolRowSchema>;
 export type ActivityRow = z.output<typeof activityRowSchema>;
 export type ExactActivityRow = z.output<typeof exactActivityRowSchema>;
@@ -202,7 +242,7 @@ export type TimelineItem = z.output<typeof timelineItemSchema>;
 export type ActivityHistory = z.output<typeof activityHistorySchema>;
 export type { TellRow } from "./heart/facts.js";
 export type ExactHistory =
-  | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
+  | Readonly<{ kind: "exact"; outcome: SettledTurn }>
   | Readonly<{ kind: "exact-report"; report: ReportRow }>
   | Readonly<{ kind: "exact-activity"; row: ExactActivityRow }>
   | Readonly<{ kind: "unknown-history"; id: string }>;
@@ -266,6 +306,8 @@ function publicResult(result: ToolResult): NonNullable<ToolRow["result"]> {
 }
 
 /** Each retained fact has exactly one row, with its durable identity unchanged. */
+export function projectFact(fact: TurnEndFact): OutcomeRow;
+export function projectFact(fact: TimelineFact): ActivityRow;
 export function projectFact(fact: TimelineFact): ActivityRow {
   switch (fact.kind) {
     case "turn-start":
@@ -364,5 +406,7 @@ export function selectExactHistory(
   const outcome = rows.find(
     (row): row is OutcomeRow => row.kind === "outcome" && row.turnSequence === selector.sequence,
   );
-  return outcome === undefined ? { kind: "unknown-history", id } : { kind: "exact", outcome };
+  return outcome === undefined
+    ? { kind: "unknown-history", id }
+    : { kind: "exact", outcome: retainedTurnOutcome(outcome) };
 }

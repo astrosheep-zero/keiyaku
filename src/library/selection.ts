@@ -1,9 +1,10 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import { akumaIdSchema, turnHistoryIdSchema } from "../akuma/identity.js";
+import { akumaIdSchema } from "../akuma/identity.js";
 import {
   exactActivityRowSchema,
-  outcomeRowSchema,
+  doneTurnSchema,
+  settledTurnSchema,
   reportRowSchema,
   timelineItemSchema,
   type ActivityHistory,
@@ -94,22 +95,15 @@ export const akumaHistoryResultSchema = z.union([
     })
     .readonly(),
   z.strictObject({ kind: z.literal("akuma-activity"), ...historyCommon, row: exactActivityRowSchema }).readonly(),
-  outcomeRowSchema
-    .unwrap()
-    .extend({ kind: z.literal("akuma-exact"), ...historyCommon })
-    .readonly(),
+  z.strictObject({ kind: z.literal("akuma-exact"), ...historyCommon, outcome: settledTurnSchema }).readonly(),
   reportRowSchema
     .unwrap()
     .extend({ kind: z.literal("akuma-report"), ...historyCommon })
     .readonly(),
   z.strictObject({ kind: z.literal("akuma-unknown-history"), ...historyCommon }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("akuma-answer"),
-      ...historyCommon,
-      historyId: turnHistoryIdSchema,
-      answer: z.string(),
-    })
+  doneTurnSchema
+    .unwrap()
+    .extend({ kind: z.literal("akuma-answer"), ...historyCommon })
     .readonly(),
   z.strictObject({ kind: z.literal("akuma-no-answer"), ...historyCommon }).readonly(),
 ]);
@@ -405,18 +399,16 @@ export async function historyAkuma(
     const subject: HistorySubject = { akumaId: addressed.id };
     if (last === true) {
       const answer = await handle.lastAnswer();
-      return answer.kind === "answer"
-        ? { kind: "akuma-answer", ...subject, answer: answer.answer, historyId: answer.historyId }
-        : { kind: "akuma-no-answer", ...subject };
+      if (answer.kind !== "answer") return { kind: "akuma-no-answer", ...subject };
+      const { kind: _kind, ...outcome } = answer;
+      return { kind: "akuma-answer", ...subject, ...outcome };
     }
     const history = await handle.history(options);
     if ("id" in options) {
       if ("kind" in history && history.kind === "exact-activity")
         return { kind: "akuma-activity", ...subject, row: history.row };
-      if ("kind" in history && history.kind === "exact") {
-        const { kind: _kind, ...row } = history.outcome;
-        return { kind: "akuma-exact", ...subject, ...row };
-      }
+      if ("kind" in history && history.kind === "exact")
+        return { kind: "akuma-exact", ...subject, outcome: history.outcome };
       if ("kind" in history && history.kind === "exact-report") {
         const { kind: _kind, ...row } = history.report;
         return { kind: "akuma-report", ...subject, ...row };

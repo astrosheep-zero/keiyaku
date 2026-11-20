@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
-import { timelineItemSchema } from "./projection.js";
-import { tellResultSchema, pendingTellReceipt } from "./call-initial-tell.js";
+import { timelineItemSchema, projectSettledTurn } from "./projection.js";
+import { tellResultSchema, pendingTellReceipt, type TellSettlement } from "./call-initial-tell.js";
 import { akumaIdSchema } from "./identity.js";
 import type { WorldRoot } from "../world.js";
 import {
@@ -12,13 +12,16 @@ import {
   type KillAdmission,
 } from "./akuma-errors.js";
 import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
+import { isWaitAbort } from "./akuma-wait.js";
+import type { TurnEndFact } from "./heart/index.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaStatus } from "./akuma.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { BodyLauncher } from "./body-launch.js";
 import {
+  interruptedTellAnswer,
   tellAdmissionEvidence,
-  completeTell,
+  tellAnswerResult,
   type AkumaAskResult,
   type AkumaKillResult,
   type AkumaTellResult,
@@ -72,30 +75,27 @@ async function admitExecutionTell(input: AskExecutionInput) {
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   if (input.wait === true) {
-    const { receipt, observation } = await executeObservedTellAkuma(input);
-    const { subject, pending } = observedTellEvidence(input.id, receipt);
-    return completeTell(
-      observation.kind === "unanswered" || observation.kind === "deadline" ? { ...subject, ...pending } : subject,
-      observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
+    const { receipt, observation, end } = await executeObservedTellAkuma(input, true);
+    return tellAnswerResult(
+      input.id,
+      receipt,
+      end === undefined ? { state: observation.kind === "deadline" ? "waiting" : "idle" } : projectSettledTurn(end),
     );
   }
   const { owner, admission, receipt } = await admitExecutionTell(input);
-  let tell = receipt;
+  let tell: TellSettlement = receipt;
   try {
     tell = await owner.settleTell(admission, tellWakeRuntime(input.spawn), {
       ...input,
+      admissionOnly: true,
       onProgress: (receipt) => {
         tell = receipt;
       },
     });
     input.signal?.throwIfAborted();
-    return completeTell(tellAdmissionEvidence(input.id, tell));
+    return tellAnswerResult(input.id, tell);
   } catch (error) {
-    throw withTellFailureReceipt(
-      error,
-      completeTell(tellAdmissionEvidence(input.id, tell), undefined, true),
-      input.signal,
-    );
+    throw withTellFailureReceipt(error, interruptedTellAnswer(input.id, tell, error), input.signal);
   }
 }
 
@@ -108,7 +108,7 @@ function tellObservation({ outcome, reason, completedAt }: Awaited<ReturnType<Ak
   return kind === "failed" ? { kind, diagnostic, ...time } : { kind, diagnostic, answer: outcome.answer, ...time };
 }
 
-function observedTellEvidence(id: AkumaStatus["id"], tell: TellResult) {
+function observedTellEvidence(id: AkumaStatus["id"], tell: TellSettlement) {
   const { action: _action, wake, interrupt, ...base } = tellAdmissionEvidence(id, tell);
   const failed =
     wake?.kind === "confirmation-stopped" ? { kind: "failed" as const, diagnostic: wake.diagnostic } : wake;
@@ -122,23 +122,58 @@ function observedTellEvidence(id: AkumaStatus["id"], tell: TellResult) {
   };
 }
 
+async function retireTellWake(
+  stop: AbortController | undefined,
+  wake: Promise<TellSettlement> | undefined,
+  failures: unknown[],
+): Promise<void> {
+  if (stop === undefined) return;
+  stop.abort(new Error("Tell observation ended"));
+  try {
+    await wake;
+  } catch (error) {
+    if (!isWaitAbort(error, stop.signal) && !failures.includes(error)) failures.push(error);
+  }
+}
+
+function observedTellFailure(
+  input: Pick<TellExecutionInput, "id" | "signal">,
+  receipt: TellSettlement,
+  failures: readonly unknown[],
+  witnessed: TurnEndFact | undefined,
+) {
+  const primary = failures[0];
+  const cause =
+    failures.length === 1
+      ? primary
+      : new AggregateError(
+          failures,
+          failures.map((error) => (error instanceof Error ? error.message : String(error))).join("; "),
+          { cause: primary },
+        );
+  const outcome = witnessed === undefined ? undefined : projectSettledTurn(witnessed);
+  return withTellFailureReceipt(primary, interruptedTellAnswer(input.id, receipt, cause, outcome), input.signal, cause);
+}
+
 export async function observeAdmittedTellAkuma(
   input: Readonly<{
     path: WorldRoot;
     id: AkumaStatus["id"];
     receipt: TellResult;
     timeoutMs?: number;
+    closeAtBound?: boolean;
     signal?: AbortSignal;
     startedAt?: number;
-    wake?: Promise<TellResult>;
-    knownReceipt?: () => TellResult;
+    wake?: Promise<TellSettlement>;
+    stopWake?: AbortController;
+    knownReceipt?: () => TellSettlement;
     onObserve?: AskObserver;
     outcomeObserved?: OutcomeObserver;
   }>,
 ) {
   const { receipt: tell } = input;
   const owner = new AkumaOwner(input.id, input.path, input.outcomeObserved);
-  let settled: TellResult | undefined;
+  let settled: TellSettlement | undefined;
   let wakeError: { error: unknown } | undefined;
   let wakeState: "launching" | "settled" | "failed" = input.wake === undefined ? "settled" : "launching";
   void input.wake?.then(
@@ -154,25 +189,35 @@ export async function observeAdmittedTellAkuma(
   const known = () => settled ?? input.knownReceipt?.() ?? tell;
   const admittedAt = input.startedAt ?? Date.parse(tell.row.at) - performance.timeOrigin;
   const elapsed = Number.isFinite(admittedAt) ? Math.max(0, performance.now() - admittedAt) : 0;
+  const boundStartedAt = input.closeAtBound === true ? (input.startedAt ?? performance.now()) : undefined;
+  const timeoutMs =
+    input.timeoutMs === undefined || boundStartedAt !== undefined
+      ? input.timeoutMs
+      : Math.max(0, input.timeoutMs - elapsed);
+  let witnessed: TurnEndFact | undefined;
+  let observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>> | undefined;
+  const failures: unknown[] = [];
   try {
     await input.onObserve?.admitted?.(tell, input.id);
-    const observed = await owner.tellOutcome(tell.admission.tellId, {
+    observed = await owner.tellOutcome(tell.admission.tellId, {
+      witness: (end) => {
+        witnessed = end;
+      },
+      ...(boundStartedAt === undefined ? {} : { boundStartedAt }),
       wake: () => {
         if (wakeError !== undefined) throw wakeError.error;
         return wakeState;
       },
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, input.timeoutMs - elapsed) }),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
     });
-    return { receipt: known(), observation: tellObservation(observed) };
   } catch (error) {
-    throw withTellFailureReceipt(
-      error,
-      completeTell(tellAdmissionEvidence(input.id, known()), undefined, true),
-      input.signal,
-    );
+    failures.push(error);
   }
+  await retireTellWake(input.stopWake, input.wake, failures);
+  if (observed === undefined || failures.length > 0) throw observedTellFailure(input, known(), failures, witnessed);
+  return { receipt: known(), observation: tellObservation(observed), end: observed.end };
 }
 
 export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult> {
@@ -185,12 +230,12 @@ export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAs
     : { ...subject, ...observation };
 }
 
-async function executeObservedTellAkuma(input: AskExecutionInput) {
+async function executeObservedTellAkuma(input: AskExecutionInput, closeAtBound = false) {
   const { owner, admission, receipt } = await admitExecutionTell(input);
   const startedAt = performance.now();
   const observing = new AbortController();
   const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
-  let known = receipt;
+  let known: TellSettlement = receipt;
   const wake = owner.settleTell(admission, tellWakeRuntime(input.spawn), {
     observeAnswer: true,
     signal,
@@ -198,21 +243,17 @@ async function executeObservedTellAkuma(input: AskExecutionInput) {
       known = progress;
     },
   });
-  try {
-    return await observeAdmittedTellAkuma({
-      ...input,
-      receipt,
-      knownReceipt: () => known,
-      wake,
-      signal,
-      startedAt,
-    });
-  } finally {
-    if (admission.barrier !== undefined) {
-      observing.abort(new Error("interrupt observation ended"));
-      await wake.catch(() => undefined);
-    }
-  }
+  const retireWake = admission.barrier !== undefined || (closeAtBound && input.timeoutMs !== undefined);
+  return await observeAdmittedTellAkuma({
+    ...input,
+    receipt,
+    knownReceipt: () => known,
+    wake,
+    ...(retireWake ? { stopWake: observing } : {}),
+    signal,
+    startedAt,
+    closeAtBound,
+  });
 }
 
 type KillExecutionInput = Readonly<{

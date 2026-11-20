@@ -293,7 +293,7 @@ test("timeline decoding batches Tell witnesses and rejects missing retained fact
   }
 });
 
-test("wait rechecks its final status when a completed probe acquires a new pending Tell", async (context) => {
+test("wait refreshes its Heart read under free-seat custody when a Tell arrives", async (context) => {
   const value = await fixture();
   const { paths, id } = value.allocated;
   const leash = (await HeldAkumaLeash.try(paths))!;
@@ -302,6 +302,9 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     await finishBodyIfIdle(paths, { sequence: body.sequence, at: value.soul.createdAt });
     leash.release();
+    const timeoutMs = 250;
+    let now = 0;
+    context.mock.method(performance, "now", () => now);
     const prepare = DatabaseSync.prototype.prepare;
     let probes = 0;
     context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
@@ -311,7 +314,7 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
         statement.get = (...args) => {
           const result = Reflect.apply(get, statement, args);
           probes += 1;
-          if (probes === 2) {
+          if (probes === 1) {
             const writer = new DatabaseSync(paths.heart);
             try {
               insertTellFact(writer, {
@@ -323,18 +326,21 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
             } finally {
               writer.close();
             }
+          } else if (probes === 2) {
+            // Expire after the protected check was issued, not while the host schedules it.
+            now = timeoutMs;
           }
           return result;
         };
       }
       return statement;
     });
-    const result = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs: 250 });
+    const result = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs });
     assert.equal(result.reason, "deadline", "new pending work invalidates the completed probe");
+    assert.equal(probes, 2, "the protected read finishes without another probe at expiry");
     const item = result.results[0]!;
-    assert.equal(item.kind, "observed");
-    assert.equal(item.kind === "observed" ? item.life : undefined, "asleep");
-    assert.equal(item.kind === "observed" ? item.pending : undefined, true);
+    assert.deepEqual(item, { akuma: id, state: "waiting", lastActivityAt: value.soul.createdAt });
+    assert.equal((await readTell(paths, "new-pending"))?.state, "pending");
     const status = await bornStatus(paths, id);
     assert.equal(status.work.kind, "idle");
     assert.equal(status.work.pending?.[0]?.id, (await readTell(paths, "new-pending"))?.sequence);
@@ -367,13 +373,14 @@ test("wait returns stranded failure without consuming pending input", async () =
     });
     assert.equal(result.reason, "completed");
     const item = result.results[0]!;
-    assert.ok(item.kind === "observed");
-    assert.equal(item.life, "stranded");
-    assert.equal(item.pending, true, "completion leaves the undelivered Tell pending");
-    assert.match(item.outcome?.kind === "failed" ? item.outcome.diagnostic : "", /session creation: 405/u);
+    assert.ok(item.state === "failed" && "last" in item);
+    assert.equal(item.reason, "stranded");
+    assert.equal((await readTell(paths, "undelivered"))?.state, "pending");
+    assert.deepEqual(item.last, { turn: `turn/${turn.sequence}`, state: "failed", at: value.soul.createdAt, reason: "session creation: 405" });
     const status = await bornStatus(paths, id);
+    assert.equal(status.life, "stranded");
     assert.equal(status.work.kind, "idle");
-    assert.equal(status.work.outcome?.verdict, "failed");
+    assert.deepEqual(status.work.outcome, item.last);
     assert.equal(status.work.pending?.[0]?.id, (await readTell(paths, "undelivered"))?.sequence);
     assert.match(status.recent?.at(-1)?.text ?? "", /^! turn\/\d+\n +session creation: 405/u);
   } finally {

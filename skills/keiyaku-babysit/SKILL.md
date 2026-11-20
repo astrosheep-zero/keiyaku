@@ -17,7 +17,7 @@ completion without doing the implementation work yourself.
   `review` as each worker returns.
 - **Delegated holder (`@holder-x`):** you handed the entire fulfillment loop for
   that `kei` to one dedicated `Akuma`. Watch the `Contract`'s journaled state
-  (`status <kei/...>`, `wait kei/... --timeout <duration>`) and steer **through**
+  (`status <kei/...>`, `wait kei/... --for <duration>`) and steer **through**
   `@holder-x` with `tell` — never bypass the holder to micromanage its workers
   directly.
 
@@ -29,7 +29,7 @@ completion without doing the implementation work yourself.
    the recent instance catalogue, `ls kei/` for active Contracts, and
    `status <kei/...|aku/...|@name>` for one identity; status does not batch selectors.
 2. **Wait on the fleet (`wait`):** pass in-flight worker `@alias`es and active
-   `kei/...` IDs to `wait` with `--timeout <duration>`. It wakes as soon as
+   `kei/...` IDs to `wait` with `--for <duration>`. It wakes as soon as
    *any* selected member settles by default, or every member with `--all`;
    mixing the two families is allowed. A deadline only bounds observation and
    never kills work.

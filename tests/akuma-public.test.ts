@@ -282,7 +282,7 @@ test("compact activity ids recover retained input, tool phases and narration thr
     assert.equal(idle.kind, "recorded");
     const idleStatus = await api.status({ akuma: born.allocated.id });
     const idlePending = idleStatus.work.pending?.[0];
-    assert.ok(idlePending && idleStatus.work.kind === "idle" && idleStatus.work.outcome?.verdict === "answered");
+    assert.ok(idlePending && idleStatus.work.kind === "idle" && idleStatus.work.outcome?.state === "done");
     assert.equal((await runCli(["history", born.allocated.id, "--id", String(idlePending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
     assert.deepEqual((await owner.status()).work, idleStatus.work);
   } finally { born.holder.release(); }
@@ -392,11 +392,18 @@ for (const observation of ["status", "wait", "roster"] as const) {
             ? await value.handle.wait({ timeoutMs: 1_000 })
             : await value.handle.status();
       assert.equal(finished, true);
-      assert.equal(result?.life, "asleep");
-      if (result !== undefined && "lifeAt" in result) assert.equal(result.lifeAt, "2026-08-12T00:05:00.000Z");
-      if (result !== undefined && "work" in result) {
-        assert.equal(result.work.kind, "idle");
-        assert.equal(result.work.outcome?.verdict, "answered");
+      assert.ok(result);
+      if ("state" in result) {
+        assert.ok(result.state === "done");
+        assert.equal(result.turn, `turn/${value.turn.sequence}`);
+        assert.equal(result.at, "2026-08-12T00:05:00.000Z");
+      } else {
+        assert.equal(result.life, "asleep");
+        if ("lifeAt" in result) assert.equal(result.lifeAt, "2026-08-12T00:05:00.000Z");
+        if ("work" in result) {
+          assert.equal(result.work.kind, "idle");
+          assert.equal(result.work.outcome?.state, "done");
+        }
       }
     } finally {
       mockedTry.mock.restore();
@@ -550,7 +557,7 @@ test("direct current work follows the latest Turn while history retains earlier 
   assert.deepEqual(selected.recent?.map(row => row.id), [5, 6, 8]);
   assert.deepEqual(selected.work.pending, [{ id: 7 }]);
   assert.equal(selected.work.summary?.id, 8);
-  assert.equal(selected.work.outcome?.historyId, "turn/1");
+  assert.equal(selected.work.outcome?.turn, "turn/1");
   assert.ok(rows.some(row => row.kind === "tool" && row.sequence === 2 && row.phase === "started"));
   const closed = [
     ...facts,
@@ -561,7 +568,7 @@ test("direct current work follows the latest Turn while history retains earlier 
   ].map(projectFact);
   const idle = summarizeFrontier(closed, "/work");
   assert.equal(idle.work.kind, "idle");
-  assert.equal(idle.work.outcome?.verdict, "answered");
+  assert.equal(idle.work.outcome?.state, "done");
   assert.equal(idle.work.summary?.id, 9);
   assert.deepEqual(idle.recent?.map(row => row.id), [8, 9, 10]);
   assert.deepEqual(idle.work.pending, [{ id: 7 }]);
@@ -977,11 +984,12 @@ test("wait timeout returns compact running evidence and its exact retained outco
   const leash = (await HeldAkumaLeash.try(source.paths))!;
   try {
     const handle = new AkumaOwner(source.id, await World.at(root));
-    const expected = await handle.status();
-    assert.equal(expected.life, "running");
+    const status = await handle.status();
+    const last = { turn: "turn/2", state: "done", at: "2026-08-08T00:00:00.000Z", answer: "public answer" };
+    assert.equal(status.life, "running");
+    assert.deepEqual(status.work.outcome, last);
     assert.deepEqual(await handle.wait({ timeoutMs: 0 }), {
-      kind: "observed", id: source.id, life: "running", lastActivityAt: expected.lastActivityAt,
-      outcome: { kind: "answered", historyId: "turn/2", answer: "public answer" },
+      akuma: source.id, state: "running", lastActivityAt: status.lastActivityAt, last,
     });
   } finally {
     leash.release();
@@ -1019,11 +1027,11 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   );
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
-  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork", historyId: "turn/2" });
+  const outcome = { turn: "turn/2", state: "done", at: "2026-08-08T00:00:00.000Z", answer: "complete without fork" };
+  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", ...outcome });
   assert.match(historyPage(await handle.history()).rows.at(-1)?.text ?? "", /✓ turn\/2\n +complete without fork/u);
-  const exact = await handle.history({ id: "turn/2" });
-  if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history" });
+  assert.deepEqual(await handle.history({ id: outcome.turn }), { kind: "exact", outcome });
+  assert.deepEqual(await handle.fork({ at: outcome.turn }, spawnAkumaBody), { kind: "unknown-history" });
 });
 
 test("SDK fork records its invoking caller independently of source lineage and emits born", async (t) => {
@@ -1233,21 +1241,23 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal("description" in status, false);
   assert.equal("pending" in status, false);
   assert.equal(status.work.kind, "idle");
-  assert.equal(status.work.outcome?.verdict, "answered");
+  assert.equal(status.work.outcome?.state, "done");
   assert.equal(status.work.turn?.sequence, 2);
   assert.equal("history" in status, false);
   assert.match(historyPage(await handle.history()).rows.at(-1)?.text ?? "", /✓ turn\/2\n +public answer/u);
   const exact = await handle.history({ id: "turn/2" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer" });
+  assert.deepEqual(exact.outcome, { turn: "turn/2", state: "done", at: "2026-08-08T00:00:00.000Z", answer: "public answer" });
+  assert.deepEqual(status.work.outcome, exact.outcome);
   assert.ok((status.recent?.length ?? 0) <= 3);
-  const waited = await handle.wait();
-  assert.equal(waited.life, "asleep");
-  assert.deepEqual(waited.outcome, { kind: "answered", historyId: "turn/2", answer: "public answer" });
+  const { akuma, lastActivityAt, ...waited } = await handle.wait();
+  assert.equal(akuma, status.id);
+  assert.equal(lastActivityAt, status.lastActivityAt);
+  assert.deepEqual(waited, exact.outcome);
   assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await handle.status()).life, "asleep");
   const finalStatus = await handle.status();
-  assert.equal(finalStatus.work.outcome?.verdict, "answered");
+  assert.deepEqual(finalStatus.work.outcome, exact.outcome);
   assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
@@ -1681,7 +1691,7 @@ test("ordinary Tell wakes a successor for a barrier-free untidy Akuma", async (c
   try {
     assert.equal((await api.status({ akuma: id })).life, "untidy");
     const receipt = await api.tell({ akuma: id, body: text });
-    assert.equal(receipt.action?.kind, "started", JSON.stringify(receipt));
+    assert.ok("result" in receipt && receipt.result === "told", JSON.stringify(receipt));
     await Promise.all(bodies);
     const { latestBody: successor, latestKill } = await readHeart(paths);
     assert.ok(successor && successor.sequence > body.sequence);
@@ -1689,7 +1699,7 @@ test("ordinary Tell wakes a successor for a barrier-free untidy Akuma", async (c
     assert.ok(fresh?.binding);
     const { turnSequence } = fresh.binding;
     assert.equal((await readTurn(paths, turnSequence))?.bodySequence, successor.sequence);
-    assert.deepEqual(receipt.action, { kind: "started", historyId: `turn/${turnSequence}` });
+    if (receipt.turn !== undefined) assert.equal(receipt.turn, `turn/${turnSequence}`);
     const delivery = { turnSequence, route: "launch", deliveredAt: successorAt };
     assert.deepEqual(fresh.deliveries, [delivery]);
     assert.deepEqual(submissions, [[retained, { id: receipt.tellId, text }]]);
@@ -2152,7 +2162,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   const waited = handle.wait();
   assert.equal(await handle.kill(), "killed");
   await body;
-  assert.notEqual((await waited).life, "running");
+  assert.equal((await waited).state, "canceled");
   assert.equal(aborted, true);
   assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
   assert.equal((await handle.status()).life, "killed");

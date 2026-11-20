@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, bindTellsToTurn, endTurn, HeldAkumaLeash, readHeart, recordReport, recordTellDeliveries } from "../src/akuma/heart/index.js";
-import { waitForCondition } from "./support/process.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
@@ -258,8 +257,8 @@ export class Akuma {
     // A non-cooperative Tell never settles on its own; close owns the outcome.
     if (values.tellPending === true) await new Promise(() => {});
     if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
-    if (values.tellMismatch === true) return { kind: "admitted", akumaId: "aku/other/11111111", tellId: "tell/1" };
-    return values.tell ?? { kind: "admitted", akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
+    if (values.tellMismatch === true) return { result: "told", akumaId: "aku/other/11111111", tellId: "tell/1" };
+    return values.tell ?? { result: "told", akumaId: this.aku, tellId: "tell/1" };
   }
   async kill() { return (await control()).evidence ?? "already-stopped"; }
   async status() { return (await control()).status ?? {}; }
@@ -421,7 +420,7 @@ test("local wire admission isolates nested tool payloads while preserving health
 });
 
 const AKU = "aku/test/11111111";
-const RECEIPT = { kind: "admitted", akumaId: AKU, tellId: "tell/7" };
+const RECEIPT = { result: "told", akumaId: AKU, tellId: "tell/7" } as const;
 
 test("the transport carries typed Tell admission, Stop evidence, and status", async (t) => {
   const { transport, set } = await fakeTransport(t);
@@ -438,17 +437,12 @@ test("the transport carries typed Tell admission, Stop evidence, and status", as
     "steering correlates the captured Turn, not a removed delivery inference");
 
   const warned = t.mock.method(console, "warn", () => {});
-  await set({ tell: { ...RECEIPT, kind: "failed", failures: [{ stage: "wake", diagnostic: "no provider" }] } });
+  await set({ tell: { ...RECEIPT, result: "failed", failures: [{ stage: "wake", diagnostic: "no provider" }] } });
   const failedWake = await transport.tell("/world", AKU, signal, "change direction");
   assert.deepEqual(tellPresentation(failedWake, "change direction"),
     { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },
     "a recorded Tell with a failed wake stays an admitted Tell, never a retried failure");
-  await set({ tell: { ...RECEIPT, wake: { kind: "pending" } } });
-  const held = await transport.tell("/world", AKU, signal, "change direction");
-  assert.deepEqual(tellPresentation(held, "change direction"),
-    { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },
-    "an admission whose work is only held completes its send command without manufacturing an outcome");
-  assert.equal(warned.mock.callCount(), 1, "a failed wake keeps its diagnostic; a held admission is not a failure");
+  assert.equal(warned.mock.callCount(), 1, "a failed wake keeps its diagnostic");
   warned.mock.restore();
 
   assert.deepEqual(await transport.stop("/world", "aku/test/1", signal), { kind: "stopped" });
@@ -467,8 +461,8 @@ test("the SDK boundary validates Tell admission locally without root schemas", a
   const installed = await import(pathToFileURL(entry).href);
   assert.equal("akumaTellResultSchema" in installed, false);
   assert.equal("activityHistorySchema" in installed, false);
-  const receipt = { ...RECEIPT, tellId: "", kind: "failed", wake: { kind: "pending" },
-    interrupt: { kind: "unavailable", evidence: "hung" }, input: { kind: "deadline" },
+  const receipt = { ...RECEIPT, tellId: "", result: "failed",
+    interrupt: { kind: "unavailable", evidence: "hung" },
     failures: [{ stage: "wake", diagnostic: "no provider", logPath: "/log" },
       { stage: "observation", diagnostic: "read failed" }] };
   await set({ tell: receipt });
@@ -802,7 +796,7 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
     `a later Turn (${later.sequence}) after an idle stretch arrives through the same observation, never a timer`);
 });
 
-test("the real public package confirms an exact live Tell through the transport", async (t) => {
+test("the installed SDK admits one Tell before submission and correlates its later typed evidence", async (t) => {
   const value = await soulFixture("paseo-sdk-tell-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   let released = false;
@@ -816,25 +810,38 @@ test("the real public package confirms an exact live Tell through the transport"
   const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
   const root = await realpath(value.root);
 
-  const submitting = transport.tell(root, value.allocated.id, t.signal, "change direction");
-  await waitForCondition("the original native Tell to be admitted", async () => (await readHeart(paths)).pending.length === 1);
-  const tellId = (await readHeart(paths)).pending[0]!.id;
-  await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: [tellId], boundAt: at });
-  await recordTellDeliveries(paths, [{ tellId, turnSequence: turn.sequence, route: "live", receipt: "required", fence: "test-live", deliveredAt: at }]);
-  const admitted = await submitting;
-  assert.equal(admitted.akumaId, value.allocated.id);
-  assert.equal(admitted.tellId, tellId);
-  assert.deepEqual(admitted.action, { kind: "steering", historyId: `turn/${turn.sequence}` });
-  assert.deepEqual(tellSchema.parse(admitted), admitted,
-    "the local boundary preserves the installed owner's receipt without a caller text echo");
+  const admitted = await transport.tell(root, value.allocated.id, t.signal, "change direction");
+  const pending = (await readHeart(paths)).pending;
+  assert.equal(pending.length, 1);
+  const tellId = pending[0]!.id;
+  assert.deepEqual(admitted, { result: "told", akumaId: value.allocated.id, tellId });
+  assert.deepEqual(tellSchema.parse(admitted), admitted);
 
-  const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
-  const frame = await stream.next();
-  assert.ok(!frame.done, "the transport serves the real package's own bounded window");
-  const recorded = frame.value.rows.find((row) => row.kind === "tell");
-  await stream.return?.();
-  assert.ok(recorded?.kind === "tell");
-  assert.equal(recorded.tellId, admitted.tellId, "the admitted Tell is durably recorded, not merely acknowledged");
-  assert.equal(recorded.text, "change direction");
-  assert.equal(recorded.state, "pending", "live submission does not invent the stronger provider receipt");
+  const stream = transport.stream(root, value.allocated.id, t.signal)[Symbol.asyncIterator]();
+  try {
+    const frame = await stream.next();
+    assert.ok(!frame.done);
+    const recorded = frame.value.rows.find((row) => row.kind === "tell");
+    assert.ok(recorded?.kind === "tell");
+    assert.equal(recorded.tellId, admitted.tellId);
+    assert.equal(recorded.state, "pending");
+    assert.deepEqual(recorded.deliveries, []);
+
+    await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: [tellId], boundAt: at });
+    await recordTellDeliveries(paths, [{ tellId, turnSequence: turn.sequence, route: "live", receipt: "required", fence: "test-live", deliveredAt: at }]);
+    for (;;) {
+      const later = await stream.next();
+      assert.ok(!later.done, "the same stream observes later evidence");
+      const delivered = later.value.rows.filter((row) => row.kind === "tell");
+      assert.equal(delivered.length, 1, "the transport never replays the input");
+      const evidence = delivered[0];
+      assert.ok(evidence?.kind === "tell");
+      assert.equal(evidence.tellId, admitted.tellId);
+      if (evidence.deliveries.length === 0) continue;
+      assert.deepEqual(evidence.deliveries, [{ deliveredAt: at, route: "live", turnSequence: turn.sequence }]);
+      assert.equal(evidence.text, "change direction");
+      assert.equal(evidence.state, "pending", "submission alone does not invent the stronger provider receipt");
+      break;
+    }
+  } finally { await stream.return?.(); }
 });

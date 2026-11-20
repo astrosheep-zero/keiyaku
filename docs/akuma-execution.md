@@ -134,8 +134,8 @@ Tell admission is atomic with Soul existence, so unborn targets refuse without
 leaving future input behind. The one admission owner checks the frozen
 execution directory before recording new input or control. A proved missing
 directory refuses new admission, not an exact replay of already-retained input.
-The filesystem check does not hold Heart write custody. Body records delivery only after provider submission
-evidence. Proven launch delivery or live delivery without a native receipt
+The filesystem check does not hold Heart write custody. Body records delivery
+only after provider submission evidence. Proven launch delivery or live delivery without a native receipt
 channel settles the Tell; where a native receipt is required, submission alone
 does not settle it. Heart admits a terminal witness for each exact Tell proven
 by delivery or correlated native receipt. Tell is at-least-once by stable
@@ -153,6 +153,14 @@ authority. A schema Tell is answered by a Turn dedicated to that Tell; ordinary
 input waits outside that Turn. Drain groups ordinary Tells only until the next
 schema Tell.
 
+A committed terminal Turn is observable immediately; it does not settle its
+Body. When only the retirement of that exact Body prevents ordinary admission,
+the caller observes its end outside Heart write custody, then admission judges
+fresh authority, including the frozen directory. Genuine active work, a conflicting control, or unsafe custody
+must not be mistaken for retirement. Admission waiting is cancellable and leaves
+no input or wake before admission. It does not change ordinary queueing or the
+explicit interrupt handoff.
+
 Interrupt atomically admits the Tell with a request for the current Body to
 yield. The predecessor never receives the protected input, and normal session
 completion cannot discard it. Submission already begun before admission is not
@@ -162,17 +170,21 @@ store. Both paths use the same leash-held Heart settlement judgment, and Body
 publication cannot cross an unsettled barrier admitted during preparation.
 A crash after barrier consumption but before launch leaves ordinary pending Tell.
 
-Ordinary Tell confirms submission of its exact input within one finite action
-window after admission, including launch preparation and any requested interrupt.
+Ordinary Tell acknowledges durable admission, not provider submission. It
+still attempts the wake and owns requested control through its finite action
+window, but does not spend that window waiting for a provider receipt. Launch
+or control failure, when known, remains a failure with its admitted input and
+cause even if another Body independently delivers that input. Clean launch
+completion and expected leash contention are not launch failures and do not
+prove delivery. An exact Turn is evidence only when already witnessed for that
+input.
 Interrupt first requires non-hung settlement of the exact predecessor and
 consumption of its barrier; neither a free leash nor elapsed time is proof, and
 completed interruption does not prove successor submission. Known hung refuses
-fresh interrupt admission. An unconfirmed action reports its stop and known
-cause while leaving admitted input and control available to advance. Final
-observation is bounded too. Neither a deadline nor caller cancellation creates a
-lifecycle fact or retracts admission; the observer releases any launch custody
-without canceling admitted work. A bounded Ask observes its own answer from
-admission on its own clock, without leaving a detached interrupt wait.
+fresh interrupt admission. Neither an observation bound nor caller cancellation
+creates a lifecycle fact or retracts admission. Bounded Tell observation and
+owned interrupt observation retire their own wake observation without stopping
+the admitted work. Ask keeps its own answer and custody judgment.
 
 Kill similarly requires explicit settlement of the exact stopped Body before it
 can record a witness. A Body that is already explicitly settled without a kill

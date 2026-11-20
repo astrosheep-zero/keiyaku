@@ -17,7 +17,7 @@ import {
   type VerbOutput,
 } from "../library/keiyaku-verbs.js";
 import { projectFailure } from "../library/outcome.js";
-import { renderVerb } from "../cli/render/verbs.js";
+import { renderVerb, type RenderVerbContext } from "../cli/render/verbs.js";
 import { describeModelTools, modelCoordinates, modelToolOutput } from "../library/model-tools.js";
 import { SERVER_DESCRIPTION } from "./description.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
@@ -63,18 +63,16 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
     const { cwd: callCwd, repo, ...business } = args ?? {};
     const value = business as VerbInput<VerbName>;
     let completion: VerbCompletion<VerbOutput<VerbName>>;
+    let recoveryCoordinates: RenderVerbContext["recoveryCoordinates"];
     try {
       const parsed = modelCoordinates(name).safeParse({
         ...(callCwd === undefined ? {} : { cwd: callCwd }),
         ...(repo === undefined ? {} : { repo }),
       });
       if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
-      const facet = Keiyaku.for({
-        cwd: resolve(cwd, parsed.data.cwd ?? "."),
-        environment,
-        ...(!("repo" in parsed.data) || parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),
-        ...(home === undefined ? {} : { home }),
-      });
+      const coordinates = { ...parsed.data, cwd: resolve(cwd, parsed.data.cwd ?? ".") };
+      if (name === "wait") recoveryCoordinates = coordinates;
+      const facet = Keiyaku.for({ ...coordinates, environment, ...(home === undefined ? {} : { home }) });
       completion = { kind: "returned", value: await facet.run(name, value, { signal }) };
     } catch (error) {
       completion = { kind: "threw", error };
@@ -83,6 +81,8 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
       const disposition = classifyVerb(name, value, completion);
       const text = renderVerb(name, value, completion, {
         surface: "mcp",
+        disposition,
+        ...(recoveryCoordinates === undefined ? {} : { recoveryCoordinates }),
         columns: DEFAULT_CLI_COLUMNS,
         color: false,
         now: Date.now(),

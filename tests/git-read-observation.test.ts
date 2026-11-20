@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ChildProcess } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -15,7 +16,7 @@ import {
 } from "../src/git/repository.js";
 import { contractId } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
-import { GitPlumbingError } from "../src/git/process.js";
+import { executeGit, GitPlumbingError } from "../src/git/process.js";
 import { parseTreeEntries } from "../src/git/tree.js";
 import { mintSnapshotId } from "../src/git/identity.js";
 import { readConflictHandoffs, recordConflictHandoff } from "../src/git/workspace.js";
@@ -332,6 +333,42 @@ test("Git read cancellation awaits physical child retirement", async () => {
       assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
     },
   );
+});
+
+test("finite Git preserves a witnessed nonzero native exit when retirement rejects", {
+  skip: process.platform === "win32" && "POSIX owned process-group retirement fixture",
+}, async (t) => {
+  const repository = makeGitRepository();
+  const controller = new AbortController();
+  const failure = new Error("retirement failed independently");
+  const emit = ChildProcess.prototype.emit;
+  const kill = process.kill;
+  let failedPid: number | undefined;
+  t.mock.method(ChildProcess.prototype, "emit", function (this: ChildProcess, event: string, ...args: unknown[]) {
+    const emitted = emit.call(this, event, ...args);
+    if (event === "exit" && args[0] === 73) {
+      failedPid = this.pid;
+      controller.abort(new Error("stop observation"));
+    }
+    return emitted;
+  });
+  t.mock.method(process, "kill", (pid: number, signal?: string | number) => {
+    if (failedPid !== undefined && pid === -failedPid && signal === "SIGTERM") throw failure;
+    return kill.call(process, pid, signal);
+  });
+  await withGitShim('if [ "$1" = "native-fixture" ]; then echo native Git failure >&2; exit 73; fi\nexec "$KEIYAKU_REAL_GIT" "$@"', {}, async gitPath => {
+    const git = await repositoryAt(repository.path, gitPath);
+    await assert.rejects(executeGit({ ...git, signal: controller.signal }, ["native-fixture"]), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      const [native, retirement] = error.errors;
+      assert.ok(native instanceof GitPlumbingError);
+      assert.equal(native.status, 73);
+      assert.equal(native.pid, failedPid);
+      assert.match(native.message, /native Git failure/u);
+      assert.equal(retirement, failure);
+      return true;
+    });
+  });
 });
 
 test("finite batch parser rejects malformed, truncated and trailing frames for every affected caller", async () => {

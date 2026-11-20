@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { tellRowSchema } from "./projection.js";
+import { tellRowSchema, turnHistoryIdSchema } from "./projection.js";
 import type { PauseFact, TellFact } from "./heart/index.js";
-import { turnHistoryIdSchema, type AkumaId } from "./identity.js";
+import type { AkumaId } from "./identity.js";
 
 export type CallInitialTell = Readonly<{
   tellId: string;
@@ -63,6 +63,7 @@ export type TellWake = z.output<typeof tellWakeSchema>;
 
 /** The progress receipt carries only the Tell coordinates progress needs; Heart keeps the native row. */
 export type TellResult = z.output<typeof tellResultSchema>;
+export type TellSettlement = TellResult & Readonly<{ action?: z.output<typeof tellActionSchema> }>;
 
 /** Freeze known admission before waiting for wake; no later read can replace it. */
 export function pendingTellReceipt(tell: TellFact, barrier?: PauseFact): TellResult {

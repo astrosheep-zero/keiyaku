@@ -64,28 +64,28 @@ const AKUMA_COMMAND_SPECS = {
   wait: {
     arity: "one-or-more",
     stdin: false,
-    flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: `wait ${SET_SELECTORS} [--any | --all] [--timeout <duration>] [--repo <path>]`,
+    flags: { any: "boolean", all: "boolean", for: "value", json: "boolean" },
+    usage: `wait ${SET_SELECTORS} [--any | --all] [--for <duration>] [--repo <path>]`,
     purpose: "Wait for Contract changes, Akuma completion, or new Akuma progress reports.",
     details: [
-      "Select Contracts and Akumas together or separately. Contract IDs wait for their next journal change or terminal state, not associated Akumas. One deadline and any/all mode cover the whole selection.",
+      "Select Contracts and Akumas together or separately. Contract IDs wait for their next journal change or terminal state, not associated Akumas. One optional bound and any/all mode cover the whole selection.",
       "The default mode is any; --all waits for every selected member. Each Contract starts from its current journal head; already accepted or abandoned Contracts complete immediately.",
       SET_DETAILS,
-      "An already completed Akuma counts immediately; a deadline only bounds observation.",
-      "A new progress report can interrupt either mode without satisfying any member. The result is reported and includes the Akuma and report/<n>; history reads the full report.",
+      "Already completed Akumas count immediately. Omit --for to wait without a time limit; --for 0ms takes one initial snapshot. The bound never stops work.",
+      "A new progress report can interrupt either mode without satisfying any member. The reporting member carries its report/<n> address; history reads the full report.",
       "With --json stdout carries the native result document.",
     ].join("\n"),
   },
   tell: {
     arity: 1,
     stdin: true,
-    flags: { interrupt: "boolean", json: "boolean" },
-    usage: "tell <aku/...|@name> [--interrupt] (<prompt> | -)",
+    flags: { interrupt: "boolean", wait: "optional-value", json: "boolean" },
+    usage: "tell <aku/...|@name> [--interrupt] [--wait [<duration>]] (<prompt> | -)",
     purpose: "Submit new orders to an Akuma.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
-      "Returns the confirmed start or steering and its exact Turn, not an answer. If confirmation stops, admitted input can still advance.",
+      "Returns durable admission without waiting for provider submission. --wait observes this Tell's exact outcome; a bare --wait has no time limit. Use -- before a duration-shaped prompt following a bare --wait.",
     ].join("\n"),
   },
   ask: {
@@ -173,10 +173,19 @@ export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
 }
 
 /** The prompt is the only stdin reader. */
-function scanSpec(action: AkumaAction, spec: AkumaCommandSpec): ScanSpec {
+function scanSpec(action: AkumaAction, spec: AkumaCommandSpec, fail: (message: string) => never): ScanSpec {
   return {
     subject: action,
     flags: spec.flags,
+    ...(action === "tell"
+      ? {
+          acceptsOptionalValue(value: string) {
+            const duration = decodeDuration(value);
+            if (duration.kind === "overflow") fail("--wait duration exceeds the safe millisecond range");
+            return duration.kind === "parsed";
+          },
+        }
+      : {}),
     ...(spec.stdin ? { stdin: "prompt" } : {}),
     stdinRefusal: `stdin marker '-' is not valid for ${action}`,
     refused: { "-d": `option -d is not valid for ${action}` },
@@ -223,15 +232,14 @@ function parseWait(
   if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
   const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   const selectors = rawSelectors.map((value) => validateSet(value, fail));
-  const timeout =
-    flags.timeout === undefined ? undefined : stringFlag(flags.timeout, "--timeout requires a duration", fail);
-  if (timeout !== undefined) parseDuration(timeout, "--timeout", fail);
+  const bound = flags.for === undefined ? undefined : stringFlag(flags.for, "--for requires a duration", fail);
+  if (bound !== undefined) parseDuration(bound, "--for", fail);
   return {
     name: "wait",
     input: {
       selectors,
       ...(completion === undefined ? {} : { completion }),
-      ...(timeout === undefined ? {} : { timeout }),
+      ...(bound === undefined ? {} : { for: bound }),
     },
     output,
   };
@@ -340,7 +348,10 @@ function parseTell(
     akuma: subject,
     ...(flags.interrupt === true ? { interrupt: true } : {}),
   };
-  if (action === "tell") return { name: action, input, acquire: { prompt }, output };
+  if (action === "tell") {
+    const wait = flags.wait === true || typeof flags.wait === "string" ? flags.wait : undefined;
+    return { name: action, input: { ...input, ...(wait === undefined ? {} : { wait }) }, acquire: { prompt }, output };
+  }
   const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
   if (wait !== undefined) parseDuration(wait, "--wait", fail);
   return {
@@ -401,7 +412,7 @@ export function parseAkumaCommand(argv: readonly string[]): AkumaParseResult {
   const fail = (message: string): never => {
     throw new CliUsageError(message, akumaUsageGuide(action));
   };
-  const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
+  const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec, fail), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "report") return parseReport(positionals, stdin !== undefined, output, fail);
   if (action === "spawn" || action === "tell" || action === "ask") {

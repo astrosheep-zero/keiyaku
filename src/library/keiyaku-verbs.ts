@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { boundedListLimitSchema, lifecycleSelectionSchema } from "../bounded-list.js";
-export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
+export { classifyVerb, verbDispositionIsError, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 
 import { parseDuration } from "../duration.js";
 import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
@@ -19,6 +19,7 @@ import {
   akumaAskNormalResultSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
+  akumaTellNormalResultSchema,
 } from "../akuma/selection-observation.js";
 import {
   regionResultSchema,
@@ -89,7 +90,7 @@ const optBool = z.boolean().exactOptional();
 const strings = z.array(text).readonly();
 const positive = z.number().int().positive();
 const duration = text.refine((value) => parseDuration(value).kind === "parsed", {
-  message: "timeout requires an integer duration with unit ms, s, m, or h within the safe millisecond range",
+  message: "expected an integer duration with unit ms, s, m, or h within the safe millisecond range",
 });
 const contract = {
   contract: optText.describe(
@@ -373,13 +374,20 @@ export const verbs = Object.freeze({
   },
   tell: {
     description:
-      "Give an Akuma an order. Returns confirmed start or steering at its exact Turn, not an answer. Unconfirmed submission can leave the order admitted and able to advance.",
+      "Admit an order for an Akuma. Returns the exact admitted input identity without waiting for provider submission. Optionally observe only that input's answer.",
     input: z
       .strictObject({
         ...tellFields,
+        wait: z
+          .union([z.literal(true), duration])
+          .exactOptional()
+          .describe(
+            "Observe this input's outcome; true has no bound, or give a duration such as 30s. Omit for admission only.",
+          ),
       })
       .readonly(),
     output: akumaTellResultSchema,
+    normal: akumaTellNormalResultSchema,
     effect: "write",
   },
   ask: {
@@ -431,7 +439,7 @@ export const verbs = Object.freeze({
   },
   wait: {
     description:
-      "Wait for Contracts to change or close and Akumas to finish their current work, together or separately. A new Akuma progress report returns reported with an exact history address, without satisfying any member. Already satisfied members count immediately. A timeout ends observation, never the work.",
+      "Wait for Contracts to change or close and Akumas to finish their current work. A new Akuma progress report interrupts observation without satisfying any member. Already satisfied members count immediately. An optional bound ends observation, never the work.",
     input: z
       .strictObject({
         selectors: z
@@ -459,11 +467,9 @@ export const verbs = Object.freeze({
           .enum(["any", "all"])
           .exactOptional()
           .describe('Completion requires "any" member (default) or "all" members; a new report can wake either mode.'),
-        timeout: duration
+        for: duration
           .exactOptional()
-          .describe(
-            "How long to watch (e.g. 30s or 5m); omit for no deadline. The deadline only stops watching, never the work. 0ms returns the current state at once.",
-          ),
+          .describe("Observation bound such as 30s, or 0ms for one initial snapshot. Omit to wait without a bound."),
       })
       .readonly(),
     output: invocationWaitResultSchema,

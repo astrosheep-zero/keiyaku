@@ -637,7 +637,7 @@ test("frozen directory lost after admission reports the exact Tell and settles i
         return await spawnAkumaBody(launch);
       } });
       if (settlementFails) renameSync(retiredLeash, paths.leash);
-      assert.ok(result.kind === "failed" && result.tellId === tellId);
+      assert.ok("result" in result && result.result === "failed" && result.tellId === tellId);
       const [wake] = result.failures;
       assert.ok(wake.stage === "wake");
       assert.ok(wake.diagnostic.startsWith(`Cannot wake ${id}: frozen execution directory ${cwd}`));

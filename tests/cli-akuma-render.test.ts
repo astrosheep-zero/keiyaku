@@ -3,7 +3,7 @@ import test from "node:test";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import { AkumaKillError } from "../src/akuma/akuma-errors.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
-import type { ActivityRow, OutcomeRow } from "../src/akuma/projection.js";
+import type { ActivityRow } from "../src/akuma/projection.js";
 import { compactTimelineItem } from "../src/akuma/timeline-text.js";
 import {
   DEFAULT_CONTEXT,
@@ -25,7 +25,7 @@ import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import type { AkumaObservation, AkumaTellResult, AkumaWaitItem } from "../src/akuma/selection-observation.js";
-import { projectCurrentWork } from "../src/akuma/status-projection.js";
+import { summarizeFrontier } from "../src/akuma/status-projection.js";
 import type { DispatchAssociation } from "../src/index.js";
 import type { ForkResult, SpawnResult } from "../src/library/akuma-creation.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -51,7 +51,7 @@ function statusOf(
     birth: DIRECT_BIRTH,
     id,
     life,
-    work: projectCurrentWork(rows),
+    work: summarizeFrontier(rows, "/work").work,
     ...extra,
   });
 }
@@ -93,7 +93,7 @@ test("status retains execution context, current work, changes, and unavailable a
   assert.equal(lines[0], id, "identity roots the panel alone");
   assert.equal(lines[1], "  /work/appointed", "the execution directory is static context, not a labelled row");
   assert.equal(lines[2], `2 ${note.text}`);
-  assert.match(lines[3]!, /^● running$/u);
+  assert.match(lines[3]!, /^● running turn\/1$/u);
   assert.ok(lines.indexOf("  changes") > 3, "reported changes follow the conclusion, subordinate");
   assert.ok(lines.some((line) => /^ {4}~ +\/work\/file$/u.test(line)));
   assert.equal(
@@ -245,153 +245,39 @@ test("Akuma observation failures name the target and reason without carrier word
         kind: "akuma",
         reason: "deadline",
         results: [
-          { kind: "unobserved", id: first, diagnostic: "heart locked" },
-          { kind: "unobserved", id: second, diagnostic: "permission denied" },
+          { state: "unavailable", akuma: first, reason: "heart locked" },
+          { state: "unavailable", akuma: second, reason: "permission denied" },
         ],
       },
       {}
     ),
-    [`! ${first} — observation failed · heart locked`, `! ${second} — observation failed · permission denied`].join(
-      "\n",
-    ),
+    [`? ${first}  unavailable`, "  heart locked", `? ${second}  unavailable`, "  permission denied"].join("\n"),
   );
 });
 
-function waitItem(status: LiveStatusObservation["status"], rows: readonly ActivityRow[]): AkumaWaitItem {
-  const pending = status.work.pending !== undefined;
-  const outcome = status.work.kind === "idle"
-    ? rows.findLast((row): row is OutcomeRow => row.kind === "outcome")
-    : undefined;
-  return {
-    kind: "observed",
-    id: status.id,
-    life: status.life,
-    ...(pending ? { pending: true } : {}),
-    ...(outcome === undefined ? {} : { outcome: { ...outcome.outcome, historyId: `turn/${outcome.turnSequence}` as const } }),
-    ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
-  };
-}
-
-function singleWait(
-  status: LiveStatusObservation["status"],
-  rows: readonly ActivityRow[],
-  alias?: string,
-): string {
-  return waitText(
-    { kind: "akuma", reason: "completed", results: [waitItem(status, rows)] },
-    { ...(alias === undefined ? {} : { alias }) }
-  );
-}
-
-function failedOutcome(sequence: number, diagnostic: string): OutcomeRow {
-  return {
-    kind: "outcome",
-    sequence,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    outcome: { kind: "failed", diagnostic },
-  };
-}
-
-function pendingTellRow(sequence: number): Extract<ActivityRow, { kind: "tell" }> {
-  return {
-    kind: "tell",
-    sequence,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: `tell/pending-${sequence}`,
-    text: "still waiting",
-    state: "pending",
-    deliveries: [],
-  };
-}
-
-test("wait renders compact member facts and complete labeled outcomes", () => {
-  const members: Array<[LiveStatusObservation["status"], readonly ActivityRow[]]> = [
-    [statusOf("aku/worker/abcd0103", "asleep", [failedOutcome(1, "provider 503")]), [failedOutcome(1, "provider 503")]],
-    [statusOf("aku/worker/abcd0105", "killed", [answeredOutcome(1, "stale answer")]), [answeredOutcome(1, "stale answer")]],
-    [statusOf("aku/worker/abcd0106", "hung", [turnStarted(1)]), [turnStarted(1)]],
-    [statusOf("aku/worker/abcd0107", "untidy", [turnStarted(1)]), [turnStarted(1)]],
-    [statusOf("aku/worker/abcd0108", "stranded", [turnStarted(1)], { strandedReason: "resume-unsupported" }), [turnStarted(1)]],
-    [statusOf("aku/worker/abcd0109", "asleep", [pendingTellRow(1)]), [pendingTellRow(1)]],
-    [statusOf("aku/worker/abcd0110", "running", [turnStarted(1), pendingTellRow(1)]), [turnStarted(1), pendingTellRow(1)]],
-  ];
-  const text = waitText(
-    { kind: "akuma", reason: "completed", results: members.map(([status, rows]) => waitItem(status, rows)) },
-    {}
-  );
-  assert.equal(
-    text,
-    [
-      "! aku/worker/abcd0103 — failed",
-      "  turn/1 · failed",
-      "  provider 503",
-      "× aku/worker/abcd0105 — killed",
-      "  turn/1 · answered",
-      "  stale answer",
-      "? aku/worker/abcd0106 — hung",
-      "! aku/worker/abcd0107 — untidy",
-      "! aku/worker/abcd0108 — stranded · resume-unsupported",
-      "⧗ aku/worker/abcd0109 — pending tell",
-      "● aku/worker/abcd0110 — running · pending tell",
-    ].join("\n"),
-    "member order and stopped life stay explicit beside an exact-turn outcome",
-  );
-  assert.doesNotMatch(text, /\n\n/u, "no blank block separators");
-  assert.doesNotMatch(text, /\d{2}:\d{2}/u, "no wall clocks");
-  assert.doesNotMatch(text, /─|changes|debts/u, "no full status frame, change or Debt dump");
-});
-
-test("wait keeps the exact-turn answer beyond the preview aperture", () => {
-  const id = "aku/worker/abcd0111";
-  const long = "👩‍💻".repeat(175);
-  const rows = [answeredOutcome(1, `${long}\n  detail\nthird\nfourth\n`)];
-  const status = statusOf(id, "asleep", rows);
-  assert.equal(singleWait(status, rows), `✓ ${id} — answered\n  turn/1 · answered\n  ${long}\n    detail\n  third\n  fourth\n`);
-});
-
-test("wait keeps a single-target alias and none in plural output", () => {
-  const status = statusOf("aku/worker/abcd0112", "asleep", []);
-  assert.equal(singleWait(status, [], "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
-  const other = statusOf("aku/worker/abcd0113", "asleep", []);
-  const plural = waitText(
-    {
-      kind: "akuma",
-      reason: "completed",
-      results: [waitItem(status, []), waitItem(other, [])],
-    },
-    { alias: "@scout" }
-  );
-  assert.doesNotMatch(plural, /@scout/u, "an ambiguous alias is not attached to any member");
+test("wait keeps a separately labeled older conclusion and its full exact answer", () => {
+  const akuma = parseAkumaId("aku/worker/abcd0111").id;
+  const answer = `${"👩‍💻".repeat(175)}\n  detail\nthird\nfourth\n`;
+  const member: AkumaWaitItem = { akuma, state: "running", turn: "turn/2",
+    last: { state: "done", turn: "turn/1", at: AKUMA_ACTIVITY_AT, answer } };
+  const text = waitText({ kind: "akuma", reason: "deadline", results: [member] }, { alias: "@scout" });
+  assert.match(text, /@scout[^\n]*running turn\/2\n  last done turn\/1/u);
+  assert.equal(text.split("\n").slice(2).map(line => line.slice(4)).join("\n"), answer);
+  const other = parseAkumaId("aku/worker/abcd0113").id;
+  assert.doesNotMatch(waitText({ kind: "akuma", reason: "deadline", results: [member, { akuma: other, state: "idle" }] }, { alias: "@scout" }), /@scout/u);
 });
 
 test("Tell admission and final Ask answer retain their distinct native facts", () => {
   const id = parseAkumaId("aku/worker/deadbeef").id;
   const answer = { akumaId: id, tellId: "tell-id", kind: "answered" as const, answer: "exact answer" };
   assert.equal(askRawAnswer(answer), JSON.stringify("exact answer"));
-  const tell = { kind: "admitted" as const, akumaId: id, tellId: "tell-id" };
+  const tell = { result: "told" as const, akumaId: id, tellId: "tell-id" };
   const standalone = tellText(tell, "continue", undefined);
-  assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
+  assert.equal(standalone, `▸ ${id}  told`);
   assert.equal(renderAskText(answer, undefined), JSON.stringify("exact answer"));
   assert.equal(askResultText(answer, undefined), `✓ answered ${id}\n  input tell-id`);
-  const longPrompt = "one line of caller input ".repeat(20);
-  const receipt = tellText(tell, longPrompt, undefined).split("\n");
-  assert.equal(receipt.length, 1, "one receipt line even past the terminal width");
-  assert.match(receipt[0]!, /^✓ told aku\/worker\/deadbeef — one line of caller input .*…$/u);
-  assert.doesNotMatch(
-    receipt.join("\n"),
-    /running|completed|pending tell|─|"$/u,
-    "an action receipt has no frame and adds no quotes",
-  );
-  assert.match(
-    tellText({ ...tell, wake: { kind: "pending" } }, longPrompt, undefined),
-    /^⧗ tell aku\/worker\/deadbeef — one line of caller input .*…$/mu,
-    "a pending Tell keeps neutral vocabulary and the pending mark",
-  );
-  assert.equal(
-    tellText({ ...tell, kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }, "continue", undefined),
-    ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed", "    wake refused"].join("\n"),
-    "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
-  );
+  assert.equal(tellText(tell, "one line of caller input ".repeat(20), undefined), standalone);
+  assert.match(tellText({ ...tell, result: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }, "continue", undefined), /wake refused/u);
   assert.equal(killResultText(id, "killed"), `✓ killed ${id}`);
   assert.equal(
     killResultText(id, "unavailable", "@tired"),
@@ -514,8 +400,9 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
  */
 const SPECIMEN_ID = parseAkumaId("aku/worker/1234abcd").id;
 
-function compactTell(extra: Omit<Extract<AkumaTellResult, { kind: "admitted" }>, "kind" | "akumaId" | "tellId"> | Omit<Extract<AkumaTellResult, { kind: "failed" }>, "akumaId" | "tellId"> = {}): AkumaTellResult {
-  return { kind: "admitted", akumaId: SPECIMEN_ID, tellId: "tell/specimen", ...extra };
+function compactTell(extra: { turn?: `turn/${number}` } | Omit<Extract<AkumaTellResult, { result: "failed" }>, "akumaId" | "tellId"> = {}): AkumaTellResult {
+  const subject = { akumaId: SPECIMEN_ID, tellId: "tell/specimen" };
+  return "result" in extra ? { ...subject, ...extra } : { ...subject, result: "told", ...extra };
 }
 
 function spawned(extra: Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind" | "akumaId"> | Omit<Extract<SpawnResult, { kind: "failed" }>, "akumaId"> = {}): SpawnResult {
@@ -538,7 +425,7 @@ test("Akuma outcomes distinguish admission from failed execution", () => {
   assert.equal(
     classifyVerb("tell", input, {
       kind: "returned",
-      value: compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }),
+      value: compactTell({ result: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }),
     }),
     "failed",
   );
@@ -691,29 +578,11 @@ test("every action receipt leads with a verdict and subject, then indented evide
   );
 });
 
-test("Tell and kill keep pending, failure, and plural evidence inside the action hierarchy", () => {
-  const started = compactTell({ action: { kind: "started", historyId: "turn/17" } });
-  const steering = compactTell({ action: { kind: "steering", historyId: "turn/17" } });
-  assert.equal(tellText(started, "go", "@fleet-desk"), "✓ @fleet-desk started turn/17");
-  assert.equal(tellText(steering, "go", "@fleet-desk"), "✓ @fleet-desk steered turn/17");
-  assert.equal(tellText(started, "go", undefined), "✓ aku/worker/1234abcd started turn/17");
-  assert.equal(tellText(started, "go", undefined, true), "✓ tell aku/worker/1234abcd\n  started turn/17");
-  assert.equal(
-    tellText(compactTell(), '  he said "wait"\n', "@tired"),
-    '✓ told aku/worker/1234abcd (@tired) — he said "wait"',
-    "the non-settled preview folds whitespace and preserves literal quotes",
-  );
-  assert.equal(tellText(compactTell(), "   ", undefined), "✓ told aku/worker/1234abcd");
-  assert.deepEqual(
-    tellText(compactTell({ wake: { kind: "pending" } }), "go", undefined).split("\n"),
-    ["⧗ tell aku/worker/1234abcd — go", "  wake pending"],
-    "a pending Tell keeps the pending mark and asserts no delivery",
-  );
-  assert.deepEqual(
-    tellText(compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }), "go", undefined).split("\n"),
-    ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed", "    wake refused"],
-    "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
-  );
+test("Tell and kill keep exact control and plural evidence inside the action hierarchy", () => {
+  const told = compactTell({ turn: "turn/17" });
+  assert.equal(tellText(told, "go", "@fleet-desk"), "▸ @fleet-desk  told turn/17");
+  const stoppedTell = compactTell({ result: "failed", interrupt: { kind: "completed" }, failures: [{ stage: "wake", diagnostic: "wake refused" }] });
+  assert.match(tellText(stoppedTell, "go", undefined), /interrupt completed[\s\S]*wake refused/u);
   assert.equal(
     renderKillText(
       {
@@ -751,7 +620,7 @@ test("Tell delivery keeps typed log coordinates and the complete terminal-safe c
   const detail = `${"👩‍💻".repeat(170)}\nrecovery: inspect the original worktree`;
   const lines = tellText(
     compactTell({
-      kind: "failed", failures: [{ stage: "wake",
+      result: "failed", failures: [{ stage: "wake",
       diagnostic: `  wake\nrefused\t\u001b ${detail}`,
       logPath: path }],
     }),
@@ -784,7 +653,7 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
   const head = [`${id} · kei/example-1234`, "  /work/appointed"];
   assert.deepEqual(lines.slice(0, 2), head, "identity carries its Contract inline and context sits beneath it");
   assert.equal(lines[2], "2 edited");
-  assert.equal(lines[3], "● running", "the activity closes on one truthful conclusion");
+  assert.equal(lines[3], "● running turn/1", "the activity closes on one truthful conclusion");
   assert.deepEqual(
     lines.slice(4),
     ["  changes", "    ~  /work/file"],

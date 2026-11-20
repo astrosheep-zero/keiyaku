@@ -14,10 +14,9 @@ refusal retains its specific cause and exposes the smallest applicable usage
 and help handles without trying the command or appending a complete help page.
 Explicit help remains complete, including supported invocation coordinates.
 
-Process outcomes form a fixed six-way classification -- accepted, unsatisfied,
-refused, retryable, failed, usage -- shared with other invocation adapters by the
-facet. An unsatisfied verdict answers the requested check negatively; it remains
-distinct from a failure to complete the operation.
+Process outcomes use the invocation facet's shared classification. An
+unsatisfied verdict answers the requested check negatively; incomplete
+observation and failure to complete the operation remain distinct.
 The CLI owns its numeric exit projection; changing either the classification or
 its exit mapping is a product change, and ordinary receipt text never carries
 the numeric map. Final text rendering is shared, pure projection of native
@@ -26,7 +25,7 @@ are syntax-neutral. Render a recovery call only when the surface can preserve
 the repository context, addressed subject, and intent; otherwise show the evidence alone.
 
 Contract-family receipts lead with the requested operation, the invocation owner's
-six-way disposition, and the complete addressed identity when known. Review keeps
+disposition, and the complete addressed identity when known. Review keeps
 the supplied verdict; preview names its dry-run intent and conflict handoff names
 its distinct conclusion. Leading admission and final placement remain independent:
 a failed invocation can still retain admitted work and landed movement. Rendering
@@ -201,18 +200,13 @@ and exceptional partials share this presentation and keep the failed process
 outcome. Requested and confirmed associations stay distinct. A Tell recovery
 call requires proof the original input was not admitted, and must preserve the
 World, exact child and input; otherwise the receipt shows evidence alone.
-Association, source, execution directory, submitted input, and diagnostics
-remain distinct supporting facts. No receipt
-claims success over a failed stage or pending confirmation. An ordinary confirmed
-Tell leads with the selector the caller addressed (its alias alone when supplied,
-otherwise the complete canonical identity) and names its settled start or
-steering action with its exact Turn once. It does not repeat the Tell verb, a
-second identity, or the submitted input. Additional interrupt evidence stays
-beneath. Pending, failed, and exceptional Tells remain evidence-bearing rather
-than compact: they keep their existing identity, outcome, cause, and whatever
-submitted input that receipt already shows. No Tell receipt claims consumption,
-an answer, or liveness. Failed or stopped actions preserve known admissions and
-their cause. Kill preserves
+Association, source, execution directory, admitted input, and diagnostics
+remain distinct supporting facts. No receipt claims success over a failed
+required stage. Ordinary Tell leads with the addressed selector and its
+admission, naming an exact Turn once only when already known. Transport
+correlation identity is not a text Turn address. Admission claims neither
+submission, an answer, nor liveness. Failed and exceptional actions preserve
+known admission, control evidence and cause. Kill preserves
 each member's native outcome in frozen selection order instead of collapsing
 partial failures into one verdict.
 
@@ -315,8 +309,9 @@ identities. Native observations retain complete identities without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
-Spawn, Tell, and kill return one final action receipt, without an answer or
-live observation frame. On a terminal, pending Ask's replaceable frame leads
+Spawn, ordinary Tell, and kill return one final action receipt without a live
+observation frame. A Tell explicitly observing its input presents that exact
+outcome rather than an admission-only receipt. On a terminal, pending Ask's replaceable frame leads
 with the complete resolved identity and carries elapsed caller observation,
 last-observed life, and the native bounded current-work summary with its
 activity coordinate when supplied. Admission may start the clock before life
@@ -338,18 +333,18 @@ other outcomes fabricate no answer. Shared final rendering composes those native
 facts directly, preserving a raw serialized answer when no meaningful controls
 require a receipt. Native history and streaming retain their complete capability.
 
-A wait is not a stream and opens no live frame. Its compact projection preserves
-the invocation's global conclusion, frozen member order and complete identities,
-without recomputing satisfaction. Contract change, terminal, missing and unknown
-remain distinct beside thin journal summary facts. Akuma summaries retain native
-life, pending input, known unsupported resume and unreadable diagnostics; stopped
-life takes precedence over an older answer. An exact-turn outcome is labeled
-and its answer text remains complete, including an older settled answer rather
-than implying new work. Running members render the compact activity witnessed
-by the native observation and any local unavailability, never a full status panel.
-Unobserved peers remain unknown, and running peers remain running.
-Single-target aliases supplement identity. Summary text is bounded, never identity
-or the full outcome payload.
+Wait opens no live frame. Its compact projection preserves ordered member states
+and identities without recomputing satisfaction. The shared presentation
+keeps success, failure, cancellation, missing or unavailable evidence, and
+unfinished work distinct. It labels an older conclusion separately and preserves
+exact answer text. A running member can show only its witnessed compact current
+activity or local activity failure. A group summary appears only when it helps
+interpret multiple members or an incomplete observation; any elapsed time is
+observation time, not liveness. An incomplete receipt includes a copyable
+continuation when the resolved scope, identities and selection intent can be
+preserved. Unavailable evidence does not justify dropping an unresolved peer
+from that continuation. Process and transport edges consume the invocation's common verdict;
+incomplete is a distinct process outcome but not a transport error.
 
 Region overlap in bind and amend receipts is advisory evidence in native order:
 each supplied relation keeps the related Contract and both patterns. An absent

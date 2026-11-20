@@ -1,4 +1,4 @@
-import { projectCurrentWork } from "../src/akuma/status-projection.js";
+import { projectCurrentWork, summarizeFrontier } from "../src/akuma/status-projection.js";
 import {
   acceptedReceipt,
   contractCatalog,
@@ -92,10 +92,7 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
       {
         kind: "akuma-exact",
         akumaId: parseAkumaId("aku/claude/1234abcd").id,
-        sequence: row.sequence,
-        turnSequence: row.turnSequence,
-        at: row.at,
-        outcome: row.outcome,
+        outcome: { state: "canceled", turn: `turn/${row.turnSequence}`, at: row.at },
       },
       { id: "turn/1" }
     ),
@@ -147,7 +144,7 @@ function placedDelivery(
 
 function statusFields(rows: readonly ActivityRow[]) {
   return {
-    work: projectCurrentWork(rows),
+    work: summarizeFrontier(rows, "/work").work,
 
   };
 }
@@ -1898,8 +1895,8 @@ test("World and addressed status retain the outcome's exact history coordinate a
   const status = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "asleep", ...statusFields(snapshot),
   });
-  for (const text of [board, snapshotText(observation(status), context)])
-    assert.match(text, /answered turn\/1/u);
+  assert.match(board, /answered turn\/1/u);
+  assert.match(snapshotText(observation(status), context), /done turn\/1/u);
 });
 
 test("native history retains diagnostics beneath a bounded command row", () => {
@@ -2058,7 +2055,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
     ...statusFields(idleRows([], answeredOutcome(1, "the answer"))),
   });
   const snapshot = snapshotText(observation(sleeping), { columns: 80, color: false });
-  assert.match(snapshot, /answered turn\/1/u);
+  assert.match(snapshot, /done turn\/1/u);
   assert.match(snapshot, /✓ completed$/u);
 
   const answerless = liveStatusObservationSchema.unwrap().shape.status.parse({
@@ -2076,16 +2073,13 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
       reason: "completed",
       results: [
         {
-          kind: "observed",
-          id: sleeping.id,
-          life: sleeping.life,
-          outcome: { kind: "answered", historyId: "turn/1", answer: "the answer" },
+          akuma: sleeping.id, state: "done", turn: "turn/1", at: AKUMA_ACTIVITY_AT, answer: "the answer",
         },
       ],
     },
     {}
   );
-  assert.equal(returned, `✓ ${sleeping.id} — answered\n  turn/1 · answered\n  the answer`, "wait keeps the complete exact-turn answer without a status panel");
+  assert.equal(returned, `✓ ${sleeping.id}  done turn/1\n  the answer`, "wait keeps the complete exact-turn answer without a status panel");
   assert.doesNotMatch(returned, /─|✓ answer|came back/u, "no panel, no separate answer row, no retired life label");
 });
 
@@ -2104,7 +2098,7 @@ test("status text and JSON report the Akuma execution workdir", () => {
   const statusLines = snapshotText(observationView, DEFAULT_CONTEXT).split("\n");
   assert.deepEqual(
     statusLines.slice(0, 3),
-    [id, "  /work/tree", "● running"],
+    [id, "  /work/tree", "● running turn/1"],
     "the execution directory is a static coordinate before the observed life",
   );
   assert.doesNotMatch(statusLines.join("\n"), /cwd/u, "the coordinate is named once, above the timeline");
@@ -2168,7 +2162,7 @@ test("status keeps current evidence while history retains thought narration", ()
     ...statusFields(outcomeSnapshot),
   });
   const outcomeText = snapshotText(observation(answeredStatus), DEFAULT_CONTEXT);
-  assert.match(outcomeText, /answered turn\/1/u);
+  assert.match(outcomeText, /done turn\/1/u);
 
   const failedOutcome: OutcomeRow = {
     kind: "outcome",
@@ -2273,21 +2267,16 @@ test("a plural wait text renders compact facts, exact-turn outcomes and unreadab
       kind: "akuma",
       reason: "deadline",
       results: [
-        {
-          kind: "observed",
-          id: first,
-          life: "asleep",
-          outcome: { kind: "answered", historyId: "turn/1", answer: "the answer" },
-        },
-        { kind: "observed", id: second, life: "running" },
-        { kind: "unobserved", id: missing, diagnostic: "window lost" },
+        { akuma: first, state: "done", turn: "turn/1", at: AKUMA_ACTIVITY_AT, answer: "the answer" },
+        { akuma: second, state: "running" },
+        { akuma: missing, state: "unavailable", reason: "window lost" },
       ],
     },
     {}
   );
   assert.equal(
     text,
-    [`✓ ${first} — answered`, "  turn/1 · answered", "  the answer", `● ${second} — running`, `! ${missing} — observation failed · window lost`].join("\n"),
+    [`✓ ${first}  done turn/1`, "  the answer", `⧗ ${second}  running`, `? ${missing}  unavailable`, "  window lost"].join("\n"),
     "compact member facts with a complete labeled answer and an honest failure line",
   );
   assert.doesNotMatch(text, /of \d+ done/u, "no completion count and no scoreboard");
@@ -2313,14 +2302,11 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
       },
     ])),
   });
-  const results = [
-    { kind: "observed" as const, id: complete.id, life: complete.life },
-    { kind: "observed" as const, id: pending.id, life: pending.life, pending: true as const },
-  ];
+  const results = [{ akuma: complete.id, state: "idle" }, { akuma: pending.id, state: "waiting" }] as const;
   const text = nativeWaitText({ kind: "akuma", reason: "completed", results }, {});
   assert.equal(
     text,
-    [`✓ ${complete.id} — completed`, `⧗ ${pending.id} — pending tell`].join("\n"),
+    [`✓ ${complete.id}  idle`, `⧗ ${pending.id}  waiting`].join("\n"),
     "each peer keeps its own final state on one line",
   );
 });
