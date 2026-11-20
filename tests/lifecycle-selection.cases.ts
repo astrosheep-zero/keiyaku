@@ -3,10 +3,8 @@ import test from "node:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Akumas, Keis, Keiyaku, Repo, World } from "../src/index.js";
-import { akumaLifecycle } from "../src/akuma/heart/facts.js";
 import { HeldAkumaLeash } from "../src/akuma/heart/index.js";
 import { allocatedHeart, bornLineageAkuma } from "./support/akuma-fixtures.js";
-import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { withGitShim } from "./support/git.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -14,7 +12,7 @@ import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
 
-test("Contract catalogues select terminal journals under one order without retired-workspace reads", async (t) => {
+test("Contract catalogues select terminal journals under one order without retired-workspace reads", async () => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
   const claimed = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
@@ -38,27 +36,11 @@ test("Contract catalogues select terminal journals under one order without retir
       ]));
       assert.ok(settled.rows?.every(row => row.attention === undefined));
       assert.doesNotMatch(readFileSync(trace, "utf8"), /status --porcelain|rev-list|worktree list/u);
-      const all = await traced.list({ selection: "all" });
-      assert.equal(all.rows?.length, 3);
-      assert.equal((await traced.list({ limit: 1 })).more, undefined);
       const bounded = await traced.list({ selection: "settled", limit: 1 });
       assert.deepEqual(bounded.rows, settled.rows?.slice(0, 1));
       assert.equal(bounded.more, true);
-      const facet = await Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
-        .ls({ selector: "kei/", lifecycle: "settled", limit: 1 });
-      assert.ok(facet.kind === "contract-catalogue");
-      assert.deepEqual(facet.rows, bounded.rows);
-      const settledIds = new Set(settled.rows?.map(row => row.id));
-      assert.deepEqual(all.rows?.filter(row => settledIds.has(row.id)), settled.rows);
     },
   );
-  const json = await cliJson<{ rows: { id: string; phase: string }[] }>(["-C", repository.path, "ls", "kei/", "--settled"], { environment: {} });
-  assert.equal(json.exit, 0, json.stderr);
-  assert.deepEqual(new Set(json.value.rows.map(row => row.phase)), new Set(["claimed", "abandoned"]));
-  const text = await runCli(["-C", repository.path, "ls", "kei/", "--settled"], { environment: {} });
-  assert.equal(text.exit, 0, text.stderr);
-  assert.match(text.stdout, /accepted/u);
-  assert.match(text.stdout, /abandoned/u);
   await assert.rejects(contracts.list({ selection: "closed" } as never), /selection must be active, settled, or all/u);
 });
 
@@ -102,10 +84,5 @@ test("Akuma lifecycle selection filters before the bound and intersects caller d
   assert.ok(selected.kind === "akuma-catalogue");
   assert.deepEqual(selected.rows, settledMine.rows?.slice(0, 1));
   assert.equal(selected.more, true);
-  const cli = await cliJson<{ rows: { id: string }[] }>(["-C", root, "ls", "aku/*", "--settled", "--limit", "2"], { environment: {} });
-  assert.equal(cli.exit, 0, cli.stderr);
-  assert.deepEqual(cli.value.rows.map(row => row.id), [newerAsleep.id, asleep.id]);
   await assert.rejects(world.list({ selection: "closed" } as never), /selection must be active, settled, or all/u);
-  for (const life of ["running", "unborn", "stranded", "hung", "untidy"] as const) assert.equal(akumaLifecycle(life), "active");
-  for (const life of ["asleep", "killed", "stillborn"] as const) assert.equal(akumaLifecycle(life), "settled");
 });

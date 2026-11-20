@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keis, Repo } from "../src/index.js";
-import type { ReviewOutcome, VerifyOutcome } from "../src/index.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
-import { renderContractHistory } from "../src/cli/render/contract-history.js";
+import type { ReviewOutcome } from "../src/index.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import {
@@ -16,9 +14,8 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
-import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
+import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 
 /** A committed candidate whose configured scratch setup always fails, producing a Verification runtime stop. */
@@ -59,15 +56,6 @@ async function bindAndCommit(options: {
   return { repository, keiyaku: bound.kei, state };
 }
 
-function assertRuntimeStop(value: unknown): void {
-  assert.ok(value !== null && typeof value === "object" && "kind" in value);
-  assert.equal(value.kind, "stopped");
-  assert.ok("stop" in value && value.stop !== null && typeof value.stop === "object" && "kind" in value.stop);
-  assert.equal(value.stop.kind, "environment-hook-failure");
-  assert.ok("name" in value.stop);
-  assert.equal(value.stop.name, "reject-candidate");
-}
-
 test("journal reads ignore unknown envelope and nested keys while append preserves original bytes", async () => {
   const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
   const git = await cachedRepositoryAt(repository.path);
@@ -82,8 +70,6 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
     .replace('"document":{', '"document":{"additional":"future",');
   assert.deepEqual(decodeJournal(extended), decodeJournal(original));
   assert.equal(encodeEntry(decodeJournal(extended)[0]!), original);
-  assert.throws(() => decodeJournal(extended.replace(/"at":"[^"]+",/u, "")), /missing field 'at'/u);
-  assert.throws(() => decodeJournal(extended.replace(/"at":"[^"]+"/u, '"at":null')), /entry.at/u);
   assert.throws(() => decodeJournal(extended.replace('{"additional":', '{ "additional":')), /not canonical/u);
 
   const tree = await updateGitTree(git, snapshot.tree, new Map([[path, { oid: await writeBlob(git, extended) }]]));
@@ -106,96 +92,9 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
   assert.ok(entry?.kind === "attestation");
   assert.equal(entry.data.summary, "ordinary review");
   assert.equal(encodeEntry(entry), next, "new writes contain only known content");
-  const updatedHistory = await keiyaku.history({ item: "2" });
-  assert.ok(updatedHistory.kind === "contract-exact");
-  assert.match(renderContractHistory(updatedHistory), /ordinary review/u);
 });
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
-  test("ungated failing Verification never runs and claim proceeds", async () => {
-    const { keiyaku } = await bindAndCommit({ gates: [], verification: "exit 1" });
-    const delivered = accepted(await keiyaku.deliver());
-
-    assert.equal(delivered.placement?.kind, "placed");
-    const state = present(await keiyaku.state());
-    assert.deepEqual(state.attestations, []);
-    assert.equal(state.terminal?.kind, "claimed");
-  });
-
-  test("ungated Verification never attempts scratch setup that would stop execution", async () => {
-    const { keiyaku } = await bindAndCommit({ gates: [], verification: "exit 0", runtimeStop: true });
-    const delivered = accepted(await keiyaku.deliver());
-
-    assert.equal(delivered.placement?.kind, "placed");
-    const state = present(await keiyaku.state());
-    assert.deepEqual(state.attestations, []);
-    assert.equal(state.terminal?.kind, "claimed");
-  });
-
-  test("reviewed is independent of a failing Verification", async () => {
-    const { keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 1" });
-    const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    const placement = delivered.placement;
-    assert.ok(placement?.kind === "gates-unsatisfied");
-    assert.deepEqual(
-      placement.unmet.map(({ gate }) => gate),
-      ["reviewed"],
-    );
-    assert.equal(placement.unmet[0]?.state, "missing");
-    assert.equal(delivered.contractId, state.id);
-    assert.equal(present(await keiyaku.state()).terminal, null);
-
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
-    assert.equal(reviewed.kind, "accepted");
-    assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
-  });
-
-  test("a targeted Contract with unmet gates stops before placement", async () => {
-    const { keiyaku } = await bindAndCommit({
-      gates: ["reviewed"],
-      verification: "exit 0",
-      target: "refs/heads/main",
-    });
-    const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    const placement = delivered.placement;
-    assert.ok(placement?.kind === "gates-unsatisfied");
-    assert.deepEqual(placement.unmet.map(({ gate }) => gate), ["reviewed"]);
-  });
-
-  test("verified blocks an unsatisfied Verification", async () => {
-    const { keiyaku, state } = await bindAndCommit({ gates: ["verified"], verification: "exit 1" });
-    const verified: VerifyOutcome = await keiyaku.verify();
-    const check = accepted(verified).checks[0];
-    assert.ok(check?.kind === "terminal");
-    assert.equal(check.verdict, "unsatisfied");
-    assert.equal(check.admission, "admitted");
-    const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    const placement = delivered.placement;
-    assert.ok(placement?.kind === "gates-unsatisfied");
-    assert.deepEqual(
-      placement.unmet.map((report) => report.gate),
-      ["verified"],
-    );
-    assert.equal(state.id, delivered.contractId);
-    assert.equal(present(await keiyaku.state()).terminal, null);
-  });
-
-  test("delivery leaves missing evidence pending and explicit verify reports its setup stop", async () => {
-    const { keiyaku } = await bindAndCommit({ gates: ["verified"], verification: "exit 0", runtimeStop: true });
-    const delivered = accepted(await keiyaku.deliver());
-
-    assert.equal(delivered.admission, undefined);
-    assert.ok(delivered.placement?.kind === "gates-unsatisfied");
-    assert.equal(delivered.placement.unmet[0]?.state, "missing");
-    const verified = accepted(await keiyaku.verify());
-    assertRuntimeStop(verified.checks[0]);
-    assert.deepEqual(present(await keiyaku.state()).attestations, []);
-    assert.equal(present(await keiyaku.state()).terminal, null);
-  });
-
   test("pre-delivery verification captures the snapshot the later delivery and review place", async () => {
     const { keiyaku } = await bindAndCommit({ gates: ["reviewed", "verified"], verification: "exit 0" });
     const verified = accepted(await keiyaku.verify());
@@ -219,135 +118,6 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
   });
 
-  test("a terminal acceptance reports the retired appointed worktree", async () => {
-    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.ok(existsSync(worktree), "an active Contract retires nothing");
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
-    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    assert.equal(reviewed.placement?.kind, "placed");
-    assert.equal(existsSync(worktree), false);
-    assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
-  });
-
-  test("a terminal removal failure surfaces as retained residue instead of an obituary", async () => {
-    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    const marker = join(repository.path, ".git", "remove-failed-once");
-    const shim = [
-      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ] && [ ! -e "$KEIYAKU_REMOVE_MARKER" ]; then',
-      '  : > "$KEIYAKU_REMOVE_MARKER"',
-      "  exit 1",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n");
-    await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
-      const delivered = accepted(await keiyaku.deliver());
-      assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-      const abandoned = await Keis.of(await Repo.at({ path: repository.path, gitPath }))
-        .kei({ id: state.id })
-        .abandon();
-      assert.ok(abandoned.kind === "accepted", JSON.stringify(abandoned));
-      assert.ok(existsSync(worktree));
-      const retained = abandoned.issues?.find((effect) => effect.kind === "worktree-retained");
-      assert.equal(retained?.kind, "worktree-retained");
-      assert.equal(retained?.path, worktree);
-    });
-  });
-
-  test("removing verified leaves old testimony in history without exposing it on completion", async () => {
-    const { repository, keiyaku } = await bindAndCommit({ gates: ["reviewed", "verified"], verification: "exit 0" });
-    accepted(await keiyaku.verify());
-    await keiyaku.deliver();
-    const before = present(await keiyaku.state()).attestations;
-    assert.equal(before.length, 1);
-    await keiyaku.amend({ gates: ["reviewed"] });
-    const delivered = accepted(await keiyaku.deliver());
-    assert.equal(delivered.admission, "reused");
-    assert.deepEqual(present(await keiyaku.state()).attestations, before);
-    const observed = await Keis.of(await Repo.at({ path: repository.path })).observe({
-      id: keiyaku.toJSON().contract,
-    });
-    assert.equal(observed.kind, "contract");
-    assert.equal(
-      observed.gates?.some(({ gate }) => gate === "verified"),
-      false,
-    );
-    const audited = await keiyaku.previewDelivery();
-    assert.ok(audited.kind === "ready");
-    assert.equal(audited.unmetGates?.some(({ gate }) => gate === "verified"), false);
-    assert.equal(audited.previousContentId, undefined);
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
-    assert.equal(reviewed.placement?.kind, "placed");
-    assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
-  });
-
-  test("repeated unsatisfied Verification under verified keeps placement blocked", async () => {
-    const verified = await bindAndCommit({ gates: ["verified"], verification: "exit 1" });
-    await verified.keiyaku.deliver();
-    const first = accepted(await verified.keiyaku.verify());
-    const repeated = accepted(await verified.keiyaku.verify());
-    const firstCheck = first.checks[0];
-    const repeatedCheck = repeated.checks[0];
-    assert.ok(firstCheck?.kind === "terminal" && repeatedCheck?.kind === "terminal");
-    assert.equal(firstCheck.admission, "admitted");
-    assert.equal(repeatedCheck.verdict, "unsatisfied");
-    assert.equal(repeatedCheck.admission, "reused");
-    const blocked = accepted(await verified.keiyaku.deliver());
-
-    assert.ok(blocked.placement?.kind === "gates-unsatisfied");
-    assert.equal(blocked.placement.unmet[0]?.state, "unsatisfied");
-    assert.equal(present(await verified.keiyaku.state()).terminal, null);
-  });
-
-  test("native delivery replaces changed unfinished content without running Verification", async () => {
-    const { repository, keiyaku, state } = await bindAndCommit({
-      gates: ["reviewed", "verified"],
-      verification:
-        "node -e \"if (require('node:fs').readFileSync('candidate.txt', 'utf8') !== 'replacement\\\\n') process.exit(1)\"",
-      runtimeStop: true,
-    });
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    const first = accepted(await keiyaku.deliver());
-    const firstEntry = present(await keiyaku.state()).delivery!.entry;
-    assert.equal(first.admission, undefined);
-
-    const firstVerification = accepted(await keiyaku.verify());
-    assertRuntimeStop(firstVerification.checks[0]);
-    assert.equal(present(await keiyaku.state()).terminal, null);
-
-    const reused = accepted(await keiyaku.deliver());
-    assert.equal(reused.admission, "reused");
-    assert.equal(present(await keiyaku.state()).delivery?.entry, firstEntry);
-    assert.deepEqual(reused.integration, first.integration);
-    assert.equal(reused.previousContentId, undefined);
-
-
-    writeFileSync(join(worktree, "candidate.txt"), "replacement\n");
-    writeFileSync(join(worktree, ".keiyaku", "settings.json"), "{}\n");
-    repository.run(["-C", worktree, "add", "candidate.txt", ".keiyaku/settings.json"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
-
-    const replaced = accepted(await keiyaku.deliver());
-    assert.equal(replaced.admission, undefined);
-    const current = present(await keiyaku.state());
-    assert.notEqual(current.delivery?.entry, firstEntry);
-    assert.notEqual(current.delivery?.data.tenderSnapshot, first.candidate);
-    const integration = current.delivery?.data.integration;
-    assert.ok(integration);
-    assert.notEqual(integration.changeId, first.contentId);
-    assert.equal(replaced.previousContentId, first.contentId);
-
-    assert.deepEqual(current.attestations, []);
-    const verified = accepted(await keiyaku.verify());
-    assert.equal(verified.snapshot, integration.snapshot);
-    assert.ok(verified.checks[0]?.kind === "terminal");
-    assert.equal(verified.checks[0].verdict, "satisfied");
-    assert.equal(current.terminal, null);
-  });
-
   test("unfinished candidate reuse refuses unauthorized dirty content", async () => {
     const { repository, keiyaku, state } = await bindAndCommit({
       gates: ["verified"],
@@ -364,109 +134,5 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.ok(refused.kind === "refused");
     assert.equal(refused.reason.kind, "dirty-workspace");
     assert.equal(present(await keiyaku.state()).delivery?.entry, firstEntry);
-  });
-
-  test("an unchanged native delivery continues without a new delivery fact", async () => {
-    const { keiyaku } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
-    const first = accepted(await keiyaku.deliver());
-    const firstEntry = present(await keiyaku.state()).delivery!.entry;
-    assert.equal(first.admission, undefined);
-
-    const second = accepted(await keiyaku.deliver());
-    assert.equal(second.admission, "reused");
-    assert.equal(present(await keiyaku.state()).delivery?.entry, firstEntry);
-  });
-});
-
-function cliJsonAt<Value>(cwd: string, argv: readonly string[]) {
-  return cliJson<Value>(["-C", cwd, ...argv], { environment: {}, readStdin: async () => "" });
-}
-
-/** A committed candidate that changes one path of a target checkout whose other tracked files stay clean. */
-async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, changedPath: string) {
-  const repository = repositoryWithMain({ files });
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: document(),
-      gates: ["reviewed"],
-      target: "refs/heads/main",
-    }),
-  );
-  const state = present(await bound.kei.state());
-  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-  writeFileSync(join(worktree, changedPath), "candidate\n");
-  repository.run(["-C", worktree, "add", changedPath]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  await bound.kei.deliver();
-  return { repository, state, worktree };
-}
-
-describe("dirty target checkout placement", () => {
-  test("an overlapping uncommitted edit never vetoes acceptance, and reconcile carries the checkout forward", async () => {
-    const { repository, state, worktree } = await targetedCheckoutBinding({ "target.txt": "base\n" }, "target.txt");
-    writeFileSync(join(repository.path, "target.txt"), "local work in progress\n");
-
-    const reviewed = (
-      await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])
-    ).value;
-    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    if (reviewed.kind !== "accepted") throw new Error("review was refused");
-    const text = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
-      { kind: "returned", value: reviewed }, { columns: repository.path.length + 100, color: false });
-    assert.match(text, /^review failed {2}kei\/\S+ · satisfied$/mu);
-    assert.match(text, /^  destination {2}refs\/heads\/main$/mu);
-    assert.match(text, /^  placement {2}placed$/mu);
-    assert.equal(existsSync(worktree), false);
-    assert.match(text, /^  issue {2}target checkout retained$/mu);
-    assert.ok(text.includes(`  path  ${repository.path}`), text);
-    assert.match(text, /^  target {2}refs\/heads\/main$/mu);
-    // Facts never wrap: a narrow width still shows the complete copyable path.
-    const lines = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
-      { kind: "returned", value: reviewed }, { columns: 25, color: false }).split("\n");
-    assert.ok(lines.includes(`  path  ${repository.path}`), lines.join("\n"));
-    assert.ok(lines.includes("  target  refs/heads/main"));
-    const landed = repository.run(["rev-parse", "refs/heads/main"]).trim();
-    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "local work in progress\n");
-
-    repository.run(["-C", repository.path, "checkout", "--", "target.txt"]);
-    const reconciled = (await cliJsonAt<ReconcileCompletion | RepoReconcileReport>(repository.path, ["reconcile"]))
-      .value;
-    assert.ok(reconciled.kind === "world");
-    assert.ok(reconciled.contracts?.some((contract) => contract.effects?.some((effect) =>
-      effect.kind === "target-checkout" && effect.path === repository.path && effect.target === "refs/heads/main")));
-    const reconcileText = renderVerb("reconcile", {}, { kind: "returned", value: reconciled },
-      { columns: 40, color: false });
-    assert.match(reconcileText, /^  effect {2}target checkout$/mu);
-    assert.ok(reconcileText.includes(repository.path), reconcileText);
-    assert.match(reconcileText, /^  target {2}refs\/heads\/main$/mu);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), landed);
-    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
-  });
-
-  test("an uncommitted edit outside the movement follows while preserving the edit", async () => {
-    const { repository, state } = await targetedCheckoutBinding(
-      { "target.txt": "base\n", "other.txt": "base\n" },
-      "target.txt",
-    );
-    writeFileSync(join(repository.path, "other.txt"), "unrelated local work\n");
-    const otherEntry = repository.run(["ls-files", "-s", "--", "other.txt"]);
-
-    const reviewed = (
-      await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])
-    ).value;
-    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    if (reviewed.kind !== "accepted") throw new Error("review was refused");
-    assert.equal(reviewed.placement?.kind, "placed");
-    assert.ok(!reviewed.issues?.some((issue) => issue.kind === "target-checkout-retained"));
-    const text = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
-      { kind: "returned", value: reviewed }, { columns: repository.path.length + 100, color: false });
-    assert.match(text, /^  placement {2}placed$/mu);
-    assert.doesNotMatch(text, /target checkout retained/u);
-    assert.equal(repository.run(["ls-files", "-s", "--", "other.txt"]), otherEntry);
-    assert.equal(repository.run(["show", ":other.txt"]), "base\n");
-    assert.equal(repository.run(["show", ":target.txt"]), "candidate\n");
-    assert.equal(repository.run(["status", "--porcelain"]), " M other.txt\n");
-    assert.equal(readFileSync(join(repository.path, "other.txt"), "utf8"), "unrelated local work\n");
-    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });
 });

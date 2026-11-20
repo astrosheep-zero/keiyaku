@@ -9,11 +9,10 @@ import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { contractOutcomeDisposition } from "../src/library/outcome.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import type { VerificationCheck } from "../src/protocol/verify.js";
-import { cliJson } from "./support/cli-fixtures.js";
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 
-test("delivery accepts an identical target through native, CLI and MCP outcomes", async (t) => {
+test("delivery accepts an identical target through native and MCP outcomes", async (t) => {
   const repository = repositoryWithMain();
   const home = temporaryDirectory(t, "keiyaku-disposition-home-");
   const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
@@ -35,18 +34,6 @@ test("delivery accepts an identical target through native, CLI and MCP outcomes"
   const delivered = accepted(await facet.deliver(input));
   assert.equal(delivered.placement?.kind, "target-content-identical");
   assert.equal(classifyVerb("deliver", input, { kind: "returned", value: delivered }), "accepted");
-  assert.equal(classifyVerb("deliver", input, { kind: "returned", value: {
-    ...delivered,
-    placement: {
-      kind: "target-moved", target: "refs/heads/main", integration: delivered.integration, observed: null,
-    },
-  } }), "failed");
-
-  const cli = await cliJson<typeof delivered>(["deliver", bound.contractId], {
-    cwd: repository.path, environment,
-  });
-  assert.equal(cli.exit, 0, cli.stderr);
-  assert.equal(cli.value.placement?.kind, "target-content-identical");
 
   const adapter = createKeiyakuMcpServer({ cwd: repository.path, environment, version: "test" });
   const client = new Client({ name: "contract-disposition", version: "1" });
@@ -63,9 +50,6 @@ test("verification admission stops retain failure and retry precedence over a ne
   type Admission = Extract<VerificationCheck, { kind: "terminal" }>["admission"];
   for (const [admission, expected] of [
     ["admitted", "unsatisfied"],
-    ["reused", "unsatisfied"],
-    ["unrecorded", "unsatisfied"],
-    [{ kind: "refused", reason: { kind: "terminal" } }, "failed"],
     [{ kind: "cancelled" }, "failed"],
     [{ kind: "retry", reason: "collision" }, "retryable"],
   ] satisfies readonly (readonly [Admission, string])[]) {

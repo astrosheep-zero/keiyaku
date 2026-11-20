@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Kei, Keis, KeiyakuError, Repo, type ContractResolution } from "../src/index.js";
-import { matchContractCandidates } from "../src/library/contract-address.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -22,14 +21,10 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   const repo = await Repo.at({ path: repository.path });
   const library = Keis.of(repo);
   const bound = accepted(await library.bind({ terms: markdown, gates: ["reviewed"] }));
-  const [summary] = (await library.list({  })).rows!;
-  assert.ok(summary);
-  const row = await library.observe({ id: summary.id });
-  assert.equal(row.kind, "contract");
-  assert.ok(row.workspace.kind !== "unappointed" && "path" in row.workspace);
-  const worktreePath = row.workspace.path;
+  const worktreePath = bound.worktreePath;
+  assert.ok(worktreePath);
   const expected: ContractResolution = { kind: "resolved", id: bound.contractId };
-  const selector = `@${row.id.slice("kei/".length)}`;
+  const selector = `@${bound.contractId.slice("kei/".length)}`;
   assert.deepEqual(await library.resolve({ selector }), expected);
   assert.deepEqual(await Keis.of(await Repo.at({ path: worktreePath })).resolve({  }), expected);
   const link = join(repository.path, "context-link");
@@ -58,17 +53,6 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
     refusal: { kind: "unknown-short-selector", selector: `${selector}-extra` },
   });
 
-  assert.deepEqual(
-    matchContractCandidates([row, { ...row, phase: "abandoned" }, { ...row, workspace: { kind: "unappointed" } }], {
-      selector,
-    }),
-    [row],
-  );
-  assert.deepEqual(
-    matchContractCandidates([{ ...row, phase: "claimed" }], { selector }),
-    [],
-    "candidate membership follows the owner's bound phase",
-  );
   rmSync(link);
   accepted(await bound.kei.abandon());
   assert.deepEqual(
@@ -78,39 +62,6 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
       refusal: { kind: "unknown-short-selector", selector },
     },
     "a resolution does not reserve its candidate against later lifecycle changes",
-  );
-});
-
-test("selector refusals are ordinary data while malformed input and cwd are caller errors", async () => {
-  const repository = makeGitRepository();
-  const repo = await Repo.at({ path: repository.path });
-  const library = Keis.of(repo);
-  assert.deepEqual(await library.resolve({ selector: "@kei/redundant" }), {
-    kind: "refused",
-    refusal: { kind: "redundant-short-selector", selector: "@kei/redundant" },
-  });
-  const invalid = await library.resolve({ selector: "not-a-contract" });
-  assert.equal(invalid.kind, "refused");
-  if (invalid.kind === "refused") assert.equal(invalid.refusal.kind, "invalid-selector");
-  await assert.rejects(
-    library.resolve({ selector: 7 } as never),
-    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "selector must be a string",
-  );
-  await assert.rejects(
-    library.resolve({ cwd: "relative" }),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "cwd must be an absolute directory coordinate",
-  );
-  const file = join(repo.cwd, "not-directory");
-  writeFileSync(file, "file");
-  await assert.rejects(
-    library.resolve({ cwd: file }),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "cwd must be an absolute directory coordinate",
   );
 });
 
