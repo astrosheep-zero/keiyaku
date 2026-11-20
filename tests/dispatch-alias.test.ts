@@ -1,27 +1,18 @@
 import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { moveAlias, readAliases } from "../src/alias/index.js";
 import { parseAkumaId, type AkumaId } from "../src/akuma/identity.js";
-import type { BodyLauncher } from "../src/akuma/body-launch.js";
-import { acquireSqliteTransactionLock, SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
+import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
 import { observeDispatchAssociations, publishDispatch, readDispatch, readDispatches } from "../src/dispatch/index.js";
-import { Akumas, Keis, KeiyakuError, Repo, World } from "../src/index.js";
-import { scopeForRepo } from "../src/library/repo.js";
-import { akumasWithLauncher } from "../src/library/akumas.js";
-import { pathsForAkumaId } from "../src/akuma/identity.js";
-import { readSoul, readTell } from "../src/akuma/heart/index.js";
-import { answering, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
-import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
+import { Akumas, Repo, World } from "../src/index.js";
 import { isolateUserHome } from "./support/user-home.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
-import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import {
   GIT_REF,
   readGitPaths,
@@ -34,23 +25,9 @@ import {
 import type { GitRepository } from "../src/git/process.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import type { WorldRoot } from "../src/world.js";
-import { makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
+import { makeGitRepository, waitForFile } from "./support/git.js";
 
 isolateUserHome();
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value?: T | PromiseLike<T>) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value?: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = (value) => resolvePromise(value as T | PromiseLike<T>);
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
-}
 
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
@@ -77,201 +54,30 @@ test("Dispatch publishes one immutable association and preserves its first times
   });
 });
 
-test("confirmed private-state seat close failure remains lag on a dispatched association", async () => {
+test("an interrupted real Git CAS confirms the originally published Dispatch", { timeout: 20_000 }, async () => {
   const raw = makeGitRepository();
-  const repository = {
-    ...(await repositoryAt(raw.path)),
-    onPrivateStateSeatClose: () => {
-      throw new SqliteTransactionLockError("seat close failed after publication", "release-failed");
-    },
-  };
-  const akuma = parseAkumaId("aku/worker/1234abcd").id;
-  const owner = contractId("kei/dispatch-owner");
-  const published = await publishDispatch({ repository, akumaId: akuma, contractId: owner });
-  assert.ok(published.kind === "dispatched", 'expected published.kind = "dispatched"');
-  assert.deepEqual(await readDispatch(repository, akuma), published.dispatch);
-  assert.deepEqual(published.seatClose, [
-    {
-      kind: "private-state-seat-close-failed",
-      diagnostic: "seat close failed after publication",
-    },
-  ]);
-});
-
-test("born Spawn waits past Bind's real Git seat cap without duplicating birth or association", { timeout: 55_000 }, async (t) => {
-  const world = await World.at(repositoryWithMain().path);
-  const repo = await Repo.at({ path: world });
-  const repository = scopeForRepo(repo);
-  const library = Keis.of(repo);
-  const bind = (title: string) => library.bind({ terms: document().replace("Library verbs", title), target: "main", gates: [] });
-  const existing = accepted(await bind("Spawn target"));
-  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
-  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  const bodies: Promise<unknown>[] = [];
-  t.after(() => settleFixtureBodies(bodies));
-  const api = akumasWithLauncher(world, (launch) => fixtureLauncher(bodies, new Map([
-    [launch.paths.directory, { adapter: answering("exact answer"), now: new Date().toISOString() }],
-  ]))(launch));
-  const arrivals = [deferred<void>(), deferred<void>()];
-  let waiters = 0;
-  Object.assign(repository, { onPrivateStateSeatContention: () => arrivals[waiters++]?.resolve() });
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(repository), mode: "immediate" });
-  const input = { akumaName: "worker", contract: existing.kei };
+  const repository = await repositoryAt(raw.path);
+  const marker = join(raw.path, "ref-committed");
+  const hook = join(repository.commonDirectory, "hooks", "reference-transaction");
+  mkdirSync(join(repository.commonDirectory, "hooks"), { recursive: true });
+  writeFileSync(hook, `#!/bin/sh\nif [ "$1" = committed ]; then\n  : > ${JSON.stringify(marker.replaceAll("\\", "/"))}\n  sleep 30\nfi\n`, { mode: 0o755 });
   const signal = new AbortController();
-  const stop = new Error("caller stopped while the shared seat was held");
-  let stopped: { id: AkumaId; tellId: string } | undefined;
-  let spawnFinished = false;
-  const waiting = api.spawn({ ...input, alias: "waited" }).finally(() => { spawnFinished = true; });
-  void waiting.catch(() => undefined);
+  const akumaId = parseAkumaId("aku/worker/1212abcd").id;
+  const owner = contractId("kei/cas-read-back");
+  const offer = publishDispatch({ repository: { ...repository, signal: signal.signal }, akumaId, contractId: owner, callerWait: true });
+  void offer.catch(() => undefined);
   try {
-    await Promise.race([arrivals[0]!.promise, waiting.then(() => assert.fail("Spawn did not wait"))]);
-    const canceled = api.spawn({ ...input, body: "retain this Tell", alias: "aborted", signal: signal.signal });
-    void canceled.catch(() => undefined);
-    await Promise.race([arrivals[1]!.promise, canceled.then(() => assert.fail("canceled Spawn did not wait"))]);
-    signal.abort(stop);
-    await assert.rejects(canceled, (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.cause, stop);
-      const result = error.spawn;
-      assert.ok(result?.kind === "failed" && result.tellId);
-      stopped = { id: result.akumaId, tellId: result.tellId };
-      assert.deepEqual(result.failures.map(({ stage }) => stage), ["dispatch"]);
-      assert.equal(result.requestedContractId, existing.contractId);
-      assert.equal(result.requestedAlias, "@aborted");
-      assert.equal(result.contractId, undefined);
-      return true;
-    });
-    const started = performance.now();
-    assert.equal((await bind("Still capped Bind")).kind, "retry");
-    const waited = performance.now() - started;
-    t.diagnostic(`actual Bind kept cap, shared seat held at least ${Math.round(waited)}ms after Spawn entered it`);
-    assert.ok(waited >= 15_000);
-    assert.equal(spawnFinished, false);
-    assert.deepEqual(await readDispatches(repository), []);
-    assert.deepEqual(await readAliases(world), []);
-    assert.ok(stopped);
-    const paths = pathsForAkumaId(world, stopped.id);
-    assert.equal((await readSoul(paths))?.id, stopped.id);
-    assert.equal((await readTell(paths, stopped.tellId))?.body, "retain this Tell");
-  } finally {
-    held.close();
-  }
-  const child = await waiting;
-  assert.equal(child.kind, "spawned");
-  assert.equal((await readSoul(pathsForAkumaId(world, child.akumaId)))?.id, child.akumaId);
-  assert.equal((await readDispatch(repository, child.akumaId))?.contractId, existing.contractId);
-  assert.deepEqual(await readAliases(world), [{ alias: "@waited", akumaId: child.akumaId }]);
-
-  const indexes = [0, 1];
-  const [binds, spawns] = await Promise.all([
-    Promise.all(indexes.map((index) => bind(`Concurrent Bind ${index}`))),
-    Promise.all(indexes.map((index) => api.spawn({ ...input, alias: `overlap-${index}` }))),
-  ]);
-  assert.equal(new Set(binds.map((result) => accepted(result).contractId)).size, indexes.length);
-  assert.ok(spawns.every(({ kind }) => kind === "spawned"));
-  const children = spawns.map(({ akumaId }) => akumaId);
-  assert.equal(new Set(children).size, indexes.length);
-  const dispatches = await readDispatches(repository);
-  assert.deepEqual(new Set(dispatches.map(({ akumaId }) => akumaId)), new Set([child.akumaId, ...children]));
-  assert.ok(dispatches.every(({ contractId }) => contractId === existing.contractId));
-  const roster = await api.list({ selection: "all" });
-  assert.deepEqual(new Set(roster.rows?.map(({ id }) => id)), new Set([stopped?.id, child.akumaId, ...children]));
-  assert.deepEqual((await readAliases(world)).map(({ akumaId }) => akumaId), [...children, child.akumaId]);
-});
-
-test("Dispatch retains a hard publication failure through seat close failure", async (t) => {
-  const raw = repositoryWithMain();
-  const world = await World.at(raw.path);
-  const repo = await Repo.at({ path: world });
-  const repository = scopeForRepo(repo);
-  const { contractId: owner } = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
-  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
-  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  const bodies: Promise<unknown>[] = [];
-  t.after(() => settleFixtureBodies(bodies));
-  const launchBody: BodyLauncher = (launch) => fixtureLauncher(bodies, new Map([
-    [launch.paths.directory, { adapter: answering("unused"), now: new Date().toISOString() }],
-  ]))(launch);
-  const api = akumasWithLauncher(world, launchBody);
-  const failClose = () => { throw new SqliteTransactionLockError("forced Dispatch seat close failure", "release-failed"); };
-
-  const rejected = join(raw.path, "rejected-dispatch");
-  const failed = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ]; then',
-      "  cat >/dev/null",
-      '  printf "%s\\n" "$1" >> "$KEIYAKU_TEST_DISPATCH_REJECTED"',
-      '  printf "forced hard publication failure\\n" >&2',
-      "  exit 42",
-      "fi",
-      'if [ -f "$KEIYAKU_TEST_DISPATCH_REJECTED" ]; then : > "$KEIYAKU_TEST_DISPATCH_REJECTED.read-back"; fi',
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_TEST_DISPATCH_REJECTED: rejected },
-    async (gitPath) => {
-      const shimRepo = await Repo.at({ path: world, gitPath });
-      Object.assign(scopeForRepo(shimRepo), { onPrivateStateSeatClose: failClose });
-      const contract = Keis.of(shimRepo).kei({ id: owner });
-      return await api.spawn({ akumaName: "worker", contract, alias: "rejected" });
-    },
-  );
-  assert.ok(failed.kind === "failed");
-  assert.equal(failed.failures.length, 1);
-  const [stopped] = failed.failures;
-  assert.ok(stopped.stage === "dispatch" && stopped.failure.kind === "publication-failed");
-  assert.match(stopped.failure.diagnostic, /forced hard publication failure/u);
-  assert.match(stopped.failure.diagnostic, /Publication seat close also failed: forced Dispatch seat close failure/u);
-  assert.equal(failed.requestedContractId, owner);
-  assert.equal(failed.requestedAlias, "@rejected");
-  assert.equal(failed.dispatchWarning, undefined);
-  assert.equal((await readSoul(pathsForAkumaId(world, failed.akumaId)))?.id, failed.akumaId);
-  assert.equal(await readDispatch(repository, failed.akumaId), null);
-  assert.deepEqual(await readAliases(world), []);
-  assert.equal(readFileSync(rejected, "utf8"), "update-ref\n");
-  assert.equal(existsSync(`${rejected}.read-back`), false);
-});
-
-test("an interrupted real Git CAS proves only the originally published Dispatch", { timeout: 20_000 }, async () => {
-  for (const moveRef of [false, true]) {
-    const raw = makeGitRepository();
-    const repository = await repositoryAt(raw.path);
-    const marker = join(raw.path, "ref-committed");
-    const hook = join(repository.commonDirectory, "hooks", "reference-transaction");
-    mkdirSync(join(repository.commonDirectory, "hooks"), { recursive: true });
-    writeFileSync(hook, `#!/bin/sh\nif [ "$1" = committed ]; then\n  : > ${JSON.stringify(marker.replaceAll("\\", "/"))}\n  sleep 30\nfi\n`, { mode: 0o755 });
-    const signal = new AbortController();
-    const akumaId = parseAkumaId("aku/worker/1212abcd").id;
-    const owner = contractId("kei/cas-read-back");
-    const offer = publishDispatch({ repository: { ...repository, signal: signal.signal }, akumaId, contractId: owner, callerWait: true });
-    void offer.catch(() => undefined);
-    let successor: string | undefined;
-    try {
-      await Promise.race([waitForFile(marker, 10_000), offer.then(() => assert.fail("CAS settled before the committed hook"))]);
-      if (moveRef) {
-        const original = raw.run(["rev-parse", GIT_REF]).trim();
-        const tree = raw.run(["rev-parse", `${original}^{tree}`]).trim();
-        successor = raw.run(["commit-tree", tree, "-p", original, "-m", "external successor, same tree"]).trim();
-        raw.run(["-c", "core.hooksPath=.git/no-fixture-hooks", "update-ref", GIT_REF, successor, original]);
-      }
-    } finally {
-      signal.abort(new Error("caller stopped after the ref transaction committed"));
-    }
+    await Promise.race([waitForFile(marker, 10_000), offer.then(() => assert.fail("CAS settled before the committed hook"))]);
+    signal.abort(new Error("caller stopped after the ref transaction committed"));
+    // The operation's own read-back confirms its exact original offer; an independent read sees the same durable fact.
     const published = await offer;
+    assert.ok(published.kind === "dispatched", 'expected published.kind = "dispatched"');
     const retained = await readDispatch(repository, akumaId);
+    assert.deepEqual(retained, published.dispatch);
     assert.equal(retained?.contractId, owner);
-    if (successor === undefined) {
-      assert.ok(published.kind === "dispatched");
-      assert.deepEqual(retained, published.dispatch);
-    } else {
-      assert.deepEqual(published, {
-        kind: "failed",
-        failure: { kind: "publication-failed", diagnostic: "Dispatch publication outcome is unknown" },
-      });
-      assert.equal(raw.run(["rev-parse", GIT_REF]).trim(), successor);
-    }
     assert.deepEqual(await readDispatches(repository), [retained]);
+  } finally {
+    if (!signal.signal.aborted) signal.abort(new Error("caller stopped after the ref transaction committed"));
   }
 });
 

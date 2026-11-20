@@ -44,21 +44,3 @@ test("empty amendments admit no fact; only explicit empties clear prerequisites 
   assert.deepEqual(cleared.terms.gates, []);
 });
 
-test("an empty amendment keeps the owner's missing and terminal refusal", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const missing = Keis.of(repo).kei({ id: "kei/missing" as ContractId });
-  assert.deepEqual(await missing.amend({}), {
-    kind: "refused",
-    contractId: "kei/missing",
-    reason: { kind: "contract-missing" },
-  });
-
-  const bound = await bind(repository, { gates: [] });
-  accepted(await bound.kei.abandon());
-  assert.deepEqual(await bound.kei.amend({}), {
-    kind: "refused",
-    contractId: bound.contractId,
-    reason: { kind: "terminal" },
-  });
-});

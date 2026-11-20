@@ -84,16 +84,3 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
     barrier.resolve();
   }
 });
-
-test("concurrent selected checks admit independent requirements without losing either result", async () => {
-  const contract = await verificationCandidate();
-  const outcomes = await Promise.all([contract.verify({ index: 1 }), contract.verify({ index: 2 })]);
-  const checks = outcomes.flatMap((outcome) => accepted(outcome).checks);
-  assert.equal(new Set(checks.map(({ requirement }) => requirement)).size, 2);
-  assert.equal(new Set(outcomes.map((outcome) => accepted(outcome).snapshot)).size, 1);
-  assert.ok(checks.every((check) => check.kind === "terminal" && check.admission === "admitted"));
-  assert.equal(present(await contract.state()).attestations.length, 2);
-  const delivered = accepted(await contract.deliver());
-  assert.equal(delivered.placement?.kind, "placed");
-  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
-});

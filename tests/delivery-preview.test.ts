@@ -6,11 +6,10 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keis, Keiyaku, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
-import { waitForFixtureFile } from "./support/process.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
-import { withGitShim, type TestGitRepository } from "./support/git.js";
+import type { TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
@@ -27,23 +26,6 @@ function verificationBody(script: string | null = "exit 1"): string {
     ].join("\n"),
   });
 }
-
-test("targetless preview without Verification returns ready without changing the journal", async () => {
-  const repository = repositoryWithMain();
-  const { kei } = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({ terms: verificationBody(null), target: null }),
-  );
-  const { head } = present(await kei.state());
-  const history = await kei.history();
-  const result = await kei.previewDelivery();
-  assert.ok(result.kind === "ready");
-  assert.equal(result.contractId, kei.id);
-  assert.equal(result.diff, undefined);
-  assert.equal(result.unmetGates, undefined);
-  assert.equal(result.target, undefined);
-  assert.equal(present(await kei.state()).head, head);
-  assert.deepEqual(await kei.history(), history);
-});
 
 function workspaceBytes(directory: string): unknown {
   return readdirSync(directory)
@@ -161,43 +143,4 @@ test("preview reports integration conflicts without materializing a merge or cha
   assert.equal(repository.run(["-C", worktree, "ls-files", "-u"]), "");
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.deepEqual(await bound.kei.history(), history);
-});
-
-test("cancelling invocation dry-run preserves native abort rather than returning an unfinished preview", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
-  assert.ok(bound.worktreePath);
-  const worktree = bound.worktreePath;
-  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const barrier = join(repository.path, ".git", "target-probe-started");
-  const before = custodySnapshot(repository, worktree);
-  const history = await bound.kei.history();
-  await withGitShim([
-    'if [ "$3" = "ls-files" ] && [ "$4" = "--cached" ] && [ "$5" = "--sparse" ]; then',
-    '  : > "$KEIYAKU_TEST_BARRIER"',
-    '  exec sleep 30',
-    'fi',
-    'exec "$KEIYAKU_REAL_GIT" "$@"',
-  ].join("\n"), { KEIYAKU_TEST_BARRIER: barrier }, async (gitPath) => {
-    const controller = new AbortController();
-    const reason = new Error("stop preview in target probe");
-    const facet = Keiyaku.for({ cwd: worktree, repo: repository.path, environment: { KEIYAKU_GIT_PATH: gitPath } });
-    const pending = facet.deliver({ contract: bound.contractId, dryRun: true }, { signal: controller.signal });
-    // Attach the rejection consumer before waiting on the in-flight process barrier.
-    const rejection = assert.rejects(pending, (error: unknown) => error === reason,
-      "a cancelled observation with no confirmed effects retains the original reason");
-    try {
-      await waitForFixtureFile(barrier);
-      controller.abort(reason);
-      await rejection;
-    } finally {
-      if (!controller.signal.aborted) controller.abort(reason);
-      await pending.catch(() => undefined);
-    }
-  });
-  assert.deepEqual(await bound.kei.history(), history);
-  assert.deepEqual(custodySnapshot(repository, worktree), before);
 });

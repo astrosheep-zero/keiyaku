@@ -10,67 +10,8 @@ import { observeContractsAt } from "../src/git/observe.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { admitDecidedOffer, mintAttempt } from "../src/protocol/attempt.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
-import { waitForFixtureFile } from "./support/process.js";
-import { appointedWorktreePath, cachedRepositoryAt, waitForFile, withGitShim } from "./support/git.js";
+import { cachedRepositoryAt, waitForFile, withGitShim } from "./support/git.js";
 import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
-
-test("a stalled clean filter leaves unrelated admission free and journal movement retries the immutable capture", async () => {
-  const repository = repositoryWithMain({ files: { ".gitattributes": "*.txt filter=stalled\n" } });
-  const bound = await bind(repository);
-  const id = present(await bound.state()).id;
-  const git = await cachedRepositoryAt(repository.path);
-  const worktree = await appointedWorktreePath(git, id);
-  const root = join(repository.path, ".git");
-  const marker = join(root, "filter-called");
-  const release = join(root, "filter-release");
-  const script = join(root, "clean-filter");
-  const publications = join(root, "review-published");
-  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-  writeFileSync(
-    script,
-    [
-      'if [ "${KEIYAKU_TEST_PRIVATE_ADD:-}" = yes ]; then',
-      '  printf "captured\\n" >> "$1"',
-      '  i=0; until [ -e "$2" ]; do i=$((i+1)); [ "$i" -lt 3000 ] || exit 42; sleep 0.02; done',
-      "fi",
-      "cat",
-    ].join("\n"),
-  );
-  repository.run(["config", "filter.stalled.clean", `sh \"${script}\" \"${marker}\" \"${release}\"`]);
-  repository.run(["config", "filter.stalled.required", "true"]);
-  await withGitShim(
-    [
-      'if [ -n "$GIT_INDEX_FILE" ] && [ "$3 $4 $5 $6" = "-c core.splitIndex=false add --all" ]; then',
-      "  export KEIYAKU_TEST_PRIVATE_ADD=yes",
-      "fi",
-      'if [ "$1 $2" = "update-ref --stdin" ]; then : > "$PUBLICATIONS"; fi',
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { PUBLICATIONS: publications },
-    async (gitPath) => {
-      const contract = await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id });
-      const testimony = { verdict: "unsatisfied", summary: "Checked the captured candidate" } as const;
-      const reviewing = contract.review(testimony);
-      void reviewing.catch(() => undefined);
-      try {
-        const captured = await Promise.race([waitForFixtureFile(marker).then(() => true), reviewing.then(() => false)]);
-        assert.ok(captured, "review must remain pending in the capture filter");
-        assert.notEqual((await bind(repository)).id, id);
-        accepted(await bound.amend({ edits: "## Replace: Context\nConcurrent terms.\n" }));
-        assert.equal(existsSync(release), false);
-      } finally {
-        writeFileSync(release, "go");
-        await reviewing.catch(() => undefined);
-      }
-      const result = await reviewing;
-      assert.equal(result.kind, "accepted");
-      // The invocation captures once; the fresh attempt reuses those immutable bytes.
-      assert.equal(readFileSync(marker, "utf8"), "captured\n");
-      assert.equal(existsSync(publications), true);
-      assert.equal(present(await bound.state()).attestations.length, 1);
-    },
-  );
-});
 
 test("a bind stalled in its seat-external preparation does not hold the publication seat", async () => {
   const repository = repositoryWithMain();

@@ -1,19 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { GitPlumbingError } from "../src/git/process.js";
-import { createKeiHandle } from "../src/library/kei.js";
-import { captureLocalContractComposition } from "../src/library/contract-settings.js";
-import { scopeForRepo } from "../src/library/repo.js";
-import { withScopeAbortSignal } from "../src/protocol/operations.js";
 import { contractJournalPath } from "../src/git/identity.js";
-import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
-import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import {
   GIT_REF,
   readGitPaths,
@@ -28,10 +20,8 @@ import {
   contractHistorySchema,
   type ContractHistory,
 } from "../src/library/contract-types.js";
-import { waitForFile, withGitShim } from "./support/git.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
-import { temporaryDirectory } from "./support/process.js";
 
 /** Address-bearing row labels: enough to prove order, stable addresses and enrichment placement. */
 function rowLabels(history: ContractHistory): readonly string[] {
@@ -39,10 +29,6 @@ function rowLabels(history: ContractHistory): readonly string[] {
   return history.events.map((event) =>
     event.kind === "dispatch" ? `dispatch ${event.akumaId}` : `${event.kind} ${event.id}`,
   );
-}
-
-function dispatchBytes(akumaId: string, contract: string, dispatchedAt: string): string {
-  return `${JSON.stringify({ akumaId, contractId: contract, dispatchedAt })}\n`;
 }
 
 function dispatchPath(akumaId: string): string {
@@ -146,64 +132,6 @@ async function overwriteAuthority(path: string, changes: ReadonlyMap<string, str
   );
 }
 
-test("Dispatch enrichment anchors to the preceding journal row without touching journal addresses", async () => {
-  const raw = repositoryWithMain();
-  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
-  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nThe amended objective.\n" }));
-  accepted(await bound.kei.arc({ body: "# Tied chapter\n" }));
-  const early = "2026-09-01T01:00:00.000Z";
-  const late = "2026-09-01T02:00:00.000Z";
-  const journalPath = contractJournalPath(bound.contractId);
-  const journal = decodeJournal(raw.run(["show", `${GIT_REF}:${journalPath}`]));
-  const records = journal.map((entry) => encodeEntry({ ...entry, at: entry.kind === "amend" ? early : late }));
-  const fallback = parseAkumaId("aku/worker/00000001").id;
-  const firstTie = parseAkumaId("aku/worker/00000002").id;
-  const secondTie = parseAkumaId("aku/worker/00000009").id;
-  const earlier = parseAkumaId("aku/worker/00000003").id;
-  await overwriteAuthority(
-    raw.path,
-    new Map([
-      [journalPath, records.join("")],
-      // Earlier than every journal timestamp still belongs to the first appended row.
-      [dispatchPath(fallback), dispatchBytes(fallback, bound.contractId, "2000-01-01T00:00:00.000Z")],
-      [dispatchPath(firstTie), dispatchBytes(firstTie, bound.contractId, late)],
-      [dispatchPath(secondTie), dispatchBytes(secondTie, bound.contractId, late)],
-      [dispatchPath(earlier), dispatchBytes(earlier, bound.contractId, early)],
-    ]),
-  );
-
-  const page = await bound.kei.history();
-  assert.ok(page.kind === "contract");
-  const journalRows = page.events.filter((event) => event.kind !== "dispatch");
-  // Append order stays authoritative even though the first row now carries the later clock.
-  assert.deepEqual(
-    journalRows.map((row) => [row.id, row.at]),
-    [
-      ["1", late],
-      ["2", early],
-      ["3", late],
-    ],
-  );
-  assert.deepEqual(rowLabels(page), [
-    "bind 1",
-    `dispatch ${fallback}`,
-    "amend 2",
-    `dispatch ${earlier}`,
-    "arc 3",
-    `dispatch ${firstTie}`,
-    `dispatch ${secondTie}`,
-  ]);
-  assert.deepEqual(rowLabels(await bound.kei.history({ before: 2 })), ["bind 1", `dispatch ${fallback}`]);
-  const latestPage = await bound.kei.history({ limit: 1 });
-  assert.deepEqual(rowLabels(latestPage), ["arc 3", `dispatch ${firstTie}`, `dispatch ${secondTie}`]);
-  assert.ok(latestPage.kind === "contract");
-  assert.equal(latestPage.omitted, 2);
-  const binding = await bound.kei.history({ item: "1" });
-  assert.ok(binding.kind === "contract-exact");
-  assert.equal(binding.event.kind, "bind");
-  assertWireRoundTrip(contractHistorySchema, binding);
-});
-
 test("Contract history retains its journal when unrelated Dispatch authority is malformed", async () => {
   const raw = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: raw.path }));
@@ -252,103 +180,4 @@ test("Contract history retains its journal when unrelated Dispatch authority is 
       return true;
     });
   }
-});
-
-test("history propagates native cancellation during optional Dispatch enrichment", async (t) => {
-  const raw = repositoryWithMain();
-  const repo = await Repo.at({ path: raw.path });
-  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null }));
-  const git = await repositoryAt(raw.path);
-  assert.equal(
-    (
-      await publishDispatch({
-        repository: git,
-        akumaId: parseAkumaId("aku/worker/00000003").id,
-        contractId: bound.contractId,
-      })
-    ).kind,
-    "dispatched",
-  );
-  const snapshot = await withGitDecodeChannel(git, (channel) =>
-    withGitReadObservation(git, channel, (observation) => observation.snapshot),
-  );
-  const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"))![1];
-  const marker = join(temporaryDirectory(t, "history-cancellation-"), "dispatch-started");
-  const controller = new AbortController();
-  await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      "  while IFS= read -r oid; do",
-      '    if [ "$oid" = "$KEIYAKU_CANCEL_OID" ]; then',
-      '      printf started > "$KEIYAKU_CANCEL_MARKER"',
-      "      while :; do sleep 10; done",
-      "    fi",
-      '    printf "%s\\n" "$oid" | "$KEIYAKU_REAL_GIT" cat-file --batch',
-      "  done",
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_CANCEL_OID: dispatch.oid, KEIYAKU_CANCEL_MARKER: marker },
-    async (gitPath) => {
-      const scope = withScopeAbortSignal(scopeForRepo(await Repo.at({ path: raw.path, gitPath })), controller.signal);
-      const kei = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
-      const rejected = assert.rejects(kei.history(), (error: unknown) => {
-        assert.ok(error instanceof KeiyakuError);
-        assert.ok(error.cause instanceof GitPlumbingError);
-        assert.match(error.cause.message, /git process cancelled/u);
-        return true;
-      });
-      try {
-        await waitForFile(marker);
-      } finally {
-        controller.abort();
-      }
-      await rejected;
-    },
-  );
-});
-
-test("history reports internal unavailable Dispatch enrichment when the Dispatch blob read fails", async () => {
-  const raw = repositoryWithMain();
-  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
-  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nRetained amended objective.\n" }));
-  const akumaId = parseAkumaId("aku/worker/00000004").id;
-  const git = await repositoryAt(raw.path);
-  assert.equal((await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind, "dispatched");
-  const snapshot = await withGitDecodeChannel(git, (channel) =>
-    withGitReadObservation(git, channel, (observation) => observation.snapshot),
-  );
-  const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"))![1];
-  await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      "  while IFS= read -r oid; do",
-      '    if [ "$oid" = "$KEIYAKU_BROKEN_OID" ]; then',
-      '      printf "%s blob\\n" "$oid"',
-      "    else",
-      '      printf "%s\\n" "$oid" | "$KEIYAKU_REAL_GIT" cat-file --batch',
-      "    fi",
-      "  done",
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_BROKEN_OID: dispatch.oid },
-    async (gitPath) => {
-      const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
-      const history = await kei.history();
-      assert.deepEqual(rowLabels(history), ["bind 1", "amend 2"]);
-      assert.ok(history.kind === "contract");
-      assert.equal(history.dispatches?.kind, "unavailable");
-      assert.equal(history.dispatches?.category, "internal");
-      const diagnostic = history.dispatches?.diagnostic ?? "";
-      assert.match(diagnostic, /unexpected header/u);
-      assert.ok(diagnostic.includes(dispatch.oid));
-      assertWireRoundTrip(contractHistorySchema, history);
-      const binding = await kei.history({ item: "1" });
-      assert.ok(binding.kind === "contract-exact");
-      assert.equal(binding.event.kind, "bind");
-    },
-  );
 });

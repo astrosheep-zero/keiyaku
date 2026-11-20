@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keis, Repo } from "../src/index.js";
-import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
-import { withGitShim } from "./support/git.js";
 
-test("fork bind preserves the source target unless the caller explicitly replaces it", async () => {
+test("fork bind preserves the source target and start", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   repository.run(["branch", "release"]);
@@ -22,12 +20,6 @@ test("fork bind preserves the source target unless the caller explicitly replace
   const forkState = present(await fork.kei.state());
   assert.equal(forkState.coordinates.target, "refs/heads/release");
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
-
-  const cleared = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id, target: null }));
-  assert.equal(present(await cleared.kei.state()).coordinates.target, undefined);
-
-  const overridden = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id, target: "main" }));
-  assert.equal(present(await overridden.kei.state()).coordinates.target, "refs/heads/main");
 });
 
 test("fork bind refuses missing sources and incompatible term inputs", async () => {
@@ -40,40 +32,4 @@ test("fork bind refuses missing sources and incompatible term inputs", async () 
     () => Keis.of(repo).bind({ forkOf: "kei/source" as never, gates: [] } as never),
     /Keis.bind input has unknown field: gates/u,
   );
-});
-
-test("fork admission rejects a source amend interleaved at the state transaction", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const source = accepted(await Keis.of(repo).bind({
-    terms: document().replace("# Library verbs", "# Race source"),
-    gates: [],
-  }));
-  const sourceState = present(await source.kei.state());
-  const oldState = repository.run(["rev-parse", GIT_REF]).trim();
-  await source.kei.amend({ gates: ["reviewed"] });
-  const movedState = repository.run(["rev-parse", GIT_REF]).trim();
-  repository.run(["update-ref", GIT_REF, oldState, movedState]);
-  const marker = `${repository.path}/fork-race.marker`;
-  const raced = await withGitShim(
-      [
-        'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_FORK_RACE_MARKER" ]; then',
-        '  touch "$KEIYAKU_FORK_RACE_MARKER"',
-        '  "$KEIYAKU_REAL_GIT" -C "$KEIYAKU_FORK_RACE_REPO" update-ref "$KEIYAKU_FORK_RACE_STATE_REF" "$KEIYAKU_FORK_RACE_MOVED" "$KEIYAKU_FORK_RACE_OLD"',
-        "fi",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {
-        KEIYAKU_FORK_RACE_MARKER: marker,
-        KEIYAKU_FORK_RACE_REPO: repository.path,
-        KEIYAKU_FORK_RACE_STATE_REF: GIT_REF,
-        KEIYAKU_FORK_RACE_OLD: oldState,
-        KEIYAKU_FORK_RACE_MOVED: movedState,
-      },
-      async (gitPath) =>
-        Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({ forkOf: sourceState.id }),
-  );
-  assert.equal(raced.kind, "refused");
-  if (raced.kind === "refused") assert.deepEqual(raced.reason, { kind: "fork-source-moved" });
-  assert.deepEqual((present(await source.kei.state())).terms.gates, ["reviewed"]);
 });

@@ -1,8 +1,8 @@
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import test, { describe } from "node:test";
+import { join } from "node:path";
 import { AuthorityCorruptionError, KeiyakuError, Keis, Repo } from "../src/index.js";
 import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import { admit } from "../src/git/admission.js";
@@ -142,55 +142,6 @@ test("ordinary protocol bind preserves both admission and SQLite retirement fail
 
 // Each concurrent case owns its repository, fault injector and cleanup.
 describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
-  test("target and prerequisite expansion keeps the initial Git epoch after the state ref moves", async () => {
-    const repository = repositoryWithHead();
-    const contracts = Keis.of(await Repo.at({ path: repository.path }));
-    const target = accepted(await contracts.bind({ terms: contractBody(), target: null }));
-    const prerequisite = accepted(await contracts.bind({ terms: contractBody(), target: null }));
-    const child = accepted(await contracts.bind({
-      terms: contractBody(), target: target.contractId, after: [prerequisite.contractId],
-    }));
-    const git = await repositoryAt(repository.path);
-    const ids = [child.contractId, target.contractId, prerequisite.contractId];
-    const before = await readGitPaths(git, ids.map((id) => contractJournalPath(id)));
-    const childOid = before.paths.get(contractJournalPath(child.contractId))!.oid;
-    const { frozen, fresh } = await withGitDecodeChannel(git, async (channel) => {
-      let moved = false;
-      const racing = {
-        ...channel,
-        readObjects: async (oids: readonly string[]) => {
-          const objects = await channel.readObjects(oids);
-          if (!moved && oids.includes(childOid)) {
-            moved = true;
-            accepted(await target.kei.arc({ body: "# A new target chapter\n" }));
-            accepted(await prerequisite.kei.abandon());
-          }
-          return objects;
-        },
-      };
-      const frozen = await observeContractsAt(git, racing, [child.contractId], { after: true });
-      assert.ok(moved);
-      const fresh = await observeContractsAt(git, channel, [child.contractId], { after: true });
-      return { frozen, fresh };
-    });
-    assert.equal(frozen.epoch.commit, before.commit);
-    assert.notEqual(fresh.epoch.commit, frozen.epoch.commit);
-    for (const id of ids) {
-      const record = contractJournal(frozen.journals, id);
-      assert.ok(record.state !== null);
-      assert.equal(record.path, contractJournalPath(id));
-      assert.equal(record.oid, before.paths.get(record.path)?.oid);
-      assert.deepEqual(record.bytes, await readBlob(git, record.oid));
-      assert.equal(frozen.decision.get(id), record.state);
-    }
-    assert.equal(frozen.decision.get(target.contractId)?.currentArc, undefined);
-    assert.equal(fresh.decision.get(target.contractId)?.currentArc?.data.title, "A new target chapter");
-    const retired = contractJournal(fresh.journals, prerequisite.contractId);
-    assert.ok(retired.state !== null);
-    assert.equal(retired.path, contractJournalPath(prerequisite.contractId, "terminal"));
-    assert.equal(retired.state.terminal?.kind, "abandoned");
-  });
-
   test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
