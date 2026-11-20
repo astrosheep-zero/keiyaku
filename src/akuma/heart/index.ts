@@ -395,11 +395,11 @@ function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTel
   return recordPendingTell(heart, tell);
 }
 
-function birthMatches(heart: DatabaseSync, id: Soul["id"]): boolean {
+function soulAt(heart: DatabaseSync, id: Soul["id"]): Soul | null {
   const soul = soulFact(heart);
   if (soul !== null && soul.id !== id)
     throw new HeartAuthorityCorruptionError("Akuma soul does not match its coordinate");
-  return soul !== null;
+  return soul;
 }
 
 export function recordTell(
@@ -421,7 +421,7 @@ export async function recordTell(
   return await withHeartTransaction(
     paths,
     (heart) => {
-      if (!birthMatches(heart, akumaIdFromDirectoryName(basename(paths.directory)).id)) return { kind: "not-born" };
+      if (soulAt(heart, akumaIdFromDirectoryName(basename(paths.directory)).id) === null) return { kind: "not-born" };
       const existing = tellFact(heart, tell.id);
       const body = latestBodyFact(heart);
       const pause = interrupt ? pauseFact(heart) : null;
@@ -561,7 +561,7 @@ export async function requestStop(
     paths,
     (heart) => {
       const id = akumaIdFromDirectoryName(basename(paths.directory)).id;
-      if (!birthMatches(heart, id)) throw new HeartUnbornError(id);
+      if (soulAt(heart, id) === null) throw new HeartUnbornError(id);
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
       if (body.hung !== undefined) return { kind: "hung", body };
@@ -761,30 +761,18 @@ export async function readHeart(paths: AkumaPaths, signal?: AbortSignal): Promis
   }
 }
 
-/**
- * The actor's identity and current open Turn from one strict, read-only Heart
- * transaction. The ordinary Heart read never authorizes supported conversion,
- * so a Heart this build cannot decode stays an observation failure rather than
- * being upgraded behind the caller's back. Only an open, non-hung latest Body
- * supplies a current Turn; an ended or hung Body contributes none.
- */
-export type ActorObservation = Readonly<{ soul: Soul | null; turn: TurnFact | null }>;
-
-export async function readActorObservation(paths: AkumaPaths, signal?: AbortSignal): Promise<ActorObservation> {
+/** Read the addressed actor's Soul and open Turn initiator in one strict observation. */
+export async function readActorObservation(paths: AkumaPaths, id: Soul["id"]) {
   try {
-    return await withReadOnlyHeart(
-      paths,
-      (heart) => {
-        const soul = soulFact(heart);
-        const body = latestBodyFact(heart);
-        const open = body === null || body.end !== undefined || body.hung !== undefined ? null : body;
-        const turn = open === null ? null : latestTurnFactForBody(heart, open.sequence);
-        return { soul, turn: turn !== null && turn.end === undefined ? turn : null };
-      },
-      signal,
-    );
+    return await withReadOnlyHeart(paths, (heart) => {
+      const soul = soulAt(heart, id);
+      if (soul === null) return null;
+      const body = latestBodyFact(heart);
+      const turn = body && !body.end && !body.hung ? latestTurnFactForBody(heart, body.sequence) : null;
+      return { soul, initiator: turn?.end === undefined ? turn?.initiator : undefined };
+    });
   } catch (error) {
-    if (isHeartAbsent(error)) return { soul: null, turn: null };
+    if (isHeartAbsent(error)) return null;
     throw error;
   }
 }

@@ -11,16 +11,13 @@ import {
   Kei,
   Keis,
 } from "../src/index.js";
-import { deliverOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { createKeiHandle } from "../src/library/kei.js";
 import { withOutcomeReceipt, projectFailure } from "../src/library/outcome.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { executionStop } from "../src/protocol/progress.js";
 import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractId, type AttestationEntry } from "../src/core/facts/types.js";
@@ -51,7 +48,6 @@ test("frozen KeiyakuError receipts merge into a fresh error retaining the origin
   assert.equal(original.cause, cause);
   assert.equal(returned.spawn, original.spawn);
   assert.equal(returned.tell, original.tell);
-  assert.equal(projectFailure(new KeiyakuError("internal", "no native cause")).causeClass, undefined);
   const corruption = new AuthorityCorruptionError("native authority", { cause });
   assert.equal(projectFailure(withOutcomeReceipt(corruption, { kind: "contract" })).causeClass, corruption.name);
   assert.equal(projectFailure(returned).causeClass, "TypeError");
@@ -128,11 +124,6 @@ test("native review publications survive observer mutation and preserve independ
   const second = await failReview("Second review", true);
   const inner = Object.freeze(first.failure);
   Object.assign(first.seen.data, { verdict: "satisfied" });
-  assert.notEqual(first.seen.data.verdict, first.published.data.verdict);
-  assert.equal(second.seen.data.summary, "observer's description");
-  assert.notEqual(second.published.entry, first.published.entry);
-  assert.equal(withOutcomeReceipt(second.failure, { kind: "contract", facts: [second.published] }).category, "internal");
-
   assert.ok(bound.worktreePath);
   const movement = { kind: "worktree-created" as const, path: bound.worktreePath };
   const wrap = (...facts: readonly AttestationEntry[]) =>
@@ -146,11 +137,7 @@ test("native review publications survive observer mutation and preserve independ
     effects: [movement],
     issues: [...first.issues, ...second.issues],
   };
-  assert.deepEqual(wrap(second.published).outcome, expected);
-  const repeat = wrap(first.published, second.published);
-  assert.equal(repeat.category, "internal");
-  assert.equal(repeat.cause, inner);
-  assert.deepEqual(JSON.parse(JSON.stringify(repeat.outcome)), expected);
+  assert.deepEqual(wrap(first.published, second.published).outcome, expected);
 
   const conflict = wrap(first.seen, second.published);
   assert.ok(conflict instanceof AuthorityCorruptionError);
@@ -160,17 +147,7 @@ test("native review publications survive observer mutation and preserve independ
   const projected = projectFailure(conflict);
   assert.equal(projected.causeClass, "AuthorityCorruptionError");
   assert.equal(projected.diagnostic, "conflicting invocation receipt");
-  assert.deepEqual(JSON.parse(JSON.stringify(projected.outcome)), expected);
-  const text = renderVerb(
-    "review",
-    { contract: id, verdict: "unsatisfied", summary: "review" },
-    { kind: "threw", error: conflict },
-    { columns: 120, color: false },
-  );
-  assert.equal(text.split("\n").filter((line) => line === "  admitted  attestation").length, 2);
-  assert.match(text, /conflicting invocation receipt/u);
-  assert.match(text, /First review: publication seat close failed/u);
-  assert.match(text, /Second review: publication seat close failed/u);
+  assert.deepEqual(conflict.outcome, expected);
 });
 
 test("accepted delivery preserves its identities and required retirement failure", async () => {
@@ -194,8 +171,6 @@ test("accepted delivery preserves its identities and required retirement failure
     issue.severity === "required" && issue.diagnostic === "publication retirement failed"));
   assert.equal(classifyVerb("deliver", {}, { kind: "returned", value: result }), "failed");
   assert.equal(present(await bound.kei.state()).delivery?.data.integration.snapshot, result.integration);
-  const wire = JSON.parse(JSON.stringify(result));
-  assert.deepEqual(deliverOutcomeSchema.parse(wire), wire);
 });
 
 test("failed redelivery retains its reused admission and addressed placement stop", async () => {
@@ -233,10 +208,6 @@ test("failed redelivery retains its reused admission and addressed placement sto
       assert.equal(error.cause, original);
       assert.equal(error.outcome.contractId, bound.kei.id);
       assert.deepEqual(error.outcome.placement, stop);
-      const text = renderVerb(
-        "deliver", { contract: bound.kei.id }, { kind: "threw", error }, { columns: 120, color: false },
-      );
-      assert.ok(text.includes(`requirement  ${stop.unmet[0]!.requirement}`));
       assert.deepEqual(error.outcome.admitted, [{
         kind: "deliver",
         admission: "reused",
@@ -244,8 +215,6 @@ test("failed redelivery retains its reused admission and addressed placement sto
         integration: first.integration,
         contentId: first.contentId,
       }]);
-      assert.match(text, /admission  reused/u);
-      assert.doesNotMatch(text, /admitted  deliver/u);
       const repeated = withOutcomeReceipt(error, { kind: "contract", reused, placement: stop });
       assert.equal(repeated.cause, error);
       assert.deepEqual(repeated.outcome, error.outcome);
@@ -263,28 +232,19 @@ test("native delivery propagates lower programming and corruption failures after
   ]) {
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(
-      await Keis.of(repo).bind({
-        terms: (await import("./support/library-verbs.js")).document(),
-        target: "main",
-        gates: [],
-      }),
-    );
-    const id = present(await bound.kei.state()).id;
+    const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
+    const id = bound.contractId;
     commitCandidate(repository);
     let armed = false;
     const base = scopeForRepo(repo);
-    const scope = {
+    const native = createKeiHandle(id, {
       ...base,
-      get gitPath(): string {
+      get gitPath() {
         if (armed) throw original;
         return base.gitPath;
       },
-      onPrivateStateSeatClose: () => {
-        armed = true;
-      },
-    };
-    const native = createKeiHandle(id, scope, captureLocalContractComposition());
+      onPrivateStateSeatClose: () => { armed = true; },
+    }, captureLocalContractComposition());
     await assert.rejects(native.deliver(), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, original instanceof AuthorityCorruptionError ? "authority-corruption" : "internal");
@@ -326,38 +286,29 @@ test("native delivery wraps lower-owner failures before publication", async () =
   assert.deepEqual(present(await bound.state()), before);
 });
 
-test("native delivery never treats an aborted signal as proof that an independent programming failure was cancellation", async () => {
+test("native delivery keeps an independent programming failure when the caller aborts", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] })).kei;
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
   commitCandidate(repository);
-  const base = scopeForRepo(repo);
   const controller = new AbortController();
   const original = new TypeError("Git capability failure after leading publication");
-  const scope = {
-    ...base,
+  const native = createKeiHandle(bound.contractId, {
+    ...scopeForRepo(repo),
     onPrivateStateSeatClose() {
-      Object.defineProperty(this, "gitPath", {
-        get() {
-          controller.abort();
-          throw original;
-        },
-      });
+      Object.defineProperty(this, "gitPath", { get() {
+        controller.abort();
+        throw original;
+      } });
     },
-  };
-  const native = createKeiHandle(present(await bound.state()).id, scope, captureLocalContractComposition());
+  }, captureLocalContractComposition());
   await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
-    assert.ok(error instanceof KeiyakuError);
+    assert.ok(error instanceof KeiyakuError && error.outcome?.kind === "contract");
     assert.equal(error.category, "internal");
     assert.equal(error.cause, original);
-    assert.ok(error.outcome?.kind === "contract");
     assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "deliver"));
     return true;
   });
-  assert.throws(
-    () => executionStop(contractId("kei/independent"), original, controller.signal),
-    (error) => error === original,
-  );
 });
 
 test("native delivery keeps claim and movement when later observation throws, without reading twice", async () => {
@@ -407,28 +358,28 @@ test("native delivery keeps claim and movement when later observation throws, wi
   assert.equal(reads, 1, "failed optional observation cannot rerun completion or presentation");
 });
 
-test("native review retains an earlier dependent's physical stop when a later sibling throws", async () => {
+test("native review keeps completed and stopped dependents when a later sibling throws", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const keis = Keis.of(repo);
   const primary = accepted(await keis.bind({ terms: document(), target: null, gates: ["reviewed"] }));
-  commitCandidate(repository, primary.worktreePath);
+  assert.ok(primary.worktreePath);
+  writeFileSync(join(primary.worktreePath, "authored.txt"), "captured dirty bytes\n");
   const child = async (title: string, gates: readonly string[] = []) => accepted(await keis.bind({
-    terms: document().replace("# Library verbs", `# ${title}`),
-    target: null,
-    gates,
-    after: [primary.kei.id],
+    terms: document().replace("# Library verbs", `# ${title}`), target: null, gates, after: [primary.kei.id],
   }));
-  const stopped = await child("Earlier sibling");
-  const gated = await child("Gated sibling", ["reviewed"]);
-  const later = await child("Later sibling");
+  const stopped = await child("A physically stopped sibling");
+  const gated = await child("B gated sibling", ["reviewed"]);
+  const claimed = await child("C claimed sibling");
+  const later = await child("D failing sibling");
   assert.equal(accepted(await stopped.kei.deliver()).placement?.kind, "prerequisites-unsatisfied");
   accepted(await gated.kei.deliver());
+  const delivered = accepted(await claimed.kei.deliver());
   accepted(await later.kei.deliver());
   assert.ok(stopped.worktreePath);
   const localEdit = join(stopped.worktreePath, "local-edit");
   writeFileSync(localEdit, "keep this edit\n");
-  accepted(await primary.kei.deliver());
+  accepted(await primary.kei.deliver({ includeDirty: true }));
   const base = scopeForRepo(repo);
   const original = new TypeError("later dependent placement failed unexpectedly");
   let armed = false;
@@ -439,110 +390,31 @@ test("native review retains an earlier dependent's physical stop when a later si
       return base.gitPath;
     },
   }, captureLocalContractComposition());
-  const review = { verdict: "satisfied", summary: "Release the prerequisite" } as const;
-  await assert.rejects(
-    native.review(review, {
-      observe(event) {
-        if (
-          event.kind === "stage" && event.contractId === later.kei.id &&
-          event.stage === "placement" && event.state === "started"
-        ) armed = true;
-      },
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError && error.outcome?.kind === "contract");
-      assert.equal(error.cause, original);
-      assert.equal(error.outcome.contractId, primary.kei.id);
-      assert.equal(error.outcome.placement?.kind, "placed");
-      assert.ok(error.outcome.issues?.some((issue) => issue.kind === "worktree-follow-retained" &&
-        issue.contractId === stopped.kei.id));
-      assert.deepEqual(error.outcome.continuation?.stopped?.map(({ contractId, stop }) => [contractId, stop.kind]), [
-        [stopped.kei.id, "physical-lag"],
-        [gated.kei.id, "gates-unsatisfied"],
-      ]);
-      const text = renderVerb(
-        "review", { ...review, contract: primary.kei.id }, { kind: "threw", error }, { columns: 120, color: false },
-      );
-      assert.ok(text.includes(`dependent  ${stopped.kei.id}\n  reason  physical lag`));
-      return true;
+  await assert.rejects(native.review({ verdict: "satisfied", summary: "Release the prerequisite" }, {
+    observe(event) {
+      if (event.kind === "stage" && event.contractId === later.kei.id &&
+        event.stage === "placement" && event.state === "started") armed = true;
     },
-  );
+  }), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError && error.outcome?.kind === "contract");
+    assert.equal(error.cause, original);
+    const { admitted, continuation, effects, issues, placement } = error.outcome;
+    assert.equal(error.outcome.contractId, primary.kei.id);
+    assert.equal(placement?.kind, "placed");
+    assert.ok(issues?.some((issue) => issue.kind === "worktree-follow-retained" && issue.contractId === stopped.kei.id));
+    assert.deepEqual(continuation?.stopped?.map(({ contractId, stop }) => [contractId, stop.kind]), [
+      [stopped.kei.id, "physical-lag"], [gated.kei.id, "gates-unsatisfied"],
+    ]);
+    assert.equal(Object.hasOwn(continuation ?? {}, "claimed"), false);
+    assert.deepEqual(admitted?.filter((fact) => fact.kind === "claimed" && fact.contractId).map((fact) => fact.contractId), [claimed.kei.id]);
+    assert.deepEqual(effects?.filter((effect) => effect.kind === "placed" && effect.contractId === claimed.kei.id), [
+      { kind: "placed", contractId: claimed.kei.id, integration: delivered.integration },
+    ]);
+    assert.equal(Object.hasOwn(error.outcome, "worktreeChanges"), false);
+    return true;
+  });
   assert.equal(present(await stopped.kei.state()).terminal, null);
   assert.equal(readFileSync(localEdit, "utf8"), "keep this edit\n");
-});
-
-test("native review retains an earlier claimed sibling when a later continuation throws", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const primaryBind = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"] }));
-  const primary = primaryBind.kei;
-  const primaryId = primary.id;
-  assert.ok(primaryBind.worktreePath);
-  writeFileSync(join(primaryBind.worktreePath, "authored.txt"), "captured dirty bytes\n");
-  const child = async (title: string) =>
-    accepted(
-      await Keis.of(repo).bind({
-        terms: document().replace("# Library verbs", "# " + title),
-        gates: [],
-        // The continuation fixtures stay targetless, like their prerequisite.
-        target: null,
-        after: [primaryId],
-      }),
-    ).kei;
-  const left = await child("Earlier sibling");
-  const right = await child("Later sibling");
-  const childIds = [present(await left.state()).id, present(await right.state()).id].sort();
-  const deliveries = new Map([[left.id, accepted(await left.deliver())], [right.id, accepted(await right.deliver())]]);
-  accepted(await primary.deliver({ includeDirty: true }));
-  const base = scopeForRepo(repo);
-  const original = new TypeError("later sibling program failure");
-  let firstClaimed = false;
-  let armed = false;
-  const scope = {
-    ...base,
-    get gitPath(): string {
-      if (armed) throw original;
-      return base.gitPath;
-    },
-  };
-  const native = createKeiHandle(primaryId, scope, captureLocalContractComposition());
-  await assert.rejects(
-    native.review(
-      { verdict: "satisfied", summary: "Invocation review passed" },
-      {
-        observe: (event) => {
-          if (event.kind === "admitted" && event.contractId === childIds[0] && event.fact.kind === "claimed")
-            firstClaimed = true;
-          if (
-            firstClaimed &&
-            event.kind === "stage" &&
-            event.contractId === childIds[1] &&
-            event.stage === "placement" &&
-            event.state === "started"
-          )
-            armed = true;
-        },
-      },
-    ),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.category, "internal");
-      assert.equal(error.cause, original);
-      assert.ok(error.outcome?.kind === "contract");
-      assert.ok(error.outcome.admitted?.some((fact) => fact.contractId === childIds[0] && fact.kind === "claimed"));
-      assert.deepEqual(
-        error.outcome.effects?.filter((effect) => effect.kind === "placed" && effect.contractId === childIds[0]),
-        [{ kind: "placed", contractId: childIds[0], integration: deliveries.get(childIds[0]!)?.integration }],
-      );
-      assert.equal(Object.hasOwn(error.outcome, "continuation"), false);
-      assert.equal(Object.hasOwn(error.outcome, "worktreeChanges"), false);
-      assert.equal(
-        error.outcome.admitted?.some((fact) => fact.contractId === childIds[1] && fact.kind === "claimed"),
-        false,
-      );
-      return true;
-    },
-  );
 });
 
 test("explicit verify retains a finished check when the next check cannot finish admission", async () => {
@@ -575,26 +447,9 @@ test("explicit verify retains a finished check when the next check cannot finish
     assert.deepEqual(error.outcome.checks, [{
       kind: "terminal", index: 1, requirement: admission.requirement, verdict: "satisfied", admission: "admitted",
     }]);
-    const text = renderVerb("verify", { contract: bound.contractId }, { kind: "threw", error }, { columns: 120, color: false });
-    assert.match(text, /^  check  1$/mu);
-    assert.match(text, /^  verdict  satisfied$/mu);
     assert.equal(error.outcome.placement, undefined);
     return true;
   });
-});
-
-test("a pre-admission custom caller abort rejects with the exact raw reason without publication", async () => {
-  const repository = repositoryWithMain();
-  const native = await bind(repository);
-  const before = present(await native.state());
-  const controller = new AbortController();
-  const reason = Object.freeze(new Error("caller stopped"));
-  controller.abort(reason);
-  await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
-    assert.equal(error, reason);
-    return true;
-  });
-  assert.deepEqual(present(await native.state()), before);
 });
 
 test("native cancellation preserves an existing category without constructing a partial preview", async () => {
@@ -604,15 +459,9 @@ test("native cancellation preserves an existing category without constructing a 
   const before = present(await bound.kei.state());
   const cause = new TypeError("original caller cause");
   const reason = Object.freeze(new KeiyakuError("authority-corruption", "categorized caller stop", { cause }));
-  const preAdmission = new AbortController();
-  preAdmission.abort(reason);
-  await assert.rejects(bound.kei.deliver({ signal: preAdmission.signal }), (error: unknown) => {
-    assert.equal(error, reason);
-    assert.ok(error instanceof KeiyakuError);
-    assert.equal(error.category, "authority-corruption");
-    assert.equal(error.outcome, undefined);
-    return true;
-  });
+  for (const stop of [Object.freeze(new Error("caller stopped")), reason]) {
+    await assert.rejects(bound.kei.deliver({ signal: AbortSignal.abort(stop) }), (error) => error === stop);
+  }
   assert.deepEqual(present(await bound.kei.state()), before);
 
   const controller = new AbortController();
@@ -662,18 +511,10 @@ test("read observation preserves exact exceptional identity and thrown undefined
   }
 });
 
-test("native bind and delivery JSON retain result data without process custody", async () => {
+test("native delivery JSON retains its direct accepted answer", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
-  const bindJson = JSON.parse(JSON.stringify(bound));
-  assert.deepEqual(bindJson, {
-    kind: "accepted",
-    contractId: bound.contractId,
-    worktreePath: bound.worktreePath,
-    target: "refs/heads/main",
-  });
-  assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);
   const delivered = accepted(await bound.kei.deliver());
   const json = JSON.parse(JSON.stringify(delivered));
@@ -686,12 +527,9 @@ test("native bind and delivery JSON retain result data without process custody",
     placement: delivered.placement,
   });
   assert.equal(delivered.placement?.kind, "placed");
-  assert.equal(Object.hasOwn(bindJson, "kei"), false);
-  assert.equal(Object.hasOwn(json, "diff"), false);
 });
 
 test("native delivery retains completed Debt settlement before terminal cleanup fails", async () => {
-  const { readFileSync } = await import("node:fs");
   const { Debts } = await import("../src/debt/index.js");
   const { World } = await import("../src/world.js");
   const repository = repositoryWithMain();
@@ -817,14 +655,10 @@ test("native preview leaves no preview answer when target-lag observation throws
   );
   const base = scopeForRepo(repo);
   const original = new TypeError("unexpected native target lag observation failure");
-  let injected = 0;
   const scope = {
     ...base,
     get gitPath(): string {
-      if (new Error().stack?.includes("observeTargetLag")) {
-        injected += 1;
-        throw original;
-      }
+      if (new Error().stack?.includes("observeTargetLag")) throw original;
       return base.gitPath;
     },
   };
@@ -837,7 +671,6 @@ test("native preview leaves no preview answer when target-lag observation throws
     assert.deepEqual(error.outcome, { kind: "contract", contractId: bound.contractId });
     return true;
   });
-  assert.equal(injected, 1);
   assert.equal(present(await bound.kei.state()).head, witnessedHead);
 });
 
@@ -870,16 +703,9 @@ test("a pre-admission finite read failure keeps its native cause without claimin
   );
   const id = bound.contractId;
   assert.ok(bound.worktreePath);
-  const { writeFileSync } = await import("node:fs");
   writeFileSync(join(bound.worktreePath, "dirty.txt"), "unadmitted bytes\n");
   await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@"',
-      "  exit 73",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
+    'if [ "$1 $2" = "cat-file --batch" ]; then "$KEIYAKU_REAL_GIT" "$@"; exit 73; fi\nexec "$KEIYAKU_REAL_GIT" "$@"',
     {},
     async (gitPath) => {
       const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id });

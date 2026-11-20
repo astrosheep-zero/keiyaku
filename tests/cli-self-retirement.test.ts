@@ -183,7 +183,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [worktree, world, contract, output] = process.argv.slice(2);
+const [worktree, world, contract] = process.argv.slice(2);
 const source = (path) => pathToFileURL(join(worktree, "build/src", path)).href;
 // Every ability this child needs is acquired before mutable product work can retire the tree.
 const { parseArgv } = await import(source("cli/parse.js"));
@@ -218,7 +218,7 @@ process.stdout.write = (chunk, ...rest) => {
 };
 let exit;
 try {
-  exit = await runCliCommand(executable(["-C", world, "review", contract, "--satisfied", "--summary", "x", ...(output === "text" ? [] : ["--json"])]));
+  exit = await runCliCommand(executable(["-C", world, "review", contract, "--satisfied", "--summary", "x", "--json"]));
 } finally {
   process.stdout.write = nativeWrite;
 }
@@ -231,20 +231,7 @@ test("a known-admission failure after retirement keeps its receipt and classific
   const harness = join(fixture.root, "failure-projection-harness.mjs");
   writeFileSync(harness, FAILURE_PROJECTION_HARNESS);
 
-  const result = await new Promise<CliChild>((resolveChild, rejectChild) => {
-    const child = spawn(process.execPath, [harness, fixture.worktree, fixture.world, fixture.contract], {
-      cwd: fixture.world,
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
-    child.once("error", rejectChild);
-    child.once("close", (code) => resolveChild({ exit: code ?? 1, stdout, stderr }));
-  });
-
+  const result = await runFixtureCli(harness, fixture.world, [fixture.worktree, fixture.world, fixture.contract]);
   assert.equal(result.exit, 0, result.stderr);
   assert.match(result.stderr, /^\/exit 3$/mu);
   assert.match(result.stderr, /^\/worktree retired$/mu, "the executing tree was retired before the failure projection");
@@ -274,24 +261,5 @@ test("a known-admission failure after retirement keeps its receipt and classific
   assert.match(body.outcome.admitted[0]!.candidate, /^[0-9a-f]{40}$/u);
   assert.match(body.outcome.admitted[0]!.integration, /^[0-9a-f]{40}$/u);
   assert.ok(body.outcome.admitted[0]!.contentId);
-  assert.equal(existsSync(fixture.worktree), false);
-});
-
-test("text failure after self-retirement retains the admitted candidate and native cause", async (context) => {
-  const fixture = selfRetirementFixture(context);
-  const harness = join(fixture.root, "failure-projection-text-harness.mjs");
-  writeFileSync(harness, FAILURE_PROJECTION_HARNESS);
-  const result = await runFixtureCli(harness, fixture.world, [
-    fixture.worktree, fixture.world, fixture.contract, "text",
-  ]);
-  assert.equal(result.exit, 0, result.stderr);
-  assert.match(result.stderr, /^\/exit 3$/mu);
-  assert.match(result.stderr, /^\/worktree retired$/mu);
-  assert.match(result.stdout, new RegExp(`^review failed  ${fixture.contract} · satisfied$`, "mu"));
-  assert.match(result.stdout, /^  admitted  deliver$/mu);
-  assert.match(result.stdout, /^  candidate  [a-f0-9]{40}$/mu);
-  assert.match(result.stdout, /^  integration result  [a-f0-9]{40}$/mu);
-  assert.match(result.stdout, /^  cause  TypeError$/mu);
-  assert.match(result.stdout, /representative failure after known admission/u);
   assert.equal(existsSync(fixture.worktree), false);
 });

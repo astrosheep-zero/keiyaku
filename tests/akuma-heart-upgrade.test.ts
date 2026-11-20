@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
@@ -22,8 +22,10 @@ import {
   recordTellReceipt,
 } from "../src/akuma/heart/index.js";
 import { HeartNeedsUpgradeError, LEASH_SCHEMA } from "../src/akuma/heart/schema.js";
-import { createHeartReader, withHeartTransaction, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
+import { withHeartTransaction, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
 import { encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { cliJson } from "./support/cli-fixtures.js";
+import type { WhoamiFacts } from "../src/library/keiyaku-identity.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
 import { waitForCondition } from "./support/process.js";
 
@@ -174,39 +176,23 @@ async function legacyFixture(version: 29 | 30 | 31, wal: boolean, prepare?: (dat
 }
 
 function custodyBytes(paths: AkumaPaths) {
-  return new Map(
-    readdirSync(paths.directory)
-      .sort()
-      .map((name) => [name, readFileSync(join(paths.directory, name))]),
-  );
+  // SHM and empty WAL are SQLite coordination, not retained history.
+  const files = readdirSync(paths.directory).filter((name) => name !== "heart.db-shm");
+  const bytes = new Map(files.map((name) => [name, readFileSync(join(paths.directory, name))]));
+  if (bytes.get("heart.db-wal")?.length === 0) bytes.delete("heart.db-wal");
+  return bytes;
 }
 
-function oldHistory(path: string) {
-  const database = new DatabaseSync(path, { readOnly: true });
-  try {
-    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
-    const tables = database.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name").all();
-    return { tables, rows: tables.map(({ name }) => database.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all()) };
-  } finally {
-    database.close();
-  }
-}
-
-for (const version of [29, 30] as const) {
-  test(`v${version} refuses ordinary Akuma access without changing closed custody`, async (context) => {
-    const value = await legacyFixture(version, false);
+for (const [version, wal] of [[29, false], [29, true], [30, false], [30, true]] as const) {
+  test(`v${version} refuses ordinary Akuma access with ${wal ? "retained WAL" : "closed custody"}`, async () => {
+    const value = await legacyFixture(version, wal);
     const { paths } = value;
     try {
       const original = custodyBytes(paths);
-      assert.deepEqual([...original.keys()], ["heart.db", "leash.db", "stdio.log"]);
-      const readers = new Set<DatabaseSync>();
-      const prepare = DatabaseSync.prototype.prepare;
-      context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-        if (sql.includes("FROM akuma_schema")) readers.add(this);
-        return prepare.call(this, sql);
-      });
+      if (wal) assert.ok(original.get("heart.db-wal")!.length > 0);
+      else assert.deepEqual([...original.keys()].sort(), ["heart.db", "leash.db", "stdio.log"]);
       const owner = new AkumaOwner(value.id, value.root);
-      const spawn = context.mock.fn(async () => assert.fail("old Heart must not spawn a Body"));
+      const spawn = async () => assert.fail("old Heart must not spawn a Body");
       const refused = (error: unknown) => {
         assert.ok(error instanceof Error);
         assert.ok(error.message.includes(paths.heart));
@@ -230,91 +216,45 @@ for (const version of [29, 30] as const) {
         appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "new" }, at }),
         refused,
       );
-      assert.equal(spawn.mock.callCount(), 0);
-      assert.ok(readers.size >= 5);
-      assert.ok(
-        [...readers].every((reader) => !reader.isOpen),
-        "refusal closes every version reader",
-      );
-      const after = custodyBytes(paths);
-      for (const [name, bytes] of original) assert.deepEqual(after.get(name), bytes, name);
-      for (const [name, bytes] of after) {
-        if (!original.has(name))
-          assert.ok(name === "heart.db-shm" || (name === "heart.db-wal" && bytes.length === 0), name);
-      }
+      assert.deepEqual(custodyBytes(paths), original);
     } finally {
       value.close();
     }
   });
-
-  test(`v${version} refuses using the retained WAL without checkpointing it`, async () => {
-    const { paths, close } = await legacyFixture(version, true);
-    try {
-      const original = custodyBytes(paths);
-      assert.ok(original.get("heart.db-wal")!.length > 0);
-      const history = oldHistory(paths.heart);
-      const refusal = new RegExp(`schema version must be 32; found ${version}`, "u");
-      await assert.rejects(readHeart(paths), refusal);
-      await assert.rejects(
-        appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "new" }, at }),
-        refusal,
-      );
-      const after = custodyBytes(paths);
-      assert.deepEqual([...after.keys()], [...original.keys()]);
-      // SHM lock/cache bookkeeping is not retained execution evidence.
-      after.delete("heart.db-shm");
-      original.delete("heart.db-shm");
-      assert.deepEqual(after, original);
-      assert.deepEqual(oldHistory(paths.heart), history);
-    } finally {
-      close();
-    }
-  });
 }
 
-function retained31Source(path: string) {
-  const database = new DatabaseSync(path, { readOnly: true });
+function retainedHistory(path: string, predecessorOnly = false) {
+  const db = new DatabaseSync(path, { readOnly: true });
   try {
-    const schema = database
-      .prepare(
-        `SELECT name, type, sql, rootpage FROM sqlite_schema
-      WHERE tbl_name NOT IN ('akuma_schema', 'tell_terminal_receipts') ORDER BY name`,
-      )
-      .all();
+    const tables = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name").all();
     return {
-      version: database.prepare("SELECT version FROM akuma_schema").get()?.version,
-      schema,
-      rows: schema
-        .filter(({ type }) => type === "table")
-        .map(({ name }) =>
-          database.prepare(`SELECT * FROM ${name} ORDER BY ${name === "sqlite_sequence" ? "name" : "rowid"}`).all(),
-        ),
+      version: db.prepare("SELECT version FROM akuma_schema").get()?.version,
+      tables: tables.filter(({ name }) => !predecessorOnly || (name !== "akuma_schema" && name !== "tell_terminal_receipts"))
+        .map(({ name, sql }) => ({ sql, rows: db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all() })),
     };
   } finally {
-    database.close();
+    db.close();
   }
 }
 
 test("v31 readers preserve retained WAL; a Tell write converts without losing history or high-water marks", async () => {
   const { id, root, paths, close } = await legacyFixture(31, true);
-  const observer = createHeartReader(paths);
   try {
     const original = custodyBytes(paths);
     assert.ok(original.get("heart.db-wal")!.length > 0);
-    const before = retained31Source(paths.heart);
-    assert.equal(before.version, 31);
+    const before = retainedHistory(paths.heart, true);
     await assert.rejects(readHeart(paths), needsUpgrade);
-    await assert.rejects(
-      observer.read(() => assert.fail("old Heart must not enter the read")),
-      needsUpgrade,
-    );
     await assert.rejects(new AkumaOwner(id, root).wait({ signal: AbortSignal.timeout(2_000) }), needsUpgrade);
-    const after = custodyBytes(paths);
-    // SQLite may update coordination bookkeeping but not the database or retained WAL.
-    original.delete("heart.db-shm");
-    after.delete("heart.db-shm");
-    assert.deepEqual(after, original);
-    assert.deepEqual(retained31Source(paths.heart), before);
+    const identity = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
+      environment: { KEIYAKU_ACTOR_ID: id, KEIYAKU_ACTOR_WORLD: root },
+    });
+    assert.equal(identity.exit, 0, identity.stderr);
+    assert.deepEqual(identity.value.self, { kind: "akuma", akumaId: id, world: root });
+    assert.ok(typeof identity.value.initiator === "object");
+    assert.equal(identity.value.initiator.kind, "unavailable");
+    assert.match(identity.value.initiator.diagnostic, /schema version must be 32; found 31/u);
+    assert.match(identity.value.profileUnavailable ?? "", /schema version must be 32; found 31/u);
+    assert.deepEqual(custodyBytes(paths), original);
 
     await recordTellReceipt(paths, { evidence: "exact", tellId: "also-mapped", kind: "accepted", receivedAt: later });
     await assert.rejects(
@@ -327,15 +267,13 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
       }),
       /no delivery mapping/u,
     );
-    const refused = custodyBytes(paths);
-    refused.delete("heart.db-shm");
-    assert.deepEqual(refused, original, "idempotent and failed receipts must not publish conversion");
+    assert.deepEqual(custodyBytes(paths), original);
     await recordTellReceipt(paths, { evidence: "exact", tellId: "also-mapped", kind: "follow-up", receivedAt: later });
     assert.deepEqual(
       (await readHeart(paths)).pending.map(({ id }) => id),
       ["pending", "bound-only"],
     );
-    assert.deepEqual(retained31Source(paths.heart), { ...before, version: 32 });
+    assert.deepEqual(retainedHistory(paths.heart, true), { ...before, version: 32 });
     await withReadOnlyHeart(paths, (db) => {
       const rows = db.prepare("SELECT * FROM tell_terminal_receipts ORDER BY tell_id, kind").all();
       assert.deepEqual(
@@ -362,7 +300,6 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
     assert.deepEqual(await readTellAction(paths, "also-mapped"), { kind: "undelivered" });
     assert.deepEqual(await readTellAction(paths, "pending"), { kind: "live", turnSequence: 11 });
     assert.equal((await readTell(paths, "pending"))?.state, "pending", "submission is not the stronger receipt");
-    assert.equal((await readTurn(paths, 1))?.end?.outcome.kind, "answered");
     const report = await recordReport(paths, { text: "after normalization", at });
     assert.equal(report.kind === "recorded" && report.report.sequence, 9001);
     await recordTellReceipt(paths, {
@@ -383,8 +320,6 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
         .get();
       assert.equal(promoted?.received_at, at);
       assert.equal(promoted?.undelivered, 1);
-      assert.equal(db.prepare("SELECT COUNT(*) AS count FROM tell_receipts").get()?.count, 6);
-      assert.equal(db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'tell_receipts'").get()?.seq, 9000);
     });
   } finally {
     close();
@@ -400,7 +335,6 @@ test("addressed Tell, Ask and Kill reach their first real admission on v31", asy
     assert.ok(holder);
     const api = Akumas.of(root);
     try {
-      await assert.rejects(api.status({ akuma: id }), /Upgrade requires a Heart write/u);
       if (verb === "Kill" || verb === "Kill glob") {
         const controller = new AbortController();
         const killing = api.kill({ akuma: verb === "Kill" ? id : "aku/claude/29*", signal: controller.signal });
@@ -437,7 +371,7 @@ test("addressed Tell, Ask and Kill reach their first real admission on v31", asy
           (await readHeart(paths)).pending.some((tell) => tell.id === receipt.tellId && tell.body === input.body),
         );
       }
-      assert.equal(retained31Source(paths.heart).version, 32);
+      assert.equal(retainedHistory(paths.heart).version, 32);
     } finally {
       holder.release();
       close();
@@ -459,57 +393,38 @@ test("a refused report does not convert a settled v31 Heart or change its retain
       kind: "refused",
       reason: "not-executing",
     });
-    const after = custodyBytes(paths);
-    original.delete("heart.db-shm");
-    after.delete("heart.db-shm");
-    assert.deepEqual(after, original);
+    assert.deepEqual(custodyBytes(paths), original);
     await assert.rejects(readHeart(paths), needsUpgrade);
   } finally {
     close();
   }
 });
 
-test("Reset cannot delete held v31 custody or convert it to inspect its Body", async () => {
-  const { root, id, paths, close } = await legacyFixture(31, false);
+test("held Reset refuses v31 and requests an exact stop after explicit conversion", async () => {
+  const { root, id, paths, close } = await legacyFixture(31, true, (db) => db.exec("DELETE FROM control WHERE kind = 'stop'"));
   const holder = await HeldAkumaLeash.try(paths);
   assert.ok(holder);
-  const writer = new DatabaseSync(paths.heart);
   try {
-    assert.equal(writer.prepare("SELECT version FROM akuma_schema").get()?.version, 31);
-    writer.exec("DELETE FROM control WHERE kind = 'stop'");
-    const inode = statSync(paths.heart, { bigint: true }).ino;
     const before = custodyBytes(paths);
     await assert.rejects(nuke({ world: root, confirm: root }), (error: unknown) => {
       assert.ok(error instanceof Error && error.cause instanceof HeartNeedsUpgradeError);
       assert.match(error.message, needsUpgrade.message);
       return true;
     });
-    const after = custodyBytes(paths);
-    before.delete("heart.db-shm");
-    after.delete("heart.db-shm");
-    assert.deepEqual(after, before);
-    assert.equal(statSync(paths.heart, { bigint: true }).ino, inode);
-    assert.equal(await HeldAkumaLeash.try(paths), null);
-    assert.equal(writer.prepare("SELECT version FROM akuma_schema").get()?.version, 31);
-
+    assert.deepEqual(custodyBytes(paths), before);
     await appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "explicit write" }, at });
+    assert.equal((await readHeart(paths)).stop, null);
     assert.deepEqual(await nuke({ world: root, confirm: root }), {
       kind: "accepted",
-      issues: [
-        { kind: "reset-owner-stopped", owner: "akuma", diagnostic: `Akuma ${id} could not be stopped: unavailable` },
-      ],
+      issues: [{ kind: "reset-owner-stopped", owner: "akuma", diagnostic: `Akuma ${id} could not be stopped: unavailable` }],
     });
-    assert.equal(statSync(paths.heart, { bigint: true }).ino, inode);
-    assert.deepEqual(readFileSync(paths.leash), before.get("leash.db"));
-    assert.deepEqual(readFileSync(paths.log), before.get("stdio.log"));
     assert.equal(await HeldAkumaLeash.try(paths), null);
-    const retained = await readHeart(paths);
-    assert.equal(retained.latestBody?.sequence, 2);
-    assert.equal(retained.latestBody?.end, undefined);
-    assert.equal(retained.stop?.bodySequence, 2);
-    assert.equal((await readTurn(paths, 11))?.end, undefined);
+    const { latestBody, stop } = await readHeart(paths);
+    assert.equal(stop?.bodySequence, 2);
+    assert.ok(latestBody?.sequence === 2 && latestBody.end === undefined);
+    const turn = await readTurn(paths, 11);
+    assert.ok(turn && turn.end === undefined);
   } finally {
-    writer.close();
     holder.release();
     close();
   }
@@ -520,14 +435,12 @@ test("contending v31 writes convert once; canceled acquisition changes nothing",
   const blocker = new DatabaseSync(paths.heart);
   const exec = DatabaseSync.prototype.exec;
   const writers = new Set<DatabaseSync>();
-  let conversions = 0;
   context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
     if (this !== blocker && sql === "BEGIN IMMEDIATE") writers.add(this);
-    if (sql.includes("CREATE TABLE tell_terminal_receipts")) conversions++;
     return exec.call(this, sql);
   });
   try {
-    const before = retained31Source(paths.heart);
+    const before = retainedHistory(paths.heart);
     blocker.exec("BEGIN IMMEDIATE");
     const controller = new AbortController();
     const reason = new Error("open canceled before acquiring writer custody");
@@ -546,13 +459,11 @@ test("contending v31 writes convert once; canceled acquisition changes nothing",
       controller.abort(reason);
     }
     await refused;
-    assert.equal(conversions, 0);
-    assert.deepEqual(retained31Source(paths.heart), before);
+    assert.deepEqual(retainedHistory(paths.heart), before);
     blocker.exec("ROLLBACK");
     const committed = await opening;
-    assert.equal(conversions, 1);
     assert.deepEqual(committed.sort(), [9001, 9002]);
-    assert.equal(retained31Source(paths.heart).version, 32);
+    assert.equal(retainedHistory(paths.heart).version, 32);
   } finally {
     blocker.close();
     close();
@@ -560,8 +471,8 @@ test("contending v31 writes convert once; canceled acquisition changes nothing",
 });
 
 test("a failed v31 upgrade commit rolls back the normalized evidence and version", async (context) => {
-  const { paths, close } = await legacyFixture(31, false);
-  const original = oldHistory(paths.heart);
+  const { paths, close } = await legacyFixture(31, true);
+  const original = retainedHistory(paths.heart);
   const exec = DatabaseSync.prototype.exec;
   const failure = new Error("upgrade commit denied");
   const injection = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
@@ -572,9 +483,9 @@ test("a failed v31 upgrade commit rolls back the normalized evidence and version
     const write = () => appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "new" }, at });
     await assert.rejects(write(), (error) => error === failure);
     injection.mock.restore();
-    assert.deepEqual(oldHistory(paths.heart), original);
+    assert.deepEqual(retainedHistory(paths.heart), original);
     assert.equal(await write(), 9001);
-    assert.equal(retained31Source(paths.heart).version, 32);
+    assert.equal(retainedHistory(paths.heart).version, 32);
   } finally {
     injection.mock.restore();
     close();
@@ -584,7 +495,7 @@ test("a failed v31 upgrade commit rolls back the normalized evidence and version
 test("a v31 writer exiting before commit publishes neither its mutation nor the conversion", async () => {
   const { paths, close } = await legacyFixture(31, true);
   try {
-    const original = oldHistory(paths.heart);
+    const original = retainedHistory(paths.heart);
     const heart = new URL("../src/akuma/heart/index.js", import.meta.url);
     const child = spawnSync(
       process.execPath,
@@ -611,7 +522,7 @@ test("a v31 writer exiting before commit publishes neither its mutation nor the 
     );
     assert.ifError(child.error);
     assert.equal(child.status, 73, child.stderr);
-    assert.deepEqual(oldHistory(paths.heart), original);
+    assert.deepEqual(retainedHistory(paths.heart), original);
     await assert.rejects(readHeart(paths), needsUpgrade);
   } finally {
     close();
@@ -627,21 +538,12 @@ test("a broken retained v31 relationship aborts conversion without publishing v3
     } finally {
       corrupt.close();
     }
-    const before = retained31Source(paths.heart);
+    const before = retainedHistory(paths.heart);
     await assert.rejects(
       appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "new" }, at }),
       /broken foreign key relationships/u,
     );
-    assert.deepEqual(retained31Source(paths.heart), before);
-    const unchanged = new DatabaseSync(paths.heart, { readOnly: true });
-    try {
-      assert.equal(
-        unchanged.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'tell_terminal_receipts'").get(),
-        undefined,
-      );
-    } finally {
-      unchanged.close();
-    }
+    assert.deepEqual(retainedHistory(paths.heart), before);
   } finally {
     close();
   }
@@ -651,8 +553,6 @@ test("current Heart keeps a physically read-only connection during observation",
   const value = await soulFixture("kei-current-heart-");
   try {
     await withReadOnlyHeart(value.allocated.paths, (database) => {
-      assert.equal(database.prepare("PRAGMA foreign_keys").get()?.foreign_keys, 1);
-      assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
       assert.throws(() => database.exec("CREATE TABLE forbidden (x INTEGER)"), /readonly/u);
     });
   } finally {

@@ -232,9 +232,6 @@ test("repeated failure projection preserves confirmed recovery evidence and the 
   const first = project("abandon", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
   assert.ok(first.error instanceof KeiyakuError);
-  assert.equal(first.error.cause, native);
-  assert.equal(first.error.category, "internal");
-  assert.equal(first.error.message, native.message);
   progress.recordStop({ kind: "execution-stopped", contractId: id, reason: "failed", diagnostic: "later read failed" });
   const final = project("abandon", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
@@ -243,14 +240,12 @@ test("repeated failure projection preserves confirmed recovery evidence and the 
   assert.equal(first.error.cause, native);
   assert.equal(final.error.category, "internal");
   assert.equal(final.error.message, native.message);
-  assert.ok(final.error.outcome?.kind === "contract");
-  assert.equal(final.error.outcome.contractId, id);
-  assert.equal(final.error.outcome.admitted, undefined);
-  assert.equal(final.error.outcome.issues?.length, 1);
+  assert.deepEqual(final.error.outcome, {
+    kind: "contract",
+    contractId: id,
+    effects: [{ kind: "recovery-snapshot", snapshot }],
+    issues: [{ kind: "execution-stopped", severity: "required", reason: "failed", diagnostic: "later read failed" }],
+  });
   assert.ok(first.error.outcome?.kind === "contract");
-  assert.notEqual(final.error, first.error);
-  assert.notEqual(first.error.outcome, final.error.outcome);
   assert.equal(first.error.outcome.issues, undefined);
-  assert.deepEqual(first.error.outcome.effects, [{ kind: "recovery-snapshot", snapshot }]);
-  assert.deepEqual(final.error.outcome.effects, first.error.outcome.effects);
 });

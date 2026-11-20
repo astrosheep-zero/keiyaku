@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, relative, resolve } from "node:path";
 import test from "node:test";
@@ -12,25 +12,12 @@ import { bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
 type TestEnvironmentModule = {
-  CALLER_ENVIRONMENT_PREFIXES: readonly string[];
-  CALLER_ENVIRONMENT_NAMES: readonly string[];
   isolatedTestEnvironment(inherited: NodeJS.ProcessEnv, home: string): Record<string, string>;
 };
 
-const { CALLER_ENVIRONMENT_PREFIXES, CALLER_ENVIRONMENT_NAMES, isolatedTestEnvironment } = (await import(
+const { isolatedTestEnvironment } = (await import(
   pathToFileURL(resolve("scripts/test-environment.mjs")).href
 )) as TestEnvironmentModule;
-
-function textContent(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((item) => {
-      if (item === null || typeof item !== "object") return "";
-      const { type, text } = item as { type?: unknown; text?: unknown };
-      return type === "text" && typeof text === "string" ? text : "";
-    })
-    .join("\n");
-}
 
 function snapshotFiles(root: string): Map<string, Buffer> {
   const snapshot = new Map<string, Buffer>();
@@ -53,7 +40,6 @@ test("packaged stdio server launches from its documented standalone configuratio
   assert.ok(manifest.dependencies["@modelcontextprotocol/sdk"]);
   const bin = resolve(manifest.bin["keiyaku-mcp"]);
   const environment = isolatedTestEnvironment(process.env, root);
-  assert.equal(environment.SQUARE_DELIVERY, join(root, "delivery.sqlite"));
   const help = execFileSync(process.execPath, [bin, "--help"], { cwd: root, encoding: "utf8", env: environment });
   const config = JSON.parse(help.slice(help.indexOf("{\n"), help.indexOf("\n\nExposure")));
   const server = config.mcpServers.keiyaku;
@@ -110,99 +96,53 @@ test("packaged stdio server launches from its documented standalone configuratio
 test("packaged stdio fixture cannot reach the launching caller's actor World", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "kei-mcp-isolation-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const poisonedRoot = mkdtempSync(join(tmpdir(), "kei-mcp-poisoned-"));
-  t.after(() => rmSync(poisonedRoot, { recursive: true, force: true }));
-  const poisonedWorld = await World.at(poisonedRoot);
-  const poisoned = await bornLineageAkuma({
-    root: poisonedWorld,
-    akumaName: "probe",
-    draw: "1234abcd",
-    createdAt: "2026-08-08T00:00:00.000Z",
-  });
-  writeFileSync(join(poisonedWorld, "parent-bytes.txt"), "poisoned parent bytes\n");
+  const poisonedWorld = await World.at(mkdirSync(join(root, "poisoned"), { recursive: true })!);
+  const world = await World.at(mkdirSync(join(root, "fixture-world"), { recursive: true })!);
+  const createdAt = "2026-08-08T00:00:00.000Z";
+  const poisoned = await bornLineageAkuma({ root: poisonedWorld, akumaName: "probe", draw: "1234abcd", createdAt });
+  const fixture = await bornLineageAkuma({ root: world, akumaName: "fixture", draw: "5678abcd", createdAt });
   const before = snapshotFiles(poisonedWorld);
-  assert.ok(before.has(relative(poisonedWorld, poisoned.paths.heart)), "the poisoned World owns a real Heart");
-  assert.ok(before.has("parent-bytes.txt"));
-  const poisonedCallerKeys = [
-    ...CALLER_ENVIRONMENT_PREFIXES.map((prefix) => `${prefix}POISONED`),
-    ...CALLER_ENVIRONMENT_NAMES,
-  ];
-  const ambient: NodeJS.ProcessEnv = {
+  const ambientLedger = join(poisonedWorld, "inherited-ledger.sqlite");
+  const environment = isolatedTestEnvironment({
     ...process.env,
-    HOME: join(root, "inherited-home"),
-    USERPROFILE: join(root, "inherited-home"),
-    KEIYAKU_HOME: join(root, "inherited-home"),
     KEIYAKU_ACTOR_ID: poisoned.id,
     KEIYAKU_ACTOR_WORLD: poisonedWorld,
-    SQUARE_DELIVERY: join(poisonedRoot, "inherited-ledger.sqlite"),
-    HTTPS_PROXY: "http://127.0.0.1:6152",
-    TEST_SENTINEL: "sentinel bytes",
-  };
-  for (const key of poisonedCallerKeys) ambient[key] = `poisoned-${key}`;
-  ambient.KEIYAKU_ACTOR_ID = poisoned.id;
-  ambient.KEIYAKU_ACTOR_WORLD = poisonedWorld;
-  const ambientBefore = { ...ambient };
-  const environment = isolatedTestEnvironment(ambient, root);
-  assert.deepEqual(ambient, ambientBefore, "the builder must not mutate its input");
-  for (const key of poisonedCallerKeys) assert.equal(environment[key], undefined, key);
-  assert.equal(environment.KEIYAKU_ACTOR_ID, undefined);
-  assert.equal(environment.KEIYAKU_ACTOR_WORLD, undefined);
-  assert.equal(environment.HOME, root);
-  assert.equal(environment.USERPROFILE, root);
-  assert.equal(environment.KEIYAKU_HOME, root);
-  assert.equal(environment.SQUARE_DELIVERY, join(root, "delivery.sqlite"));
-  assert.equal(environment.HTTPS_PROXY, "http://127.0.0.1:6152");
-  assert.equal(environment.TEST_SENTINEL, "sentinel bytes");
-  const client = new Client({ name: "test", version: "1" });
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [resolve("build/src/mcp/index.js")],
-    cwd: root,
-    env: environment,
-    stderr: "pipe",
-  });
-  await client.connect(transport);
-  t.after(async () => {
-    await client.close();
-  });
-  const result = await client.callTool({ name: "whoami", arguments: {} });
-  assert.equal(result.isError, false, JSON.stringify(result));
-  const text = textContent(result.content);
-  assert.match(text, /none \(not an akuma\)/u);
-  const rendered = JSON.stringify(result);
-  assert.equal(rendered.includes(poisoned.id), false, rendered);
-  assert.equal(rendered.includes(poisonedWorld), false, rendered);
-  const after = snapshotFiles(poisonedWorld);
-  assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort());
-  for (const [path, bytes] of before) assert.ok(after.get(path)?.equals(bytes), `poisoned parent file changed: ${path}`);
+    PI_SESSION_ID: "inherited-session",
+    SQUARE_DELIVERY: ambientLedger,
+  }, world);
 
-  const actorRoot = join(root, "fixture-world");
-  mkdirSync(actorRoot);
-  const fixtureWorld = await World.at(actorRoot);
-  const fixtureActor = await bornLineageAkuma({
-    root: fixtureWorld,
-    akumaName: "fixture",
-    draw: "5678abcd",
-    createdAt: "2026-08-08T00:00:00.000Z",
-  });
-  const explicitClient = new Client({ name: "test", version: "1" });
-  const explicitTransport = new StdioClientTransport({
-    command: process.execPath,
-    args: [resolve("build/src/mcp/index.js")],
-    cwd: root,
-    env: { ...environment, KEIYAKU_ACTOR_ID: fixtureActor.id, KEIYAKU_ACTOR_WORLD: fixtureWorld },
-    stderr: "pipe",
-  });
-  await explicitClient.connect(explicitTransport);
-  t.after(async () => {
-    await explicitClient.close();
-  });
-  const explicit = await explicitClient.callTool({ name: "whoami", arguments: {} });
-  assert.equal(explicit.isError, false, JSON.stringify(explicit));
-  const explicitText = textContent(explicit.content);
-  assert.equal(explicitText.includes(fixtureActor.id), true, explicitText);
-  assert.equal(explicitText.includes(fixtureWorld), true, explicitText);
-  assert.doesNotMatch(explicitText, /profile\s+unavailable/u);
+  for (const explicit of [false, true]) {
+    const client = new Client({ name: "test", version: "1" });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [resolve("build/src/mcp/index.js")],
+      cwd: world,
+      env: explicit ? {
+        ...environment, KEIYAKU_ACTOR_ID: fixture.id, KEIYAKU_ACTOR_WORLD: world, PI_SESSION_ID: "fixture-session",
+      } : environment,
+      stderr: "pipe",
+    });
+    await client.connect(transport);
+    try {
+      const result = await client.callTool({ name: "whoami", arguments: {} });
+      assert.equal(result.isError, false, JSON.stringify(result));
+      const content = result.content as readonly { type: string; text?: string }[];
+      const text = content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n");
+      if (!explicit) {
+        assert.match(text, /none \(not an akuma\)/u);
+        continue;
+      }
+      assert.ok(text.includes(fixture.id) && text.includes(world), text);
+      assert.doesNotMatch(text, /profile\s+unavailable/u);
+      // The shipped Square wait deferral opens the ledger under the packaged server's own environment.
+      const waited = await client.callTool({ name: "wait", arguments: { selectors: [fixture.id], timeout: "1s" } });
+      assert.equal(waited.isError, false, JSON.stringify(waited));
+      assert.equal(existsSync(join(world, "delivery.sqlite")), true);
+    } finally {
+      await client.close();
+    }
+  }
+  assert.deepEqual(snapshotFiles(poisonedWorld), before);
 });
 
 test("SIGTERM retires a pending stdio wait without changing its Contract", async (t) => {

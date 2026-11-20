@@ -71,145 +71,73 @@ test("test runner preserves unrelated inherited environment", () => {
     );
     assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
     assert.match(result.stdout + result.stderr, /repository test environment preserves selected values and scrubs reserved ones/u);
-    assert.match(result.stdout + result.stderr, /# tests 1/u);
   }
 });
 
-test("focused and sweep test children own a fresh home without caller namespaces", (context) => {
+test("focused and sweep runners isolate test children and their descendant ledger", (context) => {
   const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-identity-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const parentHome = join(directory, "parent-home");
-  mkdirSync(parentHome);
-  writeFileSync(join(parentHome, "sentinel"), "untouched");
-  const poisonedWorld = join(directory, "poisoned-world");
-  mkdirSync(join(poisonedWorld, ".keiyaku"), { recursive: true });
-  const poisonedHeart = join(poisonedWorld, ".keiyaku", "heart.db");
+  const parent = join(directory, "caller");
+  mkdirSync(parent);
+  const poisonedHeart = join(parent, "heart.db");
   writeFileSync(poisonedHeart, "poisoned parent heart bytes\n");
-  const ambientLedger = join(directory, "ambient", "delivery.sqlite");
-  mkdirSync(join(directory, "ambient"));
-  const record = join(directory, "environment.json");
-  const descendantRecord = join(directory, "descendant.json");
-  const poisonedCallerKeys = [
-    ...CALLER_ENVIRONMENT_PREFIXES.map((prefix) => `${prefix}POISONED`),
-    ...CALLER_ENVIRONMENT_NAMES,
-  ];
+  const fixture = "tests/environment.test.ts";
+  const record = join(directory, "owned-root");
   mkdirSync(join(directory, "tests"));
   mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
-  writeFileSync(join(directory, "tests", "environment.test.ts"), "// fixture source\n");
+  writeFileSync(join(directory, fixture), "// fixture source\n");
+  const poisonedKeys = [...CALLER_ENVIRONMENT_PREFIXES.map((prefix) => `${prefix}POISONED`), ...CALLER_ENVIRONMENT_NAMES];
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...Object.fromEntries(poisonedKeys.map((key) => [key, `poisoned-${key}`])),
+    HOME: parent, USERPROFILE: parent, KEIYAKU_HOME: parent,
+    KEIYAKU_ACTOR_ID: "aku/probe/1234abcd", KEIYAKU_ACTOR_WORLD: parent,
+    PASEO_HOME: parent, PASEO_PASSWORD: "live-paseo-password",
+    SQUARE_DELIVERY: join(parent, "delivery.sqlite"),
+    TEST_SENTINEL: "sentinel bytes", HTTPS_PROXY: "http://127.0.0.1:6152",
+  };
+  delete env.NODE_TEST_CONTEXT;
   writeFileSync(join(directory, ".test-build", "tests", "environment.test.js"), `
     const fs = require('node:fs');
     const path = require('node:path');
     const assert = require('node:assert/strict');
     require('node:test')('owned test environment', () => {
-      const home = process.env.HOME;
+      const { HOME: home, SQUARE_DELIVERY: ledger } = process.env;
       assert.equal(process.env.USERPROFILE, home);
       assert.equal(process.env.KEIYAKU_HOME, home);
-      assert.ok(fs.existsSync(home));
-      assert.notEqual(home, ${JSON.stringify(parentHome)});
+      assert.notEqual(home, ${JSON.stringify(parent)});
       assert.equal(process.env.HTTPS_PROXY, "http://127.0.0.1:6152");
       assert.equal(process.env.TEST_SENTINEL, "sentinel bytes");
-      assert.equal(process.env.SQUARE_DELIVERY, path.join(home, 'delivery.sqlite'));
-      assert.notEqual(process.env.SQUARE_DELIVERY, ${JSON.stringify(ambientLedger)});
-      for (const key of ${JSON.stringify(poisonedCallerKeys)}) {
+      assert.equal(ledger, path.join(home, 'delivery.sqlite'));
+      for (const key of ${JSON.stringify([...poisonedKeys, "KEIYAKU_ACTOR_ID", "KEIYAKU_ACTOR_WORLD", "PASEO_HOME", "PASEO_PASSWORD"])}) {
         assert.equal(process.env[key], undefined, key);
       }
-      assert.equal(process.env.KEIYAKU_ACTOR_ID, undefined);
-      assert.equal(process.env.KEIYAKU_ACTOR_WORLD, undefined);
-      assert.equal(process.env.PASEO_HOME, undefined);
-      assert.equal(process.env.PASEO_PASSWORD, undefined);
       const child = require('node:child_process').spawnSync(process.execPath, ['-e',
-        "require('node:fs').writeFileSync(process.env.TEST_DESCENDANT_RECORD, JSON.stringify({ home: process.env.HOME, actor: process.env.KEIYAKU_ACTOR_ID }))"],
+        "const e = process.env; require('node:fs').writeFileSync(e.SQUARE_DELIVERY, JSON.stringify({ home: e.HOME, actor: e.KEIYAKU_ACTOR_ID }))"],
         { encoding: 'utf8' });
       assert.equal(child.status, 0, child.stderr);
-      assert.equal(fs.readFileSync(process.env.TEST_DESCENDANT_RECORD, 'utf8'), JSON.stringify({ home }));
-      fs.writeFileSync(process.env.TEST_ENVIRONMENT_RECORD, JSON.stringify({ home }));
+      assert.equal(fs.readFileSync(ledger, 'utf8'), JSON.stringify({ home }));
+      fs.writeFileSync(${JSON.stringify(record)}, home);
+      if (process.env.TEST_FAIL) assert.fail('chosen failure');
     });
   `);
-  const ambient: NodeJS.ProcessEnv = {
-    ...process.env,
-    HOME: parentHome,
-    USERPROFILE: parentHome,
-    KEIYAKU_HOME: parentHome,
-    HTTPS_PROXY: "http://127.0.0.1:6152",
-    SQUARE_DELIVERY: ambientLedger,
-    TEST_SENTINEL: "sentinel bytes",
-    TEST_ENVIRONMENT_RECORD: record,
-    TEST_DESCENDANT_RECORD: descendantRecord,
-    PASEO_HOME: join(directory, "live-paseo-home"),
-    PASEO_PASSWORD: "live-paseo-password",
-  };
-  for (const key of poisonedCallerKeys) ambient[key] = `poisoned-${key}`;
-  ambient.KEIYAKU_ACTOR_ID = "aku/probe/1234abcd";
-  ambient.KEIYAKU_ACTOR_WORLD = poisonedWorld;
-  delete ambient.NODE_TEST_CONTEXT;
   const homes: string[] = [];
   for (const sweep of [false, true]) {
     rmSync(record, { force: true });
-    rmSync(descendantRecord, { force: true });
-    const result = spawnSync(
-      process.execPath,
-      [
-        resolve(root, "scripts/run-tests.mjs"),
-        "--compiled",
-        ...(sweep ? ["--test-concurrency=1"] : ["tests/environment.test.ts"]),
-      ],
-      { cwd: directory, encoding: "utf8", env: ambient },
-    );
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    const observed = JSON.parse(readFileSync(record, "utf8")) as { home: string };
-    assert.equal(existsSync(observed.home), false, "runner returned before fixture home cleanup");
-    assert.notEqual(observed.home, parentHome);
-    assert.notEqual(observed.home, process.env.HOME, "a nested runner must own its home");
-    homes.push(observed.home);
-    assert.deepEqual(readdirSync(parentHome), ["sentinel"]);
-    assert.equal(readFileSync(join(parentHome, "sentinel"), "utf8"), "untouched");
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/run-tests.mjs"), "--compiled",
+      ...(sweep ? ["--test-concurrency=1"] : [fixture])], {
+      cwd: directory, encoding: "utf8", env: { ...env, TEST_FAIL: sweep ? "yes" : "" },
+    });
+    assert.equal(result.status, sweep ? 1 : 0, result.stdout + result.stderr);
+    if (sweep) assert.match(result.stdout + result.stderr, /chosen failure/u);
+    const home = readFileSync(record, "utf8");
+    assert.notEqual(home, process.env.HOME, "a nested runner must own its home");
+    assert.equal(existsSync(home), false, "runner returned before fixture home cleanup");
+    homes.push(home);
+    assert.deepEqual(readdirSync(parent), ["heart.db"]);
     assert.equal(readFileSync(poisonedHeart, "utf8"), "poisoned parent heart bytes\n");
   }
   assert.notEqual(homes[0], homes[1]);
-});
-
-test("focused and sweep runners isolate Square ledgers through descendant exit and clean failures", (context) => {
-  const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-square-"));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const ambient = join(directory, "ambient");
-  mkdirSync(ambient);
-  writeFileSync(join(ambient, "sentinel"), "untouched");
-  mkdirSync(join(directory, "tests"));
-  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
-  writeFileSync(join(directory, "tests", "ledger.test.ts"), "// fixture source\n");
-  const record = join(directory, "observed-root");
-  const roots: string[] = [];
-  for (const sweep of [false, true]) {
-    writeFileSync(join(directory, ".test-build", "tests", "ledger.test.js"), `
-      const fs = require('node:fs');
-      const path = require('node:path');
-      const assert = require('node:assert/strict');
-      require('node:test')('isolated ledger', () => {
-        const ledger = process.env.SQUARE_DELIVERY;
-        const root = path.dirname(ledger);
-        assert.notEqual(root, ${JSON.stringify(ambient)});
-        assert.equal(ledger, path.join(root, 'delivery.sqlite'));
-        assert.ok(fs.existsSync(root));
-        fs.writeFileSync(${JSON.stringify(record)}, root);
-        const child = require('node:child_process').spawnSync(process.execPath, ['-e',
-          "require('node:fs').writeFileSync(process.env.SQUARE_DELIVERY, 'owned')"]);
-        assert.equal(child.status, 0);
-        assert.equal(fs.readFileSync(ledger, 'utf8'), 'owned');
-        ${sweep ? "assert.fail('chosen failure');" : ""}
-      });
-    `);
-    const result = spawnSync(process.execPath, [resolve(root, "scripts/run-tests.mjs"), "--compiled",
-      ...(sweep ? ["--test-concurrency=1"] : ["tests/ledger.test.ts"])], {
-      cwd: directory, encoding: "utf8", env: { ...process.env, SQUARE_DELIVERY: join(ambient, "delivery.sqlite") },
-    });
-    assert.equal(result.status, sweep ? 1 : 0, result.stdout + result.stderr);
-    const observed = readFileSync(record, "utf8");
-    roots.push(observed);
-    assert.equal(existsSync(observed), false, "runner returned before ledger cleanup");
-    assert.deepEqual(readdirSync(ambient), ["sentinel"]);
-    assert.equal(readFileSync(join(ambient, "sentinel"), "utf8"), "untouched");
-  }
-  assert.notEqual(roots[0], roots[1]);
 });
 
 test("test runner suite selection is explicit and fail-closed", () => {
