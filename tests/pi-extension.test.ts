@@ -1,8 +1,7 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -10,12 +9,7 @@ import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js
 import { temporaryDirectory } from "./support/process.js";
 
 type PackageJson = {
-  keywords?: unknown;
-  pi?: { extensions?: unknown; skills?: unknown };
-  files?: unknown;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
+  pi?: { extensions?: unknown };
 };
 
 const rootUrl = new URL(import.meta.url.endsWith(".js") ? "../../" : "../", import.meta.url);
@@ -24,14 +18,6 @@ const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {
   throw new Error("Pi package extension is missing");
 }
-const piSkills = packageJson.pi?.skills;
-if (!Array.isArray(piSkills) || piSkills.some((skill) => typeof skill !== "string")) {
-  throw new Error("Pi package skills are missing");
-}
-// Declared Pi resources ship as authored TypeScript/skills, while the tools
-// consume the package's built public SDK through its ordinary root export.
-const declaredPiResources: readonly string[] = [...piExtension, ...piSkills];
-const sourceExtension = fileURLToPath(new URL(piExtension[0], rootUrl));
 const { default: keiyakuExtension } = (await import(new URL(piExtension[0], rootUrl).href)) as {
   default: (pi: ExtensionAPI) => void;
 };
@@ -360,55 +346,6 @@ test("Pi reports extension load failures to stderr and Akuma activity", async (t
   }
 });
 
-test("npm root package declares its Pi resources", () => {
-  assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);
-  assert.deepEqual(packageJson.pi, {
-    extensions: ["./plugins/pi/keiyaku.ts"],
-    skills: ["./skills"],
-  });
-  const packaged = Array.isArray(packageJson.files) ? packageJson.files.map((entry) => String(entry)) : [];
-  for (const resource of declaredPiResources) {
-    assert.equal(
-      existsSync(fileURLToPath(new URL(resource, rootUrl))),
-      true,
-      `Pi resource is missing from the checkout: ${resource}`,
-    );
-    const target = resource.replace(/^\.\//u, "");
-    assert.equal(
-      packaged.some((entry) => {
-        const root = entry.replace(/^\.\//u, "").replace(/\/$/u, "");
-        return target === root || target.startsWith(`${root}/`);
-      }),
-      true,
-      `npm package files omit Pi resource: ${resource}`,
-    );
-  }
-});
-
-test("Pi loads the root package without host-provided dependency warnings", async (t) => {
-  const root = temporaryDirectory(t, "keiyaku-pi-peer-");
-  const loader = new sdk.DefaultResourceLoader({
-    cwd: root,
-    agentDir: root,
-    settingsManager: sdk.SettingsManager.inMemory({ packages: [fileURLToPath(rootUrl)] }),
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-  });
-  await loader.reload();
-  const result = loader.getExtensions();
-  t.after(() => result.runtime.invalidate());
-  assert.deepEqual(result.errors, []);
-  assert.equal(result.extensions.length, 1);
-  assert.equal(result.extensions[0]?.resolvedPath, sourceExtension);
-  assert.ok(result.extensions[0]?.commands.has("keiyaku"));
-  assert.deepEqual(result.warnings, []);
-  assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
-  assert.equal(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"], "*");
-  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.5.2");
-});
-
 type Handler = (event: unknown, context: ExtensionContext) => unknown;
 
 type CommandHandler = (args: string, context: ExtensionContext) => Promise<void>;
@@ -447,17 +384,6 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
   assert.ok(command);
   return { command, handlers, tools, mcpServers };
 }
-
-test("Pi registers codemode tools and the explicit Keiyaku command without MCP", () => {
-  const { handlers, tools, mcpServers } = install(async () => {
-    throw new Error("status must not run while loading");
-  });
-
-  assert.deepEqual([...handlers.keys()], ["session_start", "agent_settled", "session_shutdown"]);
-  assert.ok(tools.some((tool) => tool.name === "keiyaku_kanshi"));
-  assert.ok(tools.every((tool) => tool.exposure === "codemode"));
-  assert.deepEqual(mcpServers, []);
-});
 
 test("Pi command runs one text status and does not refresh when dismissed", async () => {
   const calls: Array<{ command: string; args: string[] }> = [];

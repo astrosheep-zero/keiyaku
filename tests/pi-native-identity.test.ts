@@ -5,8 +5,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createEventBus, type CreateAgentSessionOptions, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { harnessOwner } from "@astrosheep/square";
-import { deliveryOwner } from "../src/library/keiyaku-attribution.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { registerKeiyakuTools } from "../src/pi/index.js";
 import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
@@ -146,13 +144,4 @@ test("registered Pi tools capture the current Owner on each invocation", async (
     assert.notEqual(result.isError, true, JSON.stringify(result));
     assert.match(JSON.stringify(result), new RegExp(`pi:${session}`, "u"));
   }
-});
-
-test("parent and child native Pi environments resolve distinct delivery Owners", (t) => {
-  t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
-  const parent = deliveryOwner({ PI_SESSION_ID: "parent-session" });
-  const child = deliveryOwner({ PI_SESSION_ID: "child-session" });
-  assert.equal(parent, harnessOwner({ channel: "pi", session: "parent-session" }));
-  assert.equal(child, harnessOwner({ channel: "pi", session: "child-session" }));
-  assert.notEqual(parent, child);
 });

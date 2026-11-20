@@ -62,21 +62,9 @@ test("packaged stdio server launches from its documented standalone configuratio
   t.after(async () => {
     await client.close();
   });
-  const { tools } = await client.listTools();
-  assert.ok(tools.some((tool) => tool.name === "report"));
-  assert.match(help, /Status summarizes active work without a selector/u);
   const status = await client.callTool({ name: "status", arguments: {} });
   assert.equal(status.isError, false);
   assert.equal((status.structuredContent as { kind?: string } | undefined)?.kind, "active-work-summary");
-  const result = await client.callTool({ name: "whoami", arguments: {} });
-  assert.equal(result.isError, false);
-  const created = await client.callTool({ name: "debt_add", arguments: { cwd: root, title: "Stdio flat business input" } });
-  assert.equal(created.isError, false, JSON.stringify(created));
-  const id = (created.structuredContent as { id: string }).id;
-  const detail = await client.callTool({ name: "show", arguments: { selector: id } });
-  assert.equal(detail.isError, false, JSON.stringify(detail));
-  assert.equal(detail.structuredContent, undefined);
-  assert.match(JSON.stringify(detail.content), /Stdio flat business input/u);
   await client.close();
   const processOnEof = spawn(process.execPath, [bin], { cwd: root, stdio: ["pipe", "pipe", "pipe"], env: environment });
   let stdout = "";

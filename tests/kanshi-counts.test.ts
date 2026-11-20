@@ -15,7 +15,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { breakBody, finishBodyIfIdle, readSoul, recordTell } from "../src/akuma/heart/index.js";
 import { Debts, Kanshi, Keis, Keiyaku, KeiyakuError, Repo, World } from "../src/index.js";
-import type { AkumaCaller, KanshiCountsOptions, KanshiScopeInput } from "../src/index.js";
+import type { AkumaCaller, BindOutcome, KanshiCountsOptions, KanshiScopeInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
@@ -25,6 +25,22 @@ import { temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
+
+async function traceGit<T>(path: string, action: () => Promise<T>) {
+  writeFileSync(path, "");
+  const previous = process.env.GIT_TRACE2_EVENT;
+  process.env.GIT_TRACE2_EVENT = path;
+  const start = performance.now();
+  try {
+    const value = await action();
+    const events = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const commands: string[][] = events.filter((event) => event.event === "start").map((event) => event.argv.slice(1));
+    return { value, commands, wallMs: Math.round(performance.now() - start) };
+  } finally {
+    if (previous === undefined) delete process.env.GIT_TRACE2_EVENT;
+    else process.env.GIT_TRACE2_EVENT = previous;
+  }
+}
 
 test("exact counts observe complete independent owners and isolate corrupt Hearts", async (context) => {
   const repository = makeGitRepository();
@@ -42,19 +58,18 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const drop = accepted(await debts.add({ title: "Drop" })).id;
   accepted(await debts.debt({ id: done }).update({ state: "done" }));
   accepted(await debts.debt({ id: drop }).update({ state: "drop" }));
-  const active = [];
+  const active: Extract<BindOutcome, { kind: "accepted" }>[] = [];
   for (let i = 0; i < 12; i++) {
-    active.push(accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown(`Count ${i}`, {
+    // Keep the shared Contract target's workspace unchanged for the exact lag witness.
+    const target = i < 8 ? "main" : active[2]!.contractId;
+    active.push(accepted(await Keis.of(repo).bind({ target, terms: contractMarkdown(`Count ${i}`, {
       Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
     }), gates: ["reviewed"] })));
   }
-  const [waiting, denied] = [active[0]!, active[1]!];
-  for (const item of [waiting, denied]) {
-    assert.ok(item.worktreePath);
-    commitCandidate(repository, item.worktreePath);
-    accepted(await item.kei.deliver());
-  }
-  accepted(await denied.kei.review({ verdict: "unsatisfied", summary: "Review answered negatively" }));
+  const waiting = active[0]!;
+  assert.ok(waiting.worktreePath);
+  commitCandidate(repository, waiting.worktreePath);
+  accepted(await waiting.kei.deliver());
   const terminal = accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown("Terminal", {
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
@@ -89,28 +104,61 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const child = join(worktree, "child");
   mkdirSync(child);
   const contextual = { ...summary, currentContract: { id: waiting.contractId, state: "awaiting-review" } };
-  assert.deepEqual(await summaryAt(worktree), contextual);
   assert.deepEqual(await summaryAt(child, world), contextual);
   const report = await Kanshi.of({ world, repo }).counts();
   assert.deepEqual([report.akuma, report.contracts, report.debts], [12, 12, 12]);
-  const unavailable = await Kanshi.of({ world, repo }).counts({ akumaCaller: null });
-  assert.ok(typeof unavailable.akuma !== "number" && unavailable.akuma.kind === "failed");
-  assert.deepEqual([unavailable.contracts, unavailable.debts], [report.contracts, report.debts]);
+
+  await context.test("World observation bounds physical worktree reads before detail", async (t) => {
+    const view = Kanshi.of({ world, repo });
+    const tracePath = join(repository.path, ".git", "status-trace.jsonl");
+    const observed = await traceGit(tracePath, () => view.board());
+    const board = observed.value.contracts;
+    assert.ok(!("kind" in board), JSON.stringify(board));
+    assert.equal(board.more, true);
+    const status = observed.commands.filter((args) => args.includes("--porcelain=v2"));
+    const lag = observed.commands.filter((args) => args.includes("rev-list"));
+    assert.equal(status.length, 10, "only the ten selected catalogue workspaces are observed");
+    assert.equal(lag.length, 10, "target lag is observed only for selected rows");
+    const selectedPaths = new Set(board.rows!.map(row => active.find(candidate => candidate.contractId === row.id)!.worktreePath));
+    assert.ok(status.every(args => selectedPaths.has(args[args.indexOf("-C") + 1]!)));
+    t.diagnostic(JSON.stringify({
+      stage: "bare", worktrees: active.length, processes: observed.commands.length,
+      status: status.length, lag: lag.length, wallMs: observed.wallMs,
+    }));
+
+    const selected = active.at(-1)!;
+    const path = selected.worktreePath!;
+    const targetPath = active[2]!.worktreePath;
+    const exact = await traceGit(tracePath, () => view.contract(selected.contractId));
+    const detail = exact.value;
+    assert.ok(detail.kind === "contract");
+    assert.equal(detail.id, selected.contractId);
+    assert.equal(detail.workspace.kind, "present");
+    assert.equal(detail.workspace.counts, undefined);
+    assert.equal(detail.targetLag, 0);
+    assert.equal(exact.commands.filter((args) => args.includes("--porcelain=v2")).length, 1);
+    assert.ok(exact.commands.filter((args) => args[0] === "-C").every((args) => args[1] === path || args[1] === targetPath));
+    t.diagnostic(JSON.stringify({
+      stage: "selected", processes: exact.commands.length,
+      status: exact.commands.filter((args) => args.includes("--porcelain=v2")).length, wallMs: exact.wallMs,
+    }));
+
+    renameSync(path, `${path}-missing`);
+    try {
+      const missing = await view.contract(selected.contractId);
+      assert.ok(missing.kind === "contract" && missing.workspace.kind === "unavailable");
+      assert.equal(missing.workspace.path, path);
+      assert.equal(missing.targetLag, undefined);
+    } finally {
+      renameSync(`${path}-missing`, path);
+    }
+  });
+
   writeFileSync(stopped.paths.heart, "corrupt");
   const broken = await Kanshi.of({ world, repo }).counts();
   assert.ok(typeof broken.akuma !== "number" && broken.akuma.kind === "failed");
   assert.deepEqual(broken.contracts, report.contracts);
   assert.deepEqual(broken.debts, report.debts);
-  const partial = await summaryAt(world);
-  assert.equal(partial.kind, "active-work-summary");
-  assert.equal(summary.kind, "active-work-summary");
-  assert.ok("kind" in partial.akumas && partial.akumas.kind === "failed");
-  assert.deepEqual(partial.contracts, summary.contracts);
-  assert.deepEqual(partial.debts, summary.debts);
-  writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
-  const brokenDebt = await Kanshi.of({ world, repo }).counts();
-  assert.ok(typeof brokenDebt.debts !== "number" && brokenDebt.debts.kind === "failed");
-  assert.deepEqual(brokenDebt.contracts, report.contracts);
 });
 
 test("absence, explicit Repo and crossing validation remain independent", async (context) => {

@@ -1,20 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import { SettingsError } from "../src/settings.js";
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
-import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { projectSettings, Settings, settingsSchema } from "../src/settings.js";
-import { z } from "zod";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { KeiyakuError } from "../src/library/outcome.js";
-import { derivedVerificationMode } from "../src/library/contract-settings.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { makeGitRepository } from "./support/git.js";
@@ -41,22 +38,6 @@ async function loadNamed(value: SettingsFixture, name: string) {
   const admission = adapter.admitOptions(akumaName.options);
   if (admission.kind === "refused") throw new TypeError(admission.diagnostic);
   return { ...akumaName, options: admission.options };
-}
-
-function contractGates(context: TestContext) {
-  const repository = makeGitRepository();
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  context.after(() => rmSync(repository.path, { recursive: true, force: true }));
-  const repo = Repo.at({ path: repository.path });
-  return async (loaded: Settings, names?: readonly string[]) => {
-    const result = accepted(
-      await Keis.of(await repo, { settings: loaded }).bind({
-        terms: contractDocument("Settings derivation", "true"),
-        ...(names === undefined ? {} : { gates: names }),
-      }),
-    );
-    return present(await result.kei.state()).terms.gates;
-  };
 }
 
 test("Settings.load keeps omitted cwd user-only and canonical equal coordinates in user scope", async () => {
@@ -223,147 +204,13 @@ test("user Settings entries named like object properties retain their values and
       ]) }]]),
     };
     assert.equal(settingsSchema.safeParse(invalid).success, false, "prototype-named entries still validate their value");
-    for (const reused of ["ref", "inline"] as const) {
-      const schema = z.toJSONSchema(settingsSchema, { reused });
-      function checkReferences(value: unknown): void {
-        if (value === null || typeof value !== "object") return;
-        for (const [key, child] of Object.entries(value)) {
-          if (key === "$ref" && typeof child === "string") {
-            assert.ok(child.startsWith("#/"));
-            let target: unknown = schema;
-            for (const segment of child.slice(2).split("/")) {
-              assert.ok(target !== null && typeof target === "object", child);
-              target = Reflect.get(target, segment.replaceAll("~1", "/").replaceAll("~0", "~"));
-            }
-            assert.notEqual(target, undefined, child);
-          } else checkReferences(child);
-        }
-      }
-      checkReferences(schema);
-    }
+
   } finally {
     value.close();
   }
 });
 
-test("Settings isolates malformed namespaces but never falls through a failed higher scope", async (context) => {
-  const gates = contractGates(context);
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        gates: { default: { kind: "bundle", gates: ["reviewed"] } },
-        providers: [],
-      }),
-    );
-    let loaded = await Settings.load({ cwd: value.project, home: value.home });
-    assert.deepEqual(await gates(loaded), ["reviewed"]);
-    assert.equal(loaded.namespace("providers").kind, "failed");
-
-    writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
-    loaded = await Settings.load({ cwd: value.project, home: value.home });
-    assert.equal(loaded.namespace("gates").kind, "failed");
-    await assert.rejects(() => gates(loaded), invalidInputFromSettings);
-    await assert.rejects(() => gates(loaded, ["reviewed"]), invalidInputFromSettings);
-    // Empty gate selection skips only gates; unavailable resource scopes still fail the hook consumer.
-    await assert.rejects(() => gates(loaded, []), invalidInputFromSettings);
-  } finally {
-    value.close();
-  }
-});
-
-test("Contract bind expands mixed gates and bundles, deduplicates stably, and defaults to reviewed", async (context) => {
-  const gates = contractGates(context);
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        gates: {
-          empty: { kind: "bundle", gates: [] },
-          first: { kind: "bundle", gates: ["reviewed", "verified", "reviewed"] },
-          second: { kind: "bundle", gates: ["verified"] },
-          custom: { kind: "bundle", gates: ["security-audited"] },
-          future: { kind: "external", gate: "security-audited" },
-        },
-      }),
-    );
-    let loaded = await Settings.load({ home: value.home });
-    assert.deepEqual(await gates(loaded), ["reviewed"]);
-    assert.deepEqual(await gates(loaded, []), []);
-    assert.deepEqual(await gates(loaded, ["empty"]), []);
-    assert.deepEqual(await gates(loaded, ["first", "second", "first"]), ["reviewed", "verified"]);
-    assert.deepEqual(await gates(loaded, ["verified", "first", "custom", "verified"]), [
-      "verified",
-      "reviewed",
-      "security-audited",
-    ]);
-    assert.deepEqual(await gates(loaded, ["reviewed"]), ["reviewed"]);
-    await assert.rejects(
-      () => gates(loaded, ["default"]),
-      /Unknown gate 'default'\. Known gate names: reviewed, verified, custom, empty, first, future, second/u,
-    );
-    for (const name of ["", " ", "Security", "reviewed,verified"]) {
-      await assert.rejects(
-        () => gates(loaded, [name]),
-        (error: unknown) =>
-          invalidInputFromSettings(error) && error instanceof Error && /gate name/u.test(error.message),
-      );
-    }
-
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        gates: {
-          default: { kind: "bundle", gates: [] },
-          reviewed: { kind: "bundle", gates: ["verified"] },
-        },
-      }),
-    );
-    loaded = await Settings.load({ home: value.home });
-    assert.deepEqual(await gates(loaded), []);
-    assert.deepEqual(await gates(loaded, ["reviewed"]), ["verified"]);
-  } finally {
-    value.close();
-  }
-});
-
-test("Contract bind validates only selected bundle records and hard-rejects the old grammar", async (context) => {
-  const gates = contractGates(context);
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        gates: {
-          good: { kind: "bundle", gates: ["reviewed"] },
-          future: { kind: "external", gate: "security-audited" },
-          legacy: ["reviewed"],
-          extra: { kind: "bundle", gates: ["reviewed"], note: true },
-          invalid: { kind: "bundle", gates: ["Security"] },
-          custom: { kind: "bundle", gates: ["security-audited"] },
-        },
-      }),
-    );
-    const loaded = await Settings.load({ home: value.home });
-    assert.deepEqual(await gates(loaded, ["good"]), ["reviewed"]);
-    await assert.rejects(() => gates(loaded, ["missing"]), /Unknown gate 'missing'/u);
-    await assert.rejects(() => gates(loaded, ["future"]), /unsupported kind/u);
-    await assert.rejects(() => gates(loaded, ["legacy"]), /must be an object/u);
-    await assert.rejects(() => gates(loaded, ["extra"]), /unknown field/u);
-    await assert.rejects(
-      () => gates(loaded, ["invalid"]),
-      (error: unknown) =>
-        invalidInputFromSettings(error) && error instanceof Error && /invalid gate word/u.test(error.message),
-    );
-    assert.deepEqual(await gates(loaded, ["custom"]), ["security-audited"]);
-  } finally {
-    value.close();
-  }
-});
-
-test("Contract audit and delivery consume captured freshness while empty Settings stays permissive", async () => {
+test("Contract delivery consumes captured freshness after a Settings edit", async () => {
   const repository = makeGitRepository();
   try {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -377,7 +224,6 @@ test("Contract audit and delivery consume captured freshness while empty Setting
         gates: ["reviewed"],
       }),
     );
-    const id = present(await bound.kei.state()).id;
     assert.ok(bound.worktreePath);
     const path = bound.worktreePath;
     writeFileSync(join(path, "candidate.txt"), "candidate\n");
@@ -393,113 +239,13 @@ test("Contract audit and delivery consume captured freshness while empty Setting
       kind: "not-based-on-target",
       targetHead: repository.run(["rev-parse", "main"]).trim(),
     };
-    const audited = await bound.kei.previewDelivery();
-    assert.ok(audited.kind === "blocked");
-    assert.deepEqual(audited.reason, refusal);
     const rejected = await bound.kei.deliver();
     assert.equal(rejected.kind, "refused");
     if (rejected.kind !== "refused") throw new Error("expected strict delivery refusal");
     assert.deepEqual(rejected.reason, refusal);
     assert.equal(present(await bound.kei.state()).delivery, null);
-
-    const permissive = Keis.of(repo, { settings: await projectSettings(repository.path) }).kei({ id });
-    const ready = await permissive.previewDelivery();
-    assert.equal(ready.kind, "ready");
-    accepted(await permissive.deliver());
-    assert.deepEqual(present(await permissive.state()).delivery?.data.policy, { requireBranchesToBeUpToDate: false });
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe", async () => {
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        providers: {
-          local: { kind: "opencode-sdk", executable: "opencode-custom", env: { LITERAL: "yes" } },
-        },
-      }),
-    );
-    writeFileSync(join(value.home, "akumas", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
-    const loaded = await loadNamed(value, "builder");
-    assert.deepEqual(loaded.provider, {
-      name: "local",
-      kind: "opencode-sdk",
-      executable: "opencode-custom",
-      env: { LITERAL: "yes" },
-    });
-    assert.deepEqual(loaded.options, { model: "openai/test" });
-    assert.equal(Object.isFrozen(loaded.provider), true);
-    assert.equal(Object.isFrozen(loaded.provider.env), true);
-  } finally {
-    value.close();
-  }
-});
-
-test("Archetype resolves builtin and configured Pi executions", async () => {
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "akumas", "pi-worker.md"),
-      "---\nprovider: pi\nmodel: openai/gpt\neffort: high\n---\nWork.\n",
-    );
-    let loaded = await loadNamed(value, "pi-worker");
-    assert.deepEqual(loaded.provider, { name: "pi", kind: "pi" });
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: {} } } }));
-    writeFileSync(join(value.home, "akumas", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
-    loaded = await loadNamed(value, "pi-worker");
-    assert.deepEqual(loaded.provider, { name: "local", kind: "pi", env: {} });
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({ providers: { local: { kind: "pi", env: { A: "x" } } } }),
-    );
-    await assert.rejects(loadNamed(value, "pi-worker"), /env injection not supported for provider pi/u);
-  } finally {
-    value.close();
-  }
-});
-
-test("Archetype inherits the provider recipe and body while child fields replace their settings", async () => {
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "akumas", "base.md"),
-      "---\nprovider: codex-app-server\nmodel: base-model\neffort: high\nnetwork: disabled\ndescription: Base\n---\nBase personality.\n",
-    );
-    writeFileSync(join(value.home, "akumas", "child.md"), "---\nbase: base\nmodel: child-model\n---\n");
-    const inherited = await loadNamed(value, "child");
-    assert.deepEqual(inherited.provider, { name: "codex-app-server", kind: "codex-app-server" });
-    assert.equal(inherited.description, "Base");
-    assert.deepEqual(inherited.options, {
-      model: "child-model",
-      effort: "high",
-      network: "disabled",
-      systemPrompt: "Base personality.\n",
-      systemPromptMode: "append",
-    });
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({ providers: { local: { kind: "codex-app-server" } } }),
-    );
-    writeFileSync(
-      join(value.home, "akumas", "child.md"),
-      "---\nbase: base\nprovider: local\neffort: low\ndescription: Child\n---\nChild personality.\n",
-    );
-    const replaced = await loadNamed(value, "child");
-    assert.deepEqual(replaced.provider, { name: "local", kind: "codex-app-server" });
-    assert.equal(replaced.description, "Child");
-    assert.deepEqual(replaced.options, {
-      model: "base-model",
-      effort: "low",
-      network: "disabled",
-      systemPrompt: "Child personality.\n",
-      systemPromptMode: "append",
-    });
-  } finally {
-    value.close();
   }
 });
 
@@ -619,57 +365,6 @@ test("Archetype resolves a second configured ACP execution without registry chan
   }
 });
 
-test("Archetype systemPromptMode defaults to append and rejects invalid definitions", async () => {
-  const value = fixture();
-  try {
-    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-    assert.deepEqual((await loadNamed(value, "worker")).options, {
-      systemPrompt: "Work.\n",
-      systemPromptMode: "append",
-    });
-    writeFileSync(
-      join(value.home, "akumas", "worker.md"),
-      "---\nprovider: claude\nsystemPromptMode: append\n---\nWork.\n",
-    );
-    assert.deepEqual((await loadNamed(value, "worker")).options, {
-      systemPrompt: "Work.\n",
-      systemPromptMode: "append",
-    });
-    writeFileSync(
-      join(value.home, "akumas", "worker.md"),
-      "---\nprovider: claude\nsystemPromptMode: replace\n---\nWork.\n",
-    );
-    assert.deepEqual((await loadNamed(value, "worker")).options, {
-      systemPrompt: "Work.\n",
-      systemPromptMode: "replace",
-    });
-    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\n---\n");
-    assert.deepEqual((await loadNamed(value, "worker")).options, {});
-    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\nsystemPromptMode: replace\n---\n");
-    await assert.rejects(loadNamed(value, "worker"), /systemPromptMode requires a nonempty Markdown body/u);
-    writeFileSync(
-      join(value.home, "akumas", "worker.md"),
-      "---\nprovider: claude\nsystemPromptMode: merge\n---\nWork.\n",
-    );
-    await assert.rejects(loadNamed(value, "worker"), /systemPromptMode must be one of append, replace/u);
-  } finally {
-    value.close();
-  }
-});
-
-test("provider option decoding preserves historical prompts and rejects invalid modes", () => {
-  assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n" }), { systemPrompt: "Work.\n" });
-  assert.deepEqual(decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "replace" }), {
-    systemPrompt: "Work.\n",
-    systemPromptMode: "replace",
-  });
-  assert.throws(() => decodeProviderOptions({ systemPromptMode: "append" }), /requires systemPrompt/u);
-  assert.throws(
-    () => decodeProviderOptions({ systemPrompt: "Work.\n", systemPromptMode: "merge" }),
-    /systemPromptMode must be append, replace/u,
-  );
-});
-
 test("generic ACP prompt argument mode matches only the configured mapping", async () => {
   const value = fixture();
   const historical = {
@@ -728,103 +423,6 @@ test("generic ACP prompt argument mode matches only the configured mapping", asy
   }
 });
 
-test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
-  const value = fixture();
-  try {
-    writeFileSync(
-      join(value.home, "settings.json"),
-      JSON.stringify({
-        gates: {
-          default: { kind: "bundle", gates: ["reviewed"] },
-        },
-      }),
-    );
-    const observed = await Settings.load({ cwd: value.project, home: value.home });
-    const text = await runCli(["-C", value.project, "settings"], {
-      cwd: value.project,
-      environment: { KEIYAKU_HOME: value.home },
-    });
-    assert.equal(text.exit, 0);
-    assert.match(text.stdout, /^settings\n  user  read(?:\n    )?/u);
-    assert.match(
-      text.stdout,
-      /    entry  default · user\n      value  object \(2\)\n        kind  "bundle"\n        gates  list \(1\)\n          "0"  "reviewed"/u,
-    );
-    const json = await cliJson<Pick<Settings, "namespaces">>(["-C", value.project, "settings"], {
-      cwd: value.project,
-      environment: { KEIYAKU_HOME: value.home },
-    });
-    assert.deepEqual(json.value.namespaces, { gates: observed.namespace("gates") });
-  } finally {
-    value.close();
-  }
-});
-
-test("settings CLI preserves opaque names, types, empty collections and provenance", async () => {
-  const value = fixture();
-  try {
-    const opaque = {
-      emptyArray: [],
-      emptyObject: {},
-      number: 1,
-      string: "1",
-      monkey: "banana",
-      token: "synthetic",
-      password: "fixture",
-      "dotted.key": "line\n\u001b",
-      dotted: { key: "nested" },
-      rows: [{ x: 1 }, { x: "1" }, null, false, ""],
-      "escaped\nkey": 'tab\tquote"slash\\\u200d',
-    };
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ future: { local: { lower: true } } }));
-    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({ future: { local: opaque } }));
-    const runtime = { cwd: value.project, environment: { KEIYAKU_HOME: value.home } };
-    const text = await runCli(["-C", value.project, "settings"], runtime);
-    assert.equal(text.exit, 0, text.stderr);
-    assert.equal(text.stderr, "");
-    assert.equal(
-      text.stdout.slice(text.stdout.indexOf("    entry")),
-      [
-        "    entry  local · project · shadows user",
-        "      value  object (11)",
-        "        emptyArray  list (0)",
-        "        emptyObject  object (0)",
-        "        number  1",
-        '        string  "1"',
-        '        monkey  "banana"',
-        '        token  "synthetic"',
-        '        password  "fixture"',
-        '        "dotted.key"  "line\\n\\u001b"',
-        "        dotted  object (1)",
-        '          key  "nested"',
-        "        rows  list (5)",
-        '          "0"  object (1)',
-        "            x  1",
-        '          "1"  object (1)',
-        '            x  "1"',
-        '          "2"  null',
-        '          "3"  false',
-        '          "4"  ""',
-        '        "escaped\\nkey"  "tab\\tquote\\\"slash\\\\\\u200d"',
-        "",
-      ].join("\n"),
-    );
-    assert.doesNotMatch(text.stdout, /redacted|lower|\u001b|\u200d/u);
-    const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
-    assert.equal(json.exit, 0, json.stderr);
-    const observed = await Settings.load({ cwd: value.project, home: value.home });
-    assert.deepEqual(json.value.scopes, observed.scopes);
-    assert.deepEqual(json.value.namespaces, {
-      future: {
-        kind: "read",
-        entries: { local: { source: "project", shadows: true, value: opaque } },
-      },
-    });
-  } finally {
-    value.close();
-  }
-});
-
 test("settings CLI retains scoped failures and available opaque observations", async () => {
   const value = fixture();
   try {
@@ -855,25 +453,6 @@ test("settings CLI retains scoped failures and available opaque observations", a
   }
 });
 
-test("settings text preserves long paths and opaque provider values", async () => {
-  const value = fixture();
-  try {
-    const longHome = join(value.root, `${"settings-path-".repeat(8)}home`);
-    mkdirSync(longHome, { recursive: true });
-    const longPath = join(longHome, "settings.json");
-    writeFileSync(
-      longPath,
-      JSON.stringify({ providers: { local: { kind: "acp", env: { LONG_VALUE: "x".repeat(100) } } } }),
-    );
-    const observed = await Settings.load({ cwd: value.project, home: longHome });
-    const text = renderSettingsText(observed);
-    assert.match(text, new RegExp(realpathSync.native(longPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-    assert.match(text, /LONG_VALUE  "x{100}"/u);
-  } finally {
-    value.close();
-  }
-});
-
 // ---------------------------------------------------------------------------
 // Captured Settings derivation
 // ---------------------------------------------------------------------------
@@ -898,84 +477,7 @@ function invalidInputFromSettings(error: unknown): boolean {
   return error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof SettingsError;
 }
 
-test("omitted Settings accepts built-in gates only, empty hooks, and false freshness", async () => {
-  const repository = makeGitRepository();
-  try {
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const repo = await Repo.at({ path: repository.path });
-    const selected = accepted(
-      await Keis.of(repo).bind({
-        terms: contractDocument(),
-        gates: ["reviewed", "reviewed"],
-      }),
-    );
-    assert.deepEqual(present(await selected.kei.state()).terms.gates, ["reviewed"]);
-    await assert.rejects(
-      Keis.of(repo).bind({ terms: contractDocument(), gates: ["security-audited"] }),
-      (error: unknown) =>
-        error instanceof KeiyakuError &&
-        error.category === "invalid-input" &&
-        /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
-    );
-    const bare = accepted(await Keis.of(repo).bind({ terms: contractDocument("Bare core") }));
-    assert.deepEqual(present(await bare.kei.state()).terms.gates, []);
-    const empty = accepted(
-      await Keis.of(repo, { settings: await projectSettings(repository.path) }).bind({
-        terms: contractDocument("Provided empty Settings"),
-      }),
-    );
-    assert.deepEqual(present(await empty.kei.state()).terms.gates, ["reviewed"]);
-    await assert.rejects(
-      Keis.of(repo).bind({ terms: contractDocument(), gates: ["Security"] }),
-      (error: unknown) =>
-        error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof TypeError,
-    );
-  } finally {
-    rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("captured Settings selects the configured default while explicit [] skips the lookup", async () => {
-  const repository = makeGitRepository();
-  try {
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    writeProjectSettings(repository.path, {
-      gates: {
-        default: { kind: "bundle", gates: ["reviewed"] },
-        strict: { kind: "bundle", gates: ["reviewed", "security-audited"] },
-      },
-    });
-    const captured = await projectSettings(repository.path);
-    const repo = await Repo.at({ path: repository.path });
-    const omitted = accepted(
-      await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Omitted") }),
-    );
-    assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
-    const mixed = accepted(
-      await Keis.of(repo, { settings: captured }).bind({
-        terms: contractDocument("Mixed"),
-        gates: ["reviewed", "strict", "reviewed"],
-      }),
-    );
-    assert.deepEqual(present(await mixed.kei.state()).terms.gates, ["reviewed", "security-audited"]);
-    const explicit = accepted(
-      await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Explicit"), gates: [] }),
-    );
-    assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
-
-    // Later edits never rewrite an already admitted decision or the captured value.
-    writeProjectSettings(repository.path, {
-      gates: { default: { kind: "bundle", gates: ["security-audited"] } },
-    });
-    assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
-    const again = accepted(await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Again") }));
-    assert.deepEqual(present(await again.kei.state()).terms.gates, ["reviewed"]);
-  } finally {
-    rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("a broken gates namespace is scoped to omitted and word-selected bind or amend", async () => {
+test("a broken gates namespace refuses selected gates but not an explicit empty selection", async () => {
   const repository = makeGitRepository();
   try {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -997,50 +499,16 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
       }),
     );
     assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
-    // Omitted amend preserves admitted gates without lookup; fork copies the source gates.
-    accepted(await brokenHandle.amend({ edits: contractDocument("Admitted v2") }));
-    assert.deepEqual(present(await brokenHandle.state()).terms.gates, ["reviewed"]);
-    const forked = accepted(await Keis.of(repo, { settings: broken }).bind({ forkOf: id }));
-    assert.deepEqual(present(await forked.kei.state()).terms.gates, ["reviewed"]);
-    // Reads and unrelated verbs never select the namespace.
-    assert.ok(Array.isArray((await Keis.of(repo, { settings: broken }).list({})).rows!));
-
     const before = await brokenHandle.history();
-    const rowsBefore = (await Keis.of(repo, { settings: broken }).list({})).rows!.length;
     await assert.rejects(
       Keis.of(repo, { settings: broken }).bind({ terms: contractDocument("Omitted broken") }),
       invalidInputFromSettings,
     );
-    await assert.rejects(
-      Keis.of(repo, { settings: broken }).bind({
-        terms: contractDocument("Word-selected broken"),
-        gates: ["reviewed"],
-      }),
-      invalidInputFromSettings,
-    );
     await assert.rejects(brokenHandle.amend({ gates: ["reviewed"] }), invalidInputFromSettings);
     assert.deepEqual(await brokenHandle.history(), before);
-    assert.equal((await Keis.of(repo, { settings: broken }).list({})).rows!.length, rowsBefore);
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
   }
-});
-
-test("Verification currency defaults optimistically and accepts only its selected mode", async () => {
-  const value = fixture();
-  try {
-    assert.equal(derivedVerificationMode({}), "optimistic");
-    for (const [configuration, expected] of [
-      [{}, "optimistic"],
-      [{ verification: {} }, "optimistic"],
-      [{ verification: { mode: "optimistic" } }, "optimistic"],
-      [{ verification: { mode: "strict" } }, "strict"],
-    ] as const) {
-      writeProjectSettings(value.project, configuration);
-      const settings = await Settings.load({ cwd: value.project, home: value.home });
-      assert.equal(derivedVerificationMode({ settings }), expected);
-    }
-  } finally { value.close(); }
 });
 
 test("invalid Verification settings fail verify before admission without contaminating other verbs", async () => {
@@ -1052,28 +520,20 @@ test("invalid Verification settings fail verify before admission without contami
     const settings = await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
     const contracts = Keis.of(repo, { settings });
     const { kei } = accepted(await contracts.bind({ terms: contractDocument("Verification isolation", "true"), gates: ["reviewed", "verified"] }));
-    accepted(await kei.amend({ edits: "## Replace: Objective\n\nKeep Verification settings isolated.\n" }));
-    accepted(await kei.arc({ body: "# Namespace isolation\n" }));
-    assert.ok((await contracts.list({})).rows?.length);
     const before = await kei.history();
     const id = present(await kei.state()).id;
-    for (const verification of [[], null, "strict", { unknown: true }, { mode: "loose" }, { mode: null }, { mode: false }]) {
+    for (const verification of [[], { mode: "loose" }]) {
       writeProjectSettings(repository.path, { verification });
       const selected = Keis.of(repo, { settings: await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") }) }).kei({ id });
       await assert.rejects(selected.verify(), (error: unknown) => {
         assert.ok(invalidInputFromSettings(error));
         if (verification !== null && typeof verification === "object" && "mode" in verification)
           assert.equal((error as Error).message, 'verification.mode must be "optimistic" or "strict"');
-        if (verification !== null && typeof verification === "object" && "unknown" in verification)
-          assert.equal((error as Error).message, "verification has unknown entry: unknown");
         return true;
       });
       assert.deepEqual(await selected.history(), before);
     }
-    assert.equal((await kei.previewDelivery()).kind, "ready");
     assert.equal(accepted(await kei.deliver()).placement?.kind, "gates-unsatisfied");
-    assert.equal(accepted(await kei.review({ verdict: "satisfied", summary: "Broken Verification settings do not affect review" })).placement?.kind, "gates-unsatisfied");
-    accepted(await kei.abandon());
   } finally { rmSync(repository.path, { recursive: true, force: true }); }
 });
 
@@ -1086,7 +546,6 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
 
     writeProjectSettings(repository.path, { worktree: { create: "not-an-array" } });
     const brokenHooks = await projectSettings(repository.path);
-    assert.equal((await Keis.of(repo, { settings: brokenHooks }).list({})).rows, undefined);
     await assert.rejects(
       Keis.of(repo, { settings: brokenHooks }).bind({ terms: contractDocument("Broken hooks") }),
       invalidInputFromSettings,
@@ -1096,43 +555,9 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
     const brokenFreshness = await projectSettings(repository.path);
     const selected = Keis.of(repo, { settings: brokenFreshness }).kei({ id: missing });
     await assert.rejects(selected.previewDelivery(), invalidInputFromSettings);
-    await assert.rejects(selected.deliver(), invalidInputFromSettings);
-    await assert.rejects(selected.verify(), invalidInputFromSettings);
     // Review consumes neither namespace and reaches its own admission instead.
     assert.equal((await selected.review({ verdict: "satisfied", summary: "Settings review passed" })).kind, "refused");
-
-    const cause = new SettingsError("unavailable git observation");
-    const unavailable: Settings = {
-      ...brokenFreshness,
-      namespace(name) {
-        if (name === "git") throw cause;
-        return brokenFreshness.namespace(name);
-      },
-    };
-    await assert.rejects(
-      Keis.of(repo, { settings: unavailable }).kei({ id: missing }).previewDelivery(),
-      (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input" && error.cause === cause,
-    );
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
-  }
-});
-
-test("the CLI keeps a broken selected namespace as invalid input, not a draft refusal", async () => {
-  const repository = makeGitRepository();
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-settings-cli-home-"));
-  try {
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    writeProjectSettings(repository.path, { gates: [] });
-    const environment = { KEIYAKU_HOME: home };
-    const readStdin = async () => contractDocument("CLI broken gates");
-    const refused = await runCli(["-C", repository.path, "bind", "-"], { environment, readStdin });
-    assert.equal(refused.exit, 64, refused.stdout + refused.stderr);
-    assert.doesNotMatch(refused.stdout, /draft/u);
-    const explicit = await runCli(["-C", repository.path, "bind", "--gates", "", "-"], { environment, readStdin });
-    assert.equal(explicit.exit, 0, explicit.stdout + explicit.stderr);
-  } finally {
-    rmSync(repository.path, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
   }
 });

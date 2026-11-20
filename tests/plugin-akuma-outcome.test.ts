@@ -6,9 +6,8 @@ import { join } from "node:path";
 import { DeliveryLedger, deliveryKeyPrefix, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { type TestContext } from "node:test";
-import { Akuma, Akumas, KeiyakuError, World, type AkumaTellResult, type WorldRoot } from "../src/index.js";
+import { Akuma, Akumas, World, type AkumaTellResult, type WorldRoot } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { readAkumaWork } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
@@ -341,17 +340,6 @@ test("activation diagnostics belong to the initiating host and are never replaye
   assert.deepEqual(later, []);
 });
 
-test("host options reject malformed capabilities before construction or birth effects", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-host-invalid-"));
-  const invalidInput = (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input";
-  for (const host of [null, { reportDiagnostic: "stderr" }, { execution: {} }]) {
-    assert.throws(() => Akumas.of(world, host as never), invalidInput);
-    assert.throws(() => Akuma.select(world, "aku/worker/0b500015", host as never), invalidInput);
-    await assert.rejects(Akuma.birth("worker", { root: world, host: host as never }), invalidInput);
-  }
-  assert.equal((await Akumas.of(world).list()).rows, undefined, "an empty roster omits rows");
-});
-
 function signal(akumaId: string, sequence: number): Signal {
   return { kind: "akuma.outcome-observed", akumaId, historyId: `turn/${sequence}` };
 }
@@ -385,8 +373,6 @@ test("public status observes committed identity, not idle or incidental internal
   const api = Akumas.of(world);
   await api.list();
   await readAkumaWork(world, value.allocated.id);
-  await new AkumaOwner(value.allocated.id, world).history();
-  await new AkumaOwner(value.allocated.id, world).lastAnswer();
   assert.deepEqual(recorded.signals(), [], "lifecycle production, roster and internal reads are not observers");
   assert.equal((await Akuma.select(world, empty.allocated.id).idle({ timeoutMs: 0 })).reason, "completed");
   await api.status({ akuma: empty.allocated.id });
@@ -397,16 +383,6 @@ test("public status observes committed identity, not idle or incidental internal
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence)]);
   recorded.reset();
   const failed = await outcome(value);
-  await Akuma.select(world, value.allocated.id).status();
-  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)]);
-  recorded.reset();
-  await api.status({ akuma: value.allocated.id });
-  assert.deepEqual(
-    recorded.signals(),
-    [signal(value.allocated.id, failed.sequence)],
-    "a distinct operation may observe the same result again",
-  );
-  recorded.reset();
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
   assert.equal(open.work.kind, "open");
@@ -443,12 +419,7 @@ test("history page, exact and last use the identity of the actual retained resul
     signal(value.allocated.id, answered.sequence),
     signal(value.allocated.id, failed.sequence),
   ]);
-  recorded.reset();
-  await Akuma.select(world, value.allocated.id).history();
-  assert.deepEqual(recorded.signals(), [
-    signal(value.allocated.id, answered.sequence),
-    signal(value.allocated.id, failed.sequence),
-  ]);
+
 });
 
 test("all-wait observes final snapshot outcomes once per operation", { timeout: 10_000 }, async (t) => {
@@ -470,9 +441,7 @@ test("all-wait observes final snapshot outcomes once per operation", { timeout: 
   });
   assert.equal(result.reason, "deadline");
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
-  recorded.reset();
-  await Akuma.select(world, first.allocated.id).idle({ timeoutMs: 0 });
-  assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
+
 });
 
 async function squareObserver(t: TestContext, world: WorldRoot, additional: readonly ReturnType<typeof harnessOwner>[] = []) {

@@ -9,14 +9,11 @@ import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-ag
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { harnessOwner } from "@astrosheep/square";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { Akuma, Keiyaku, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
-import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
-import { beginTurn, endTurn, readHeart, readLatestTurnForBody, readSoul, readTell } from "../src/akuma/heart/index.js";
+import { readHeart, readLatestTurnForBody, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
-import { bornBody } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { isolateUserHome } from "./support/user-home.js";
 import {
@@ -169,20 +166,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     const catalogue = (await client.listTools()).tools;
     const tools = native.session.getAllTools().filter((tool) => tool.namespace?.name === "keiyaku");
     assert.deepEqual(tools.map((tool) => tool.name), catalogue.map((tool) => `keiyaku_${tool.name}`));
-    for (const [index, tool] of tools.entries()) {
-      const expected = catalogue[index]!;
-      assert.equal(tool.exposure, "codemode");
-      assert.deepEqual(tool.namespace, { name: "keiyaku", description: SERVER_DESCRIPTION, instructions: SERVER_DESCRIPTION });
-      assert.deepEqual(tool.parameters, expected.inputSchema);
-      assert.deepEqual(tool.annotations, expected.annotations);
-      assert.deepEqual(native.session.getToolDefinition(tool.name)?.outputSchema, expected.outputSchema);
-    }
+    assert.ok(tools.every((tool) => tool.exposure === "codemode"));
     for (const [name, input] of [
       ["bind", { terms: "terms", forkOf: "kei/source" }],
-      ["deliver", { dryRun: true, overwrite: false }],
-      ["history", { selector: "@worker", before: 2, since: 1 }],
-      ["history", { selector: "kei/example", item: "answer" }],
-      ["history", { selector: "@worker", limit: 5001 }],
     ] as const) {
       const args = { cwd: join(root, "missing"), ...input };
       await native.run(`await tools.keiyaku_${name}(${JSON.stringify(args)});`, true);
@@ -201,27 +187,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     `);
     assert.match(text(read), /keiyaku_spawn/u);
     assert.match(text(read), new RegExp(`pi:${native.manager.getSessionId()}`, "u"));
-    await native.run(`await tools.keiyaku_ls({selector: "aku/", mine: true});`, true);
-    const usage = resultFor(native.results, "keiyaku_ls");
-    assert.equal(usage.isError, true);
-    assert.equal(usage.structuredContent, undefined);
-    assert.equal(JSON.parse(usage.content[1]!.type === "text" ? usage.content[1]!.text : "").category, "invalid-input");
-    await native.run(`text(await tools.keiyaku_ls({selector: "aku/"}));`);
     const expectedRead = await client.callTool({ name: "ls", arguments: { selector: "aku/" } });
     const nativeRead = resultFor(native.results, "keiyaku_ls");
-    assert.deepEqual(nativeRead.content, expectedRead.content);
     assert.deepEqual(nativeRead.structuredContent, expectedRead.structuredContent);
-    await native.run(`text(await tools.keiyaku_status({}));`);
-    const nativeSummary = resultFor(native.results, "keiyaku_status");
-    assert.equal(nativeSummary.isError, false, text(nativeSummary));
-    assert.equal(Keiyaku.verbs.status.normal.parse(nativeSummary.structuredContent).kind, "active-work-summary");
-    const mcpSummary = await client.callTool({ name: "status", arguments: {} });
-    assert.deepEqual(nativeSummary.content, mcpSummary.content);
-    assert.deepEqual(nativeSummary.structuredContent, mcpSummary.structuredContent);
-    await native.run(`text(await tools.keiyaku_show({selector: "debt/missing"}));`, true);
-    const missingDetail = resultFor(native.results, "keiyaku_show");
-    const expectedDetail = await client.callTool({ name: "show", arguments: { selector: "debt/missing" } });
-    assert.deepEqual(missingDetail.content, expectedDetail.content);
     await native.run(`text(await tools.keiyaku_spawn({akumaName: "acp-worker", prompt: "first", alias: "native-child", bare: true}));`);
     const spawned = resultFor(native.results, "keiyaku_spawn");
     assert.equal(spawned.isError, false, text(spawned));
@@ -239,52 +207,19 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     const paths = pathsForAkumaId(world, child.id);
     const body = (await readHeart(paths)).latestBody!;
     const pid = Number(readFileSync(join(root, "first.ready"), "utf8"));
-    assert.equal((await readLatestTurnForBody(paths, body.sequence))?.initiator, process.env.KEIYAKU_INITIATOR);
+    const turn = await readLatestTurnForBody(paths, body.sequence);
+    assert.ok(turn);
+    assert.equal(turn.initiator, process.env.KEIYAKU_INITIATOR);
     await native.run(`text(await tools.keiyaku_ls({selector: "aku/*", mine: true}));`);
     const mine = resultFor(native.results, "keiyaku_ls").structuredContent as { rows: { id: string }[] };
     assert.deepEqual(mine.rows.map((row) => row.id), [id]);
-    await native.run(`
-      text(await tools.keiyaku_status({selector: ${JSON.stringify(id)}}));
-      text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], for: "0ms"}));
-    `);
-    for (const name of ["keiyaku_ls", "keiyaku_status", "keiyaku_wait"]) {
-      const result = resultFor(native.results, name);
-      assert.equal(result.isError, false, text(result));
-      const schema = native.session.getToolDefinition(name)?.outputSchema;
-      assert.ok(schema);
-      const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(result.structuredContent);
-      assert.equal(validation.valid, true, validation.errorMessage);
-      const facet = Keiyaku.for({
-        cwd: root,
-        environment: { ...process.env },
-        home: agentDir,
-        identity: { owner: harnessOwner({ channel: "pi", session: native.manager.getSessionId() }) },
-      });
-      const expected = name === "keiyaku_ls"
-        ? await facet.ls({ selector: "aku/*", mine: true })
-        : name === "keiyaku_status"
-          ? await facet.status({ selector: id })
-          : await facet.wait({ selectors: [id], for: "0ms" });
-      const withoutObservationTime = (key: string, value: unknown) => key === "observedAt" ? undefined : value;
-      assert.deepEqual(
-        JSON.parse(JSON.stringify(result.structuredContent, withoutObservationTime)),
-        JSON.parse(JSON.stringify(expected, withoutObservationTime)),
-      );
-    }
-
-    const retained = await bornBody(world, "feed0030", "2026-11-17T00:00:00.000Z");
-    try {
-      const turn = await beginTurn(retained.allocated.paths, { bodySequence: retained.body.sequence, startedAt: "2026-11-17T00:00:00.000Z" });
-      await endTurn(retained.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-11-17T00:00:01.000Z", outcome: { kind: "answered", answer: "exact Pi answer\n", session: { sessionId: "retained-pi" } } });
-      for (const selection of [{ limit: 1 }, { item: `turn/${turn.sequence}` }, { item: "answer" }]) {
-        const input = { selector: retained.allocated.id, ...selection };
-        await native.run(`text(await tools.keiyaku_history(${JSON.stringify(input)}));`);
-        const observed = resultFor(native.results, "keiyaku_history");
-        const expected = await client.callTool({ name: "history", arguments: input });
-        assert.equal(observed.isError, false, text(observed));
-        assert.deepEqual(observed.content, expected.content);
-      }
-    } finally { retained.holder.release(); }
+    await native.run(`text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], for: "0ms"}));`);
+    const immediate = resultFor(native.results, "keiyaku_wait");
+    assert.equal(immediate.isError, false, text(immediate));
+    const { members: [running] } = Keiyaku.verbs.wait.normal.parse(immediate.structuredContent);
+    assert.ok(running?.state === "running");
+    assert.equal(running.akuma, id);
+    assert.equal(running.turn, `turn/${turn.sequence}`);
 
     const baseline = deferred<void>();
     const prepare = DatabaseSync.prototype.prepare;

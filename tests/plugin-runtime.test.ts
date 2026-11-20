@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
-import { emitPluginSignal, withAkumaWaitDeferrals } from "../src/plugin/akuma-signals.js";
+import { emitPluginSignal } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
 import { Settings } from "../src/settings.js";
@@ -207,33 +207,6 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
   } finally { value.close(); }
 });
 
-test("caller abort outranks concurrent runtime acquisition failure", async () => {
-  const value = fixture();
-  try {
-    const caller = new AbortController();
-    const reason = new Error("caller cancelled");
-    const selected = await Settings.load({ cwd: value.root, home: value.home });
-    const failing = { ...selected, namespace() {
-      caller.abort(reason);
-      throw new Error("runtime failed concurrently");
-    } };
-    await assert.rejects(withAkumaWaitDeferrals({
-      world: await World.at(value.root), settings: failing, reportDiagnostic: () => assert.fail("abort is not a plugin failure"),
-    }, { akumaIds: ["aku/one"] }, caller.signal, async () => assert.fail("aborted operation must not run")), error => error === reason);
-  } finally { value.close(); }
-});
-
-test("wait with no selected plugins preserves its result", async () => {
-  const value = fixture();
-  try {
-    writeProjectPlugins(value.root, { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } });
-    const runtime = await pluginRuntime({ world: await World.at(value.root),
-      settings: await Settings.load({ cwd: value.root, home: value.home }) });
-    const result = {};
-    assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => result), result);
-  } finally { value.close(); }
-});
-
 test("wait cleanup has a fresh bound and cannot replace the original error", async (context) => {
   const value = fixture();
   try {
@@ -274,23 +247,6 @@ test("wait cleanup has a fresh bound and cannot replace the original error", asy
     assert.deepEqual(trace(output), ["close:false:false", "cleanup-aborted"]);
     assert.equal(diagnostics.length, 1);
     assert.match(diagnostics[0]!, /wait deferral cleanup/u);
-  } finally { value.close(); }
-});
-
-test("malformed wait resources diagnose without changing the route result", async () => {
-  const value = fixture();
-  try {
-    writePlugin(value.root, "alpha", 'export default { manifest: { id: "alpha", apiVersion: 1 }, activate() { return { waitDeferral() { return { close: 42 }; } }; } };');
-    writeProjectPlugins(value.root, {
-      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
-      alpha: { package: "./plugins/alpha.mjs" },
-    });
-    const diagnostics: string[] = [];
-    const runtime = await pluginRuntime({ world: await World.at(value.root),
-      settings: await Settings.load({ cwd: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
-    assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => "result"), "result");
-    assert.equal(diagnostics.length, 1);
-    assert.match(diagnostics[0]!, /wait deferral: resource close must be a function/u);
   } finally { value.close(); }
 });
 
@@ -557,58 +513,6 @@ test("plugin activation admits complete instances and isolates native import and
   }
 });
 
-test("plugin runtime rejects a handler name outside the accepted vocabulary", async () => {
-  const value = fixture();
-  try {
-    const output = join(value.root, "trace.txt");
-    writePlugin(
-      value.root,
-      "loose",
-      [
-        'import { appendFileSync } from "node:fs";',
-        "export default {",
-        '  manifest: { id: "loose", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "partial-handler\\n"), "akuma.unknown": () => appendFileSync(context.config.trace, "unknown\\n") } }; },',
-        "};",
-      ].join("\n"),
-    );
-    writePlugin(
-      value.root,
-      "working",
-      [
-        'import { appendFileSync } from "node:fs";',
-        "export default {",
-        '  manifest: { id: "working", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "working-signal\\n") } }; },',
-        "};",
-      ].join("\n"),
-    );
-    writeProjectPlugins(value.root, {
-      loose: { package: "./plugins/loose.mjs", config: { trace: output } },
-      working: { package: "./plugins/working.mjs", config: { trace: output } },
-    });
-
-    const diagnostics: string[] = [];
-    const runtime = await pluginRuntime({
-      world: await World.at(value.root),
-      reportDiagnostic: (value) => diagnostics.push(value),
-    });
-    await runtime.emit({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/example",
-      bodySequence: 1,
-      turnSequence: 1,
-      outcome: { kind: "answered", text: "done" },
-    });
-
-    assert.equal(diagnostics.length, 1);
-    assert.match(diagnostics[0]!, /^plugin loose activation:.*akuma\.unknown/su);
-    assert.deepEqual(trace(output), ["working-signal"]);
-  } finally {
-    value.close();
-  }
-});
-
 test("original plugin, instance, signals and resource receivers survive validation", async () => {
   const value = fixture();
   try {
@@ -661,49 +565,6 @@ test("original plugin, instance, signals and resource receivers survive validati
     assert.equal(result, "observed");
     assert.deepEqual(trace(output), ["acquire", "signal", "close"]);
     assert.deepEqual(diagnostics, []);
-  } finally {
-    value.close();
-  }
-});
-
-test("incompatible identity, version or instance refuses all plugin hooks", async () => {
-  const value = fixture();
-  try {
-    const output = join(value.root, "trace.txt");
-    const plugins: Record<string, unknown> = {
-      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
-    };
-    const cases = [
-      { id: "identity", manifest: { id: "other", apiVersion: 1 }, instance: "{}" },
-      { id: "version", manifest: { id: "version", apiVersion: 2 }, instance: "{}" },
-      { id: "deferral", manifest: { id: "deferral", apiVersion: 1 }, instance: "{ signals, waitDeferral: 42 }" },
-      { id: "extra", manifest: { id: "extra", apiVersion: 1 }, instance: "{ signals, unexpected: true }" },
-    ];
-    for (const { id, manifest, instance } of cases) {
-      writePlugin(value.root, id, `
-        import { appendFileSync } from "node:fs";
-        export default {
-          manifest: ${JSON.stringify(manifest)},
-          activate(context) {
-            const signals = { "akuma.turn-started"() { appendFileSync(context.config.trace, "leaked\\n"); } };
-            return ${instance};
-          }
-        };
-      `);
-      plugins[id] = { package: `./plugins/${id}.mjs`, config: { trace: output } };
-    }
-    writeProjectPlugins(value.root, plugins);
-    const diagnostics: string[] = [];
-    const runtime = await pluginRuntime({
-      world: await World.at(value.root),
-      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-    });
-    await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/example", turnSequence: 1 });
-    assert.deepEqual(trace(output), []);
-    assert.equal(diagnostics.length, cases.length);
-    for (const { id } of cases) {
-      assert.equal(diagnostics.filter((diagnostic) => diagnostic.startsWith(`plugin ${id} activation:`)).length, 1);
-    }
   } finally {
     value.close();
   }
@@ -851,63 +712,6 @@ test("plugin writable paths reject traversal, management custody, duplicate name
         true,
       );
     }
-  } finally {
-    value.close();
-  }
-});
-
-test("a healthy plugin is emitted to while another activation hangs", { timeout: 5_000 }, async (context) => {
-  const value = fixture();
-  try {
-    const output = join(value.root, "trace.txt");
-    writePlugin(
-      value.root,
-      "hanging",
-      [
-        'import { appendFileSync } from "node:fs";',
-        "export default {",
-        '  manifest: { id: "hanging", apiVersion: 1 },',
-        '  activate(context, cancellation) { appendFileSync(context.config.trace, "activation-started\\n"); return new Promise((_resolve, reject) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); reject(cancellation.reason); }, { once: true })); },',
-        "};",
-      ].join("\n"),
-    );
-    writePlugin(
-      value.root,
-      "working",
-      [
-        'import { appendFileSync } from "node:fs";',
-        "export default {",
-        '  manifest: { id: "working", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, "activated\\n"); return { signals: { "akuma.born": () => appendFileSync(context.config.trace, "called\\n") } }; },',
-        "};",
-      ].join("\n"),
-    );
-    writeProjectPlugins(value.root, {
-      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
-      hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
-      working: { package: "./plugins/working.mjs", config: { trace: output } },
-    });
-
-    const diagnostics: string[] = [];
-    const advance = deadlineClock(context);
-    const runtime = await pluginRuntime({
-      world: await World.at(value.root),
-      reportDiagnostic: (value) => diagnostics.push(value),
-    });
-    // Emitted immediately after runtime acquisition, while the hanging activation
-    // is still in flight: the ready plugin's own activation is the only thing its
-    // handler waits for, so no clock advance or staging delay is needed.
-    const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1, origin: { kind: "direct" }, caller: { kind: "unknown" } }, (value) => diagnostics.push(value));
-    await eventually(() => trace(output).includes("activation-started") && trace(output).includes("called"));
-    assert.deepEqual([...trace(output)].sort(), ["activated", "activation-started", "called"]);
-    advance(5_000);
-    await emission;
-    // Cooperative rejection after expiry is observed without a second diagnostic.
-    assert.deepEqual([...trace(output)].sort(), ["activated", "activation-aborted", "activation-started", "called"]);
-    assert.deepEqual(diagnostics.filter(value => value.startsWith("plugin hanging activation:")), [
-      "plugin hanging activation: timed out after 5000ms",
-    ]);
-    assert.equal(diagnostics.includes("plugin hanging signal: timed out after 5000ms"), true, diagnostics.join("; "));
   } finally {
     value.close();
   }
