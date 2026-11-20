@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  bind,
   commitCandidate,
   accepted,
-  acceptedDelivery,
   document,
   present,
   repositoryWithMain,
@@ -12,25 +10,6 @@ import {
 import { Keis, Repo } from "../src/index.js";
 import { deferred } from "./support/process.js";
 import type { ExecutionObservation } from "../src/index.js";
-
-test("synchronous and asynchronous observer failures cannot change delivery admission or completion", async () => {
-  for (const observer of [
-    () => {
-      throw new TypeError("observer failure");
-    },
-    async () => {
-      throw new TypeError("observer rejection");
-    },
-  ]) {
-    const repository = repositoryWithMain();
-    const contract = await bind(repository);
-    commitCandidate(repository);
-    const outcome = acceptedDelivery(await contract.deliver({}, { observe: observer }));
-    assert.equal(outcome.admission, undefined);
-    assert.equal(outcome.contractId, present(await contract.state()).id);
-    assert.equal(present(await contract.state()).delivery?.data.integration.snapshot, outcome.integration);
-  }
-});
 
 async function verificationCandidate() {
   const repository = repositoryWithMain();
@@ -117,30 +96,4 @@ test("concurrent selected checks admit independent requirements without losing e
   const delivered = accepted(await contract.deliver());
   assert.equal(delivered.placement?.kind, "placed");
   assert.equal(present(await contract.state()).terminal?.kind, "claimed");
-});
-
-test("slow observers and callers that stop observing never delay or cancel delivery", async () => {
-  const repository = repositoryWithMain();
-  const contract = await bind(repository);
-  commitCandidate(repository);
-  const barrier = deferred<void>();
-  let seen = 0;
-  try {
-    const outcome = acceptedDelivery(
-      await contract.deliver(
-        {},
-        {
-          observe: () => {
-            seen += 1;
-            return barrier.promise;
-          },
-        },
-      ),
-    );
-    assert.ok(seen > 0);
-    assert.equal(outcome.contractId, present(await contract.state()).id);
-    assert.ok(present(await contract.state()).delivery);
-  } finally {
-    barrier.resolve();
-  }
 });

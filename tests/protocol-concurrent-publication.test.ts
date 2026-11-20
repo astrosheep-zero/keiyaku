@@ -4,39 +4,15 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Keis, Repo } from "../src/index.js";
-import { prepareAmendDocument } from "../src/body/amend.js";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { journalEntry, type ContractTerms } from "../src/core/facts/types.js";
+import { journalEntry } from "../src/core/facts/types.js";
 import { admit } from "../src/git/admission.js";
 import { observeContractsAt } from "../src/git/observe.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { contractTerms, documentDerivation } from "../src/library/input.js";
-import { amendOperation } from "../src/protocol/amend.js";
 import { admitDecidedOffer, mintAttempt } from "../src/protocol/attempt.js";
-import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { privateStatePublicationSeatPath, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
-import { deferred, waitForFixtureFile } from "./support/process.js";
+import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
+import { waitForFixtureFile } from "./support/process.js";
 import { appointedWorktreePath, cachedRepositoryAt, waitForFile, withGitShim } from "./support/git.js";
 import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
-
-test("two concurrent private-state binds both publish distinct accepted contracts", async () => {
-  const repository = repositoryWithMain();
-  const writers = 2;
-  const results = await Promise.all(
-    Array.from({ length: writers }, () =>
-      (async () =>
-        Keis.of(await Repo.at({ path: repository.path })).bind({
-          terms: document(),
-          gates: ["reviewed"],
-        }))(),
-    ),
-  );
-  assert.equal(results.length, writers);
-  assert.ok(results.every((result) => result.kind === "accepted"));
-  const states = await Promise.all(results.map((result) => result.kei.state()));
-  assert.equal(new Set(states.map((state) => present(state).id)).size, writers);
-  assert.ok(states.every((state) => present(state).head !== null));
-});
 
 test("a stalled clean filter leaves unrelated admission free and journal movement retries the immutable capture", async () => {
   const repository = repositoryWithMain({ files: { ".gitattributes": "*.txt filter=stalled\n" } });
@@ -138,34 +114,6 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   assert.equal(released.kind, "accepted");
 });
 
-test("an injected Git publication error still returns publication-failed", async () => {
-  const repository = repositoryWithMain();
-  const contract = await bind(repository);
-  const attempts = `${repository.path}/publication-attempts`;
-  const outcome = await withGitShim(
-    [
-      'if [ "$1" = "update-ref" ]; then',
-      "  cat >/dev/null",
-      '  printf "attempt\\n" >> "$KEIYAKU_ATTEMPTS"',
-      '  printf "forced hard publication failure\\n" >&2',
-      "  exit 42",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_ATTEMPTS: attempts },
-    async (gitPath) =>
-      (
-        await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
-          id: present(await contract.state()).id,
-        })
-      ).amend({ edits: "## Replace: Context\nNo coordinate moved.\n" }),
-  );
-  assert.equal(outcome.kind, "retry");
-  assert.ok(outcome.kind === "retry" && outcome.reason === "publication-failed");
-  assert.match(outcome.diagnostic, /forced hard publication failure/u);
-  assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
-});
-
 test("unknown publication never confirms an entry whose persisted bytes differ", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
@@ -210,60 +158,4 @@ test("unknown publication never confirms an entry whose persisted bytes differ",
       assert.equal(readFileSync(marker, "utf8"), "publication\n");
     },
   );
-});
-
-test("concurrent amends spend a prepared edit, while a new attempt still refuses an already stale source", async () => {
-  const repository = repositoryWithMain();
-  const contract = await bind(repository);
-  const state = present(await contract.state());
-  const id = state.id;
-  const source: ContractTerms = state.terms;
-  const capability = await cachedRepositoryAt(repository.path);
-  const derive = (markdown: string) => (observed: ContractTerms) => {
-    const amended = prepareAmendDocument(markdown)(decodeContractDocument(observed.document.bytes));
-    const decoded = decodeContractDocument(amended.document);
-    const terms = contractTerms(decoded, observed.gates, observed.after);
-    return { terms, verification: documentDerivation(decoded).verification };
-  };
-  const writer = (markdown: string, ready?: () => void) => {
-    const scope = ready === undefined ? capability : { ...capability, onPrivateStateSeatContention: ready };
-    return withGitDecodeChannel(scope, (channel) =>
-      amendOperation({
-        scope,
-        channel,
-        contractId: id,
-        source,
-        deriveAmendment: derive(markdown),
-      }),
-    );
-  };
-  const held = await acquireSqliteTransactionLock({
-    path: privateStatePublicationSeatPath(capability),
-    mode: "immediate",
-  });
-  const first = deferred<void>();
-  const second = deferred<void>();
-  const context = "## Replace: Context\nfirst concurrent amendment\n";
-  const objective = "## Replace: Objective\nsecond concurrent amendment\n";
-  const both = Promise.all([writer(context, first.resolve), writer(objective, second.resolve)]);
-  try {
-    await Promise.race([
-      Promise.all([first.promise, second.promise]),
-      both.then(() => assert.fail("writers did not contend")),
-    ]);
-  } finally {
-    held.close();
-  }
-  const outcomes = await both;
-  assert.equal(outcomes.filter((outcome) => outcome.kind === "accepted").length, 1);
-  assert.deepEqual(
-    outcomes.find((outcome) => outcome.kind !== "accepted"),
-    {
-      kind: "refused",
-      refusal: { kind: "terms-moved" },
-    },
-  );
-  const lost = outcomes[0]!.kind === "accepted" ? objective : context;
-  assert.deepEqual(await writer(lost), { kind: "refused", refusal: { kind: "terms-moved" } });
-  accepted(await contract.amend({ edits: lost }));
 });

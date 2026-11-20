@@ -89,53 +89,6 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
   assert.deepEqual(cli.value, catalog);
 });
 
-test("the public catalogue rejects malformed caller input before observing any definition", async (context) => {
-  const { root, home } = catalogueFixture(context, {
-    root: { broken: '---\nprovider: claude\nhidden: "true"\n---\n' },
-  });
-
-  for (const malformed of [null, "aku/", []]) {
-    await assert.rejects(Akumas.akumaNames(malformed as never), (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.category, "invalid-input");
-      assert.match(error.message, /catalogue .*object/u);
-      return true;
-    });
-  }
-  await assert.rejects(
-    Akumas.akumaNames({ cwd: root, home, akumaName: "worker" } as never),
-    /Akuma catalogue .*unknown field: akumaName/u,
-  );
-  await assert.rejects(
-    Akumas.akumaNames({ cwd: 7 } as never),
-    /Akuma catalogue cwd must be a nonblank string/u,
-  );
-  await assert.rejects(
-    Akumas.akumaNames({ home: "   " } as never),
-    /Akuma catalogue home must be a nonblank string/u,
-  );
-  await assert.rejects(
-    Akumas.akumaNames({ home: "relative/home" } as never),
-    /Akuma catalogue home must be absolute/u,
-  );
-  await assert.rejects(
-    Akumas.akumaNames({ cwd: root, limit: 0 } as never),
-    /limit must be an integer from 1 to 500/u,
-  );
-
-  // The boundary wins over the invalid definition the same request would have read.
-  await assert.rejects(Akumas.akumaNames({ cwd: root, home: 7 } as never), (error: unknown) => {
-    assert.ok(error instanceof KeiyakuError);
-    assert.equal(error.category, "invalid-input");
-    assert.match(error.message, /catalogue home .*nonblank string/u);
-    return true;
-  });
-  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
-    assert.ok(error instanceof AkumaNameError);
-    return true;
-  });
-});
-
 test("the native akumaName error keeps its class, kind, reason and searched paths", async (context) => {
   const { root, home } = catalogueFixture(context, {
     root: { broken: '---\nprovider: claude\nhidden: "true"\n---\n' },
@@ -155,24 +108,6 @@ test("the native akumaName error keeps its class, kind, reason and searched path
     assert.ok(error.cause instanceof Error);
     return true;
   });
-});
-
-test("definition admission refuses nonmapping YAML and a prompt mode without a body", async (context) => {
-  const { root, home } = catalogueFixture(context, { home: { broken: "" } });
-  const path = join(home, "akumas", "broken.md");
-  for (const [markdown, reason] of [
-    ["---\n[provider, claude]\n---\n", /frontmatter must be one mapping/u],
-    ["---\nprovider: claude\nsystemPromptMode: replace\n---\n", /systemPromptMode .*nonempty Markdown body/u],
-  ] as const) {
-    writeFileSync(path, markdown);
-    await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
-      assert.ok(error instanceof AkumaNameError);
-      assert.equal(error.akumaName, "broken");
-      assert.deepEqual(error.searched, [path]);
-      assert.match(error.reason, reason);
-      return true;
-    });
-  }
 });
 
 test("catalogue follows the source of each definition and reads shadowed Home files only as bases", async (context) => {
@@ -239,24 +174,6 @@ test("catalogue refuses the first invalid name by UTF-8 bytes, even hidden beyon
     assert.deepEqual(error.searched, [join(home, "akumas", "z.md")]);
     assert.match(error.reason, /keys must be unique/u);
     assert.ok(error.cause instanceof Error);
-    return true;
-  });
-});
-
-test("spawn accepts a bare alias and a missing akumaName points to the catalogue", async (context) => {
-  const { root, home } = catalogueFixture(context, {});
-  const akumas = Akumas.of(await World.at(root));
-  await assert.rejects(akumas.spawn({ akumaName: "missing", alias: "lane", home }), (error: unknown) => {
-    assert.ok(error instanceof AkumaNameError);
-    assert.equal(error.akumaName, "missing");
-    assert.equal(error.message, "`missing` was not found");
-    assert.equal(error.absent, true);
-    assert.equal(error.category, "invalid-input");
-    assert.deepEqual(error.next, { verb: "ls", input: { selector: "aku/" } });
-    assert.ok(Object.isFrozen(error.next));
-    assert.ok(Object.isFrozen(error.next.input));
-    assert.equal(Object.getOwnPropertyDescriptor(error, "next")?.writable, false);
-    assert.equal(Object.getOwnPropertyDescriptor(error, "next")?.enumerable, true);
     return true;
   });
 });

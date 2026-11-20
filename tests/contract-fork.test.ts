@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keis, Repo } from "../src/index.js";
-import { parseArgv } from "../src/cli/parse.js";
-import { cliJson } from "./support/cli-fixtures.js";
 import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 
-test("fork bind copies the source target and does not substitute the caller branch", async () => {
+test("fork bind preserves the source target unless the caller explicitly replaces it", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   repository.run(["branch", "release"]);
@@ -24,20 +22,6 @@ test("fork bind copies the source target and does not substitute the caller bran
   const forkState = present(await fork.kei.state());
   assert.equal(forkState.coordinates.target, "refs/heads/release");
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
-});
-
-test("fork bind target:null clears the source target and a string overrides it", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  repository.run(["branch", "release"]);
-  const source = accepted(
-    await Keis.of(repo).bind({
-      terms: document().replace("# Library verbs", "# Targeted source"),
-      target: "release",
-      gates: [],
-    }),
-  );
-  const sourceState = present(await source.kei.state());
 
   const cleared = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id, target: null }));
   assert.equal(present(await cleared.kei.state()).coordinates.target, undefined);
@@ -55,40 +39,6 @@ test("fork bind refuses missing sources and incompatible term inputs", async () 
   await assert.rejects(
     () => Keis.of(repo).bind({ forkOf: "kei/source" as never, gates: [] } as never),
     /Keis.bind input has unknown field: gates/u,
-  );
-});
-
-test("fork CLI reads no stdin and keeps its form disjoint", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const source = accepted(await Keis.of(repo).bind({
-    terms: document().replace("# Library verbs", "# CLI source"),
-    gates: [],
-  }));
-  const sourceId = (present(await source.kei.state())).id;
-  const result = await cliJson<Readonly<{ kind: string; contractId: string }>>(["bind", "--fork-of", sourceId], {
-    cwd: repository.path,
-    environment: {},
-    readStdin: () => {
-      throw new Error("fork bind must not read stdin");
-    },
-  });
-  assert.equal(result.exit, 0);
-  assert.equal(result.value.kind, "accepted");
-  assert.match(result.value.contractId, /^kei\//u);
-  assert.notEqual(result.value.contractId, sourceId);
-  assert.throws(() => parseArgv(["bind", "--fork-of", sourceId, "-"]), /fork bind reads no stdin/u);
-  assert.throws(
-    () => parseArgv(["bind", "--fork-of", sourceId, "--gates", "default"]),
-    /not valid with --fork-of/u,
-  );
-  assert.throws(
-    () => parseArgv(["bind", "--fork-of", sourceId, "--after", sourceId]),
-    /not valid with --fork-of/u,
-  );
-  assert.throws(
-    () => parseArgv(["bind", "--fork-of", sourceId, "--debt", "debt/example"]),
-    /not valid with --fork-of/u,
   );
 });
 

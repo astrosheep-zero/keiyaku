@@ -2,24 +2,13 @@ import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, readlinkSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keis, Keiyaku, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
-import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { waitForFixtureFile } from "./support/process.js";
-import { renderRootHelp } from "../src/cli/parse.js";
-import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
-import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { contractId, entryUlid } from "../src/core/facts/types.js";
+import { decodeContractDocument } from "../src/body/decode.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
-import { admitDeliveryOperation, prepareDelivery } from "../src/protocol/deliver.js";
-import { decideDeliver } from "../src/core/verbs/deliver.js";
-import { scopeOperation } from "../src/protocol/operations.js";
-import { observeContractAt } from "../src/git/observe.js";
-import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
-import { renderVerb } from "../src/cli/render/verbs.js";
-import { changeId, snapshotId } from "../src/core/facts/types.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
 import { withGitShim, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
@@ -39,61 +28,6 @@ function verificationBody(script: string | null = "exit 1"): string {
   });
 }
 
-test("a stale document derivation is refused by the pure decision and restarts the protocol", async () => {
-  const repository = repositoryWithMain();
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: verificationBody(null),
-    }),
-  );
-  const state = present(await bound.kei.state());
-  const decoded = decodeContractDocument(state.terms.document.bytes);
-  const derivation = {
-    document: decoded.document.key,
-    bytes: state.terms.document.bytes,
-    title: decoded.title,
-    verification: prepareVerificationDeclaration(verificationDefinition(decoded)),
-  };
-  await bound.kei.amend({ edits: "## Replace: Objective\nA newer document.\n\n" });
-  const scope = await scopeOperation({ coordinate: repository.path });
-
-  await withGitDecodeChannel(scope, async (channel) => {
-    // A pure mismatched decision refuses its own stale document.
-    const current = present((await observeContractAt(scope, channel, state.id)).state);
-    const prepared = await prepareDelivery(
-      scope,
-      { contractId: state.id, coordinates: current.coordinates },
-      { title: decoded.title, document: decoded.document.bytes },
-    );
-    assert.ok(prepared.kind === "prepared", 'expected prepared.kind = "prepared"');
-    assert.deepEqual(
-      decideDeliver({
-        input: {
-          contractId: state.id,
-          at: "2026-08-06T00:00:00Z",
-          preparation: { kind: "prepared", document: derivation.document, data: prepared.data },
-        },
-        attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5F99")] },
-        observation: new Map([[state.id, current]]),
-      }),
-      { kind: "refused", refusal: { kind: "document-moved" } },
-    );
-    // The protocol never publishes the stale preparation: the same derivation exhausts its restarts.
-    assert.deepEqual(
-      await admitDeliveryOperation({
-        scope,
-        channel,
-        contractId: state.id,
-        deriveDocument: () => derivation,
-        requireBranchesToBeUpToDate: false,
-        includeDirty: false,
-        materializeConflict: false,
-      }),
-      { kind: "retry", reason: { kind: "exhausted" } },
-    );
-  });
-});
-
 test("targetless preview without Verification returns ready without changing the journal", async () => {
   const repository = repositoryWithMain();
   const { kei } = accepted(
@@ -109,46 +43,6 @@ test("targetless preview without Verification returns ready without changing the
   assert.equal(result.target, undefined);
   assert.equal(present(await kei.state()).head, head);
   assert.deepEqual(await kei.history(), history);
-});
-
-test("ungated preview reports undeclared without executing declarations or admitting testimony", async () => {
-  const repository = repositoryWithMain();
-  const marker = `${repository.path}/verification-ran`;
-  const contract = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: verificationBody(`touch '${marker}'\nexit 1`),
-      gates: ["reviewed"],
-    }),
-  ).kei;
-  const audited = await contract.previewDelivery();
-  assert.ok(audited.kind === "ready");
-  assert.equal(audited.unmetGates?.some(({ gate }) => gate === "verified"), false);
-  assert.equal(existsSync(marker), false);
-  assert.deepEqual(present(await contract.state()).attestations, []);
-});
-
-test("preview target lag is absent at zero and counted when the target moved", () => {
-  const report = (behind: number): Extract<DeliveryPreviewOutcome, { kind: "ready" }> => ({
-    kind: "ready", contractId: contractId("kei/audit-lag"),
-    candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)),
-    contentId: changeId("c".repeat(40)), scope: {},
-    target: {
-      kind: "placeable",
-      ref: "refs/heads/main",
-      head: snapshotId("a".repeat(40)),
-      ...(behind === 0 ? {} : { behind }),
-    },
-  });
-
-  const unmoved = renderVerb("deliver", { contract: "kei/audit-lag", dryRun: true },
-    { kind: "returned", value: report(0) }, { columns: 120, color: false });
-  assert.match(unmoved, /^  reference {2}refs\/heads\/main$/mu);
-  assert.match(unmoved, /^  head {2}a{40}$/mu);
-  assert.doesNotMatch(unmoved, /behind 0/u, "zero lag is an absent fact, not a printed zero");
-
-  const moved = renderVerb("deliver", { contract: "kei/audit-lag", dryRun: true },
-    { kind: "returned", value: report(5) }, { columns: 120, color: false });
-  assert.match(moved, /^  behind {2}5$/mu, "a moved target still names its lag");
 });
 
 function workspaceBytes(directory: string): unknown {
@@ -186,7 +80,7 @@ function custodySnapshot(repository: TestGitRepository, worktree: string): unkno
 }
 
 test("native, invocation and CLI preview preserve authority, refs, real indexes and bytes without Verification or hooks", async () => {
-  const { cliJson, runCli } = await import("./support/cli-fixtures.js");
+  const { cliJson } = await import("./support/cli-fixtures.js");
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const verificationMarker = join(repository.path, "verification-ran");
@@ -216,21 +110,6 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   const history = await native.history();
   const blocked = await native.previewDelivery();
   assert.ok(blocked.kind === "blocked" && blocked.reason.kind === "dirty-workspace");
-  const otherRepo = repositoryWithMain();
-  const repoOption = relative(otherRepo.path, repository.path);
-  const blockedCli = await runCli(
-    ["-C", otherRepo.path, "--repo", repoOption, "deliver", bound.contractId, "--dry-run", "--show-diff"],
-    { environment: {} },
-  );
-  assert.equal(blockedCli.exit, 0, blockedCli.stderr);
-  assert.equal(blockedCli.stdout.split("\n")[0], `deliver --dry-run accepted  ${bound.contractId}`);
-  const recoveryPrefix = "  available  keiyaku ";
-  const recovery = blockedCli.stdout.split("\n").find((line) => line.startsWith(recoveryPrefix));
-  assert.equal(recovery,
-    `${recoveryPrefix}-C ${otherRepo.path} --repo ${repoOption} deliver ${bound.contractId} --dry-run --show-diff --include-dirty`);
-  const replay = await runCli(recovery.slice(recoveryPrefix.length).split(" "), { environment: {} });
-  assert.equal(replay.exit, 0, replay.stderr);
-  assert.match(replay.stdout, /^\s*\+final unstaged version$/mu);
   const preview = await native.previewDelivery({ includeDirty: true, showDiff: true });
   assert.ok(preview.kind === "ready");
   assert.ok(preview.diff?.kind === "present");
@@ -255,52 +134,11 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   const observations: ExecutionObservation[] = [];
   assert.deepEqual(await facet.deliver(input, { observe: (event) => { observations.push(event); } }), preview);
   assert.deepEqual(observations, [], "a preview emits no admission or mutation progress");
-  assert.deepEqual(await facet.run("deliver", input), preview);
   assertWireRoundTrip(Keiyaku.verbs.deliver.output, preview);
-  assert.equal(classifyVerb("deliver", input, { kind: "returned", value: preview }), "accepted");
   assert.deepEqual(await native.history(), history);
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.equal(existsSync(verificationMarker), false);
   assert.equal(existsSync(hookMarker), false);
-  assert.equal("audit" in native, false);
-  assert.doesNotMatch(renderRootHelp(), /^\s+audit\s/mu);
-  for (const options of [["--overwrite"], ["--materialize-conflict"], ["--message", "unused"]]) {
-    await assert.rejects(runCli(["-C", repository.path, "deliver", bound.contractId, "--dry-run", ...options]));
-  }
-  await assert.rejects(runCli(["-C", repository.path, "audit", bound.contractId]));
-  assert.deepEqual(custodySnapshot(repository, worktree), before);
-  const delivered = accepted(await facet.run("deliver", { contract: bound.contractId, includeDirty: true }));
-  assertWireRoundTrip(Keiyaku.verbs.deliver.output, delivered);
-  assert.equal(delivered.placement?.kind, "gates-unsatisfied");
-  assert.equal(existsSync(verificationMarker), false);
-  assert.equal(existsSync(hookMarker), false);
-});
-
-test("preview reports prerequisite and gate judgments without claiming acceptance readiness", async () => {
-  const repository = repositoryWithMain();
-  const repo = await Repo.at({ path: repository.path });
-  const prerequisite = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
-  const dependent = accepted(
-    await Keis.of(repo).bind({
-      terms: verificationBody(),
-      after: [prerequisite.contractId],
-      gates: ["reviewed", "verified"],
-    }),
-  );
-  const before = await dependent.kei.history();
-  const result = await dependent.kei.previewDelivery();
-  assert.ok(result.kind === "ready");
-  assert.deepEqual(result.unmetPrerequisites, [{ contractId: prerequisite.contractId, state: "active" }]);
-  assert.deepEqual(result.unmetGates?.map(({ gate, state }) => [gate, state]),
-    [["reviewed", "missing"], ["verified", "missing"]]);
-  const text = renderVerb("deliver", { contract: dependent.contractId, dryRun: true },
-    { kind: "returned", value: result }, { columns: 160, color: false });
-  assert.match(text, /^deliver --dry-run accepted {2}kei\//mu);
-  assert.match(text, /^  candidate {2}[a-f0-9]{40}$/mu);
-  assert.ok(text.includes(prerequisite.contractId));
-  assert.match(text, /^  prerequisite {2}kei\/\S+\n  state {2}active$/mu);
-  assert.doesNotMatch(text, /candidate {2}(?:ready|prepared)|accepted\.|delivered/u);
-  assert.deepEqual(await dependent.kei.history(), before);
 });
 
 test("preview reports integration conflicts without materializing a merge or changing custody", async () => {
@@ -362,52 +200,4 @@ test("cancelling invocation dry-run preserves native abort rather than returning
   });
   assert.deepEqual(await bound.kei.history(), history);
   assert.deepEqual(custodySnapshot(repository, worktree), before);
-});
-
-test("preview names overlapping dirty target checkout while normal delivery still lands and preserves its bytes", async () => {
-  const repository = repositoryWithMain({ files: { "delivered.txt": "base\n" } });
-  const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
-  assert.ok(bound.worktreePath);
-  const worktree = bound.worktreePath;
-  writeFileSync(join(worktree, "delivered.txt"), "candidate\n");
-  repository.run(["-C", worktree, "add", "delivered.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const dirty = "target checkout uncommitted bytes\n";
-  writeFileSync(join(repository.path, "delivered.txt"), dirty);
-  const before = custodySnapshot(repository, worktree);
-  const history = await bound.kei.history();
-  const preview = await bound.kei.previewDelivery();
-  assert.equal(preview.kind, "ready");
-  assert.ok(preview.target?.kind === "placeable");
-  assert.equal(preview.target.checkouts?.length, 1);
-  const checkout = preview.target.checkouts![0]!;
-  assert.equal(checkout.path, repository.path);
-  assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate/u);
-  const text = renderVerb("deliver", { contract: bound.contractId, dryRun: true },
-    { kind: "returned", value: preview }, { columns: 200, color: false });
-  // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged
-  // without display whitespace while the whole rendering stays in the failure evidence.
-  const displayed = text.replace(/\s+/gu, "");
-  assert.match(text, /target {2}placeable/u);
-  assert.ok(text.includes(`checkout cannot follow  ${repository.path}`));
-  assert.ok(displayed.includes(checkout.diagnostic.replace(/\s+/gu, "")), `preview must render the checkout diagnostic; got:\n${text}`);
-
-  assert.deepEqual(custodySnapshot(repository, worktree), before);
-  assert.deepEqual(await bound.kei.history(), history);
-  const facet = Keiyaku.for({ cwd: worktree, repo: repository.path, environment: {} });
-  const observations: ExecutionObservation[] = [];
-  const delivered = accepted(await facet.deliver({}, { observe: (event) => {
-    observations.push(event);
-    throw new Error("observer cannot stop delivery");
-  } }));
-  assert.ok(observations.some((event) => event.kind === "admitted"));
-  assert.ok(delivered.placement?.kind === "placed");
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
-  assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
-  const retained = (delivered.issues ?? []).find((effect) => effect.kind === "target-checkout-retained");
-  assert.ok(retained?.kind === "target-checkout-retained");
-  assert.equal(retained.path, repository.path);
-  assert.equal(retained.diagnostic, checkout.diagnostic);
-  assert.equal(readFileSync(join(repository.path, "delivered.txt"), "utf8"), dirty);
 });

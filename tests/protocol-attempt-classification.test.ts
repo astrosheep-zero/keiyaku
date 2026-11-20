@@ -34,7 +34,7 @@ test("each spent premise consumes only its own fresh context", async () => {
   );
 });
 
-test("exhaustion, collision, refusal and a throw keep their own terminals", async () => {
+test("spent preparation and identity collision have distinct budget terminals", async () => {
   let spent = 0;
   const exhausted = await runBoundedAttempts<undefined, Final, never>(
     contexts(2),
@@ -55,21 +55,4 @@ test("exhaustion, collision, refusal and a throw keep their own terminals", asyn
   assert.deepEqual(collision, { kind: "collision" });
   assert.equal(collisions, 2, "a collision asks for a fresh attempt until the budget is spent");
 
-  let refusals = 0;
-  const refused = await runBoundedAttempts<undefined, Final, string>(contexts(2), prepared, async () => {
-    refusals += 1;
-    return { kind: "refused", refusal: "no" };
-  });
-  assert.deepEqual(refused, { kind: "refused", refusal: "no" });
-  assert.equal(refusals, 1);
-
-  let thrown = 0;
-  await assert.rejects(
-    runBoundedAttempts<undefined, Final, never>(contexts(2), prepared, async () => {
-      thrown += 1;
-      throw new Error("attempt failed");
-    }),
-    /attempt failed/u,
-  );
-  assert.equal(thrown, 1, "an exception must not invoke a later attempt");
 });

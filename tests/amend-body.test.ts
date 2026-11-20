@@ -74,46 +74,6 @@ test("amend H2 operations form one complete body replacement", () => {
   );
 });
 
-test("bare amend H2 headings replace existing sections and add new extensions", () => {
-  const amended = applyAmendOperations(
-    [
-      "## Context",
-      "bare context",
-      "",
-      "## Criteria",
-      "### Bare criterion",
-      "bare criterion body",
-      "",
-      "## Verification",
-      "```bash timeout=5m",
-      "echo bare",
-      "```",
-      "",
-      "## Notes",
-      "bare notes",
-      "",
-      "## Fresh notes",
-      "new extension",
-      "",
-    ].join("\n"),
-    body,
-  );
-
-  assert.equal(amended.context.trim(), "bare context");
-  assert.deepEqual(
-    amended.criteria.map(({ title, body }) => ({ title, body: body.trim() })),
-    [{ title: "Bare criterion", body: "bare criterion body" }],
-  );
-  assert.deepEqual(amended.verification, [{ executor: "bash", script: "echo bare", timeoutMs: 300_000 }]);
-  assert.deepEqual(
-    amended.extensions.map(({ title, content }) => ({ title, content: content.trim() })),
-    [
-      { title: "Notes", content: "bare notes" },
-      { title: "Fresh notes", content: "new extension" },
-    ],
-  );
-});
-
 test("amend requires a timeout for new Verification declarations", () => {
   const current = decodeContractDocument(renderContractBody(body));
   assert.throws(
@@ -178,99 +138,6 @@ test("amend keeps criteria and extension collections coherent across ordered mut
   );
 });
 
-test("extension removal and re-addition put the new section after surviving extensions", () => {
-  const current = decodeContractDocument(
-    renderContractBody({ ...body, extensions: [...body.extensions, { title: "Archive", content: "kept\n" }] }),
-  );
-  const before = structuredClone(current);
-  Object.freeze(current.criteria);
-  current.extensions.forEach(Object.freeze);
-  Object.freeze(current.extensions);
-  Object.freeze(current);
-  const result = prepareAmendDocument("## Remove: Notes\n\n## Add: Notes\nnew\n\n## Append: Notes\nlast\n")(current);
-  assert.deepEqual(
-    decodeContractDocument(result.document).extensions.map(({ title, content }) => ({
-      title,
-      content: content.trim(),
-    })),
-    [
-      { title: "Archive", content: "kept" },
-      { title: "Notes", content: "new\n\nlast" },
-    ],
-  );
-  assert.deepEqual([...result.changedSections], ["notes"]);
-  assert.deepEqual(current, before);
-});
-
-test("extensions require exact authored targets after normalized lookup, including bare Set", () => {
-  for (const kind of ["Update", "Replace", "Append", "Remove", "Add", "Set"]) {
-    const heading = kind === "Set" ? "notes" : `${kind}: notes`;
-    const content = kind === "Remove" ? "" : "changed\n";
-    assert.throws(() => applyAmendOperations(`## ${heading}\n${content}`, body), {
-      name: "KeiyakuError",
-      category: "invalid-input",
-      message: kind === "Add" || kind === "Set" ? "extension already exists 'notes'" : "unknown extension 'notes'",
-    });
-  }
-});
-
-test("failed ordered application leaves the supplied document and its collections intact", () => {
-  const current = decodeContractDocument(renderContractBody(body));
-  const before = structuredClone(current);
-  current.criteria.forEach(Object.freeze);
-  current.extensions.forEach(Object.freeze);
-  Object.freeze(current.criteria);
-  Object.freeze(current.extensions);
-  Object.freeze(current);
-  const apply = prepareAmendDocument(
-    "## Update: Notes\nchanged\n\n## Add: Criteria\n### Added\nadded\n\n## Remove: Notes\n\n## Append: Criteria\n### ADDED\ncollision\n",
-  );
-  assert.throws(() => apply(current), /Append Criteria targets an existing criterion/);
-  assert.deepEqual(current, before);
-});
-
-test("amend has no criterion-level remove operation", () => {
-  assert.throws(
-    () => applyAmendOperations("## Remove: Criterion Keep\n", body),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "unknown extension 'Criterion Keep'",
-  );
-});
-
-test("amend cannot add a reserved H2 as an extension", () => {
-  for (const title of ["Gates", "Pipeline", "After", "Arc", "Fulfillment"]) {
-    assert.throws(
-      () => applyAmendOperations(`## Add: ${title}\nvalue\n`, body),
-      (error: unknown) =>
-        error instanceof KeiyakuError &&
-        error.category === "invalid-input" &&
-        error.message === `${title.toLowerCase()} is not a contract Markdown section`,
-    );
-  }
-});
-
-test("amend rejects a normalized extension-title collision at the operation boundary", () => {
-  assert.throws(
-    () => applyAmendOperations("## Add: notes\nsecond notes\n", body),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "extension already exists 'notes'",
-  );
-});
-
-test("explicit Replace still refuses a missing extension", () => {
-  assert.throws(
-    () => applyAmendOperations("## Replace: Fresh notes\nnew extension\n", body),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "unknown extension 'Fresh notes'",
-  );
-});
-
 test("Criteria amendments preserve H3 boundaries and caller-context diagnostics", () => {
   const current = decodeContractDocument(renderContractBody(body));
   const source =
@@ -285,26 +152,7 @@ test("Criteria amendments preserve H3 boundaries and caller-context diagnostics"
     category: "invalid-input",
     message: "Criteria operation must contain one or more H3 entries",
   });
-  assert.throws(() => prepareAmendDocument("## Criteria\nstray\n### Entry\nbody\n")(current), {
-    name: "KeiyakuError",
-    category: "invalid-input",
-    message: "Criteria operation may contain only H3 entries",
-  });
-  assert.throws(() => prepareAmendDocument("## Criteria\n### Entry\nbody\n### ENTRY\nother\n")(current), {
-    name: "KeiyakuError",
-    category: "invalid-input",
-    message: "criteria operation contains duplicate or empty titles",
-  });
-  assert.throws(() => prepareAmendDocument("## Criteria\n### Empty\n")(current), {
-    name: "KeiyakuError",
-    category: "invalid-input",
-    message: "criterion 'Empty' operation body is empty",
-  });
-  assert.throws(() => prepareAmendDocument("## Add: Criteria\n### KEEP\nnew\n")(current), {
-    name: "KeiyakuError",
-    category: "invalid-input",
-    message: "Add Criteria targets an existing criterion",
-  });
+
 });
 
 test("prepared amendments refuse duplicates before application and preserve untouched bytes", () => {

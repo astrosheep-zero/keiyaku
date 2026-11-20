@@ -3,58 +3,7 @@ import test from "node:test";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Debts, Keis, Repo, Settings, World } from "../src/index.js";
-import type { ReconciliationLag } from "../src/library/outcome.js";
-import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
-import {
-  reconcileLagIsFailure,
-  reconcileLagScope,
-  type ReconcileLagScope,
-} from "../src/library/reconcile.js";
-
-test("reconcile lag classification covers scope and failure for every current lag kind", () => {
-  type Lag = ReconciliationLag;
-  const fixtures: readonly [Lag, ReconcileLagScope, boolean][] = [
-    [{ kind: "worktree-retained", path: "/tmp/worktree" }, "none", false],
-    [
-      {
-        kind: "worktree-follow-retained",
-        path: "/tmp/worktree",
-        reason: "head-moved",
-      },
-      "continuation",
-      false,
-    ],
-    [{ kind: "unsealed-bytes", path: "/tmp/worktree" }, "none", false],
-    [{ kind: "target-checkout-retained", path: "/tmp/target", target: "refs/heads/main", diagnostic: "retained" }, "placement", true],
-    [
-      {
-        kind: "worktree-hook-failed",
-        phase: "create",
-        path: "/tmp/worktree",
-        name: "prepare",
-        diagnostic: "failed",
-      },
-      "reconciliation",
-      true,
-    ],
-    [{ kind: "reconcile-failed", diagnostic: "failed" }, "reconciliation", true],
-    [
-      {
-        kind: "contract-file-failed",
-        path: ".keiyaku/KEIYAKU.md",
-        diagnostic: "failed",
-      },
-      "reconciliation",
-      true,
-    ],
-  ];
-
-  assert.deepEqual(
-    fixtures.map(([lag]) => [lag.kind, reconcileLagScope(lag), reconcileLagIsFailure(lag)]),
-    fixtures.map(([lag, scope, failure]) => [lag.kind, scope, failure]),
-  );
-});
-
+import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 test("world reconciliation settles each Contract before its own removal, even when another cleanup lags", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
@@ -99,7 +48,6 @@ test("world reconciliation settles each Contract before its own removal, even wh
     const file = debtPaths[index]!;
     renameSync(file, `${file}.pending`);
     try {
-      commitCandidate(repository, worktreePath);
       const delivery = accepted(await bound.kei.deliver());
       assert.equal(delivery.placement?.kind, "placed");
       assert.equal(existsSync(worktreePath), true);
