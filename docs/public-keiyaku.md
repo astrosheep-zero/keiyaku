@@ -11,7 +11,7 @@ both typed methods and generic execution over the same caller boundary. The
 facet also owns the shared interpretation of returned and thrown outcomes for
 adapters; this classification does not replace or alter the native answer.
 Structural descriptions expose wire inputs and complete owner results alongside
-their owner-declared normal subsets and progress, without validating trusted
+their owner-declared routing answers and progress, without validating trusted
 owner values as they flow through execution. Routing composes these descriptions
 without narrowing the native return value. Every
 described verb's output type is its producing owner's schema output; native
@@ -51,16 +51,16 @@ and chapter narrative rather than imposing a generic name on unrelated intent.
 Observation bounds share duration semantics and never stop the observed work.
 Native Akuma SDK inputs and CLI flag grammar remain independent of this
 model-facing vocabulary.
-Structured output is reserved for routing
-operations and retains the producing owner's native normal wire answer. Every
-normal answer of such a tool carries that same answer, including an answered
-negative verdict or an unanswered or deadline observation. Serialization retains
-native discriminants, member observations, associations, and owner detail while
-excluding process-local capabilities. Guidance and Debt detail return complete
-unclipped text at the transport edge. Serialization supplies no new classification
-or authority.
-Error results are text led by their classification and remain text-only, including
-their structured failure projection. Runtime recovery guidance uses MCP calls in
+Structured output is reserved for routing operations and retains the producing
+owner's declared wire answer, including an answered negative verdict or an
+unanswered or deadline observation. The same declaration serves discovery and
+transport. Stops without a routing receipt remain classification-led text.
+A confirmed Spawn receipt follows [public-results.md](public-results.md); its
+transport does not change the failed disposition of a stopped Spawn.
+Serialization retains native discriminants, member observations, associations,
+and owner detail while excluding process-local capabilities. Guidance and Debt
+detail return complete unclipped text. Serialization supplies no new
+classification or authority. Runtime recovery guidance uses MCP calls in
 MCP syntax, derived from the same native recovery facts used by other surfaces.
 An unsatisfied verification verdict is an answered negative, distinct from an
 operation failure, and is not a transport error. Published names are safe

@@ -10,7 +10,7 @@ import {
   type VerbOutput,
   type VerbName,
 } from "../library/keiyaku-verbs.js";
-import { describeModelTools, hasOutputSchema, modelCoordinates } from "../library/model-tools.js";
+import { describeModelTools, modelCoordinates, modelToolOutput } from "../library/model-tools.js";
 import { projectFailure } from "../library/outcome.js";
 import { renderVerb } from "../cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
@@ -73,7 +73,8 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
           completion = { kind: "threw", error };
         }
         const disposition = classifyVerb(name, value, completion);
-        const isError = disposition !== "accepted" && disposition !== "unsatisfied";
+        const failure = completion.kind === "threw" ? projectFailure(completion.error) : undefined;
+        const output = modelToolOutput(name, completion, disposition, failure?.spawn);
         const text = renderVerb(name, value, completion, {
           surface: "mcp",
           columns: DEFAULT_CLI_COLUMNS,
@@ -83,16 +84,11 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
         });
         return {
           content: [
-            { type: "text", text: isError ? `${disposition}\n${text}` : text },
-            ...(completion.kind === "threw"
-              ? [{ type: "text" as const, text: JSON.stringify(projectFailure(completion.error)) }]
-              : []),
+            { type: "text", text: output.isError ? `${disposition}\n${text}` : text },
+            ...(failure === undefined ? [] : [{ type: "text" as const, text: JSON.stringify(failure) }]),
           ],
-          isError,
+          ...output,
           details: { disposition },
-          ...(!isError && hasOutputSchema(name) && completion.kind === "returned"
-            ? { structuredContent: JSON.parse(JSON.stringify(completion.value)) }
-            : {}),
         };
       },
     });

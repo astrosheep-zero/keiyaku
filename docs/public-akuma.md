@@ -34,8 +34,11 @@ Akuma creation is owned by Akuma itself. Package composition may add a requested
 Contract Dispatch and then a requested Alias move. Birth or fork is the leading,
 irreversible result: a later Dispatch, Alias, or observation failure is reported
 as its own integration stage and never rolls back the Akuma. A Dispatch failure
-prevents the requested Alias move; an Alias failure preserves Dispatch. A
-contract-free birth is complete and writes no Dispatch. Fork may carry an
+prevents the requested Alias move; an Alias failure preserves Dispatch. Spawn's
+post-birth association waits share the existing acquisition rule: only the
+caller's stop bounds either wait, and stopping a wait cannot claim the effect.
+A writer's operational retirement failure does not reverse a confirmed move;
+its diagnostic stays visible as lag. A contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
 provider fork capability. A fork confirms its child at durable birth without
 waiting for the Body to sleep. A later launch stop preserves that confirmed
@@ -96,8 +99,11 @@ merely to discard it later. Bounded spawn
 answer observation stays with the submitting observer. Composition never
 rereads later state to infer the identity of an earlier observed answer. Ordinary
 creation answers omit routine stage inventories and repeated input, while a later
-integration or observation failure retains the born child, admitted input and
-usable recovery coordinates with its native failure. Attaching that evidence
+integration or observation failure retains the born child, exact admitted input,
+requested and confirmed association coordinates, and ordered stage stops with
+native diagnostics. Lack of an input receipt does not prove non-admission; an
+already admitted Tell is not safe to submit again. A returned partial Spawn and
+an exceptional post-birth stop use the same native creation receipt. Attaching that evidence
 throws a fresh KeiyakuError with immutable, directly readable creation or Tell
 evidence and the previous native failure as its cause. This preserves frozen
 causes and gives independent invocations separate receipts. Public consumers

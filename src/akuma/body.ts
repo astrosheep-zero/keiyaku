@@ -2,6 +2,7 @@ import { projectAkumaBirth } from "./caller.js";
 import { appendFile } from "node:fs/promises";
 import { boundedDiagnostic } from "../settings.js";
 import { abortable, abortableDelay } from "./abort.js";
+import { AkumaWorkdirMissingError } from "./akuma-errors.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import { driveTurn } from "./turn-drive.js";
 import {
@@ -454,14 +455,50 @@ export function evidencedTellWake(observed: TellActionEvidence): TellWake | null
   }
 }
 
+async function settleMissingWorkdir(
+  paths: AkumaPaths,
+  tellId: string,
+  signal: AbortSignal,
+  launchFailure: AkumaWorkdirMissingError,
+): Promise<TellWake> {
+  const details = [launchFailure.message];
+  let leash: HeldAkumaLeash | null = null;
+  let undelivered = false;
+  try {
+    leash = await HeldAkumaLeash.try(paths);
+    if (leash !== null) undelivered = await leash.settleUndeliveredTell(paths, tellId, signal);
+  } catch (error) {
+    signal.throwIfAborted();
+    details.push(`Could not settle the exact Tell: ${diagnostic(error)}`);
+  } finally {
+    try {
+      leash?.release();
+    } catch (error) {
+      details.push(`Could not release settlement custody: ${diagnostic(error)}`);
+    }
+  }
+  if (!undelivered) {
+    try {
+      const observed = await readTellAction(paths, tellId, signal);
+      if (observed.kind === "launch" || observed.kind === "live") return evidencedTellWake(observed)!;
+      undelivered = observed.kind === "undelivered";
+    } catch (error) {
+      signal.throwIfAborted();
+      details.push(`Could not observe the exact Tell: ${diagnostic(error)}`);
+    }
+  }
+  return { kind: "failed", ...(undelivered ? { reason: "undelivered" } : {}), diagnostic: details.join("\n") };
+}
+
 async function launchForTell(
   paths: AkumaPaths,
+  tellId: string,
   runtime: TellWakeRuntime,
   signal: AbortSignal,
-  read: () => Promise<TellActionEvidence>,
   successorAfter: number | undefined,
 ): Promise<TellWake | null> {
   signal.throwIfAborted();
+  const read = () => readTellAction(paths, tellId, signal);
   const launched = Promise.resolve().then(() => {
     signal.throwIfAborted();
     return runtime.spawn(paths);
@@ -473,6 +510,7 @@ async function launchForTell(
     // Launch may yield a handle even after our observer is gone. Only release it.
     void launched.then((late) => late.release()).catch(() => undefined);
     signal.throwIfAborted();
+    if (error instanceof AkumaWorkdirMissingError) return await settleMissingWorkdir(paths, tellId, signal, error);
     return evidencedTellWake(await read()) ?? { kind: "failed", diagnostic: diagnostic(error) };
   }
   try {
@@ -546,9 +584,9 @@ export async function wakeRecordedTell(
     }
     const wake = await launchForTell(
       paths,
+      tellId,
       runtime,
       signal,
-      read,
       submission ? undefined : (before.body?.sequence ?? 0),
     );
     if (wake !== null) return wake;

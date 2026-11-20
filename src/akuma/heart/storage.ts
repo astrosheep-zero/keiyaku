@@ -37,7 +37,7 @@ import {
   sealFact,
   stopFact,
 } from "./rows.js";
-import { insertTellFact } from "./tells.js";
+import { insertTellFact, tellFact, tellTerminalWriter, tellWasUndelivered } from "./tells.js";
 import { ACTIVITY_LIMIT, pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
 import { insertSurveillanceFact } from "./surveillance.js";
@@ -118,14 +118,14 @@ async function acquire<T>(operation: () => T, signal?: AbortSignal): Promise<T> 
 async function beginTransaction(
   database: DatabaseSync,
   path: string,
-  mode: "read" | "write",
+  mode: "read" | "write" | "frozen-soul",
   signal?: AbortSignal,
 ): Promise<ReturnType<typeof checkHeartSchema>> {
   return await acquire(() => {
     try {
       database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
       // DEFERRED acquires its snapshot on the first read, not on BEGIN.
-      return checkHeartSchema(database, path, mode === "write");
+      return checkHeartSchema(database, path, mode !== "read");
     } catch (error) {
       rollbackTransaction(database);
       throw error;
@@ -133,19 +133,33 @@ async function beginTransaction(
   }, signal);
 }
 
-export async function withReadOnlyHeart<T>(
+async function observeHeart<T>(
   paths: AkumaPaths,
+  mode: "read" | "frozen-soul",
   body: (database: DatabaseSync) => T,
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
   const database = await openExistingDatabase(paths.heart, 0, "ro");
   try {
-    await beginTransaction(database, paths.heart, "read", signal);
+    await beginTransaction(database, paths.heart, mode, signal);
     return finishTransaction(database, body);
   } finally {
     database.close();
   }
+}
+
+export function withReadOnlyHeart<T>(
+  paths: AkumaPaths,
+  body: (database: DatabaseSync) => T,
+  signal?: AbortSignal,
+): Promise<T> {
+  return observeHeart(paths, "read", body, signal);
+}
+
+/** The frozen Soul layout is unchanged across the supported write-side predecessors. */
+export function readSoulForTell(paths: AkumaPaths, signal?: AbortSignal): Promise<Soul | null> {
+  return observeHeart(paths, "frozen-soul", soulFact, signal);
 }
 
 export type HeartRead = <T>(body: (database: DatabaseSync) => T, signal?: AbortSignal) => Promise<T>;
@@ -344,6 +358,23 @@ export class HeldAkumaLeash {
   ): Promise<InterruptCompletion> {
     if (this.closed) throw new Error("Akuma interrupt completion requires a held leash");
     return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected), signal);
+  }
+
+  /** An idle wake holder may settle only the exact still-unsubmitted input. */
+  async settleUndeliveredTell(paths: AkumaPaths, tellId: string, signal: AbortSignal): Promise<boolean> {
+    if (this.closed || this.bodySequence !== undefined) throw new Error("Tell settlement requires an idle held leash");
+    return await withHeartTransaction(
+      paths,
+      (heart) => {
+        const body = latestBodyFact(heart);
+        if (body !== null && (body.end === undefined || body.hung !== undefined)) return false;
+        const tell = tellFact(heart, tellId);
+        if (tell === null || tell.deliveries.length !== 0) return false;
+        if (tell.state === "told") return tellWasUndelivered(heart, tellId);
+        return tellTerminalWriter(heart, "undelivered", new Date().toISOString(), true)(tellId);
+      },
+      signal,
+    );
   }
 
   async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {

@@ -6,6 +6,7 @@ import {
   appendPrivateStateSeatClose,
   confirmPrivateStatePublication,
   mergePrivateStateSeatClose,
+  privateStateSeatCloseLag,
   withPrivateStatePublicationSeat,
   type PrivateStateSeatCloseLag,
   type PrivateStateSeatOutcome,
@@ -25,6 +26,7 @@ import {
 } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
 import {
+  readRef,
   withGitDecodeChannel,
   withGitReadObservation,
   withGitTargetedReadObservation,
@@ -46,9 +48,11 @@ export type DispatchFailure =
   | Readonly<{ kind: "conflict"; current: Dispatch }>
   | Readonly<{ kind: "publication-failed"; diagnostic: string }>;
 
-type DispatchPublication =
-  | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
-  | Readonly<{ kind: "failed"; failure: DispatchFailure }>;
+type DispatchPublication = Readonly<
+  ({ kind: "dispatched"; dispatch: Dispatch } | { kind: "failed"; failure: DispatchFailure }) & {
+    seatClose?: readonly PrivateStateSeatCloseLag[];
+  }
+>;
 
 function pathFor(akumaId: AkumaId): string {
   return `${DISPATCH_PREFIX}${createHash("sha256").update(akumaId).digest("hex")}${DISPATCH_SUFFIX}`;
@@ -155,27 +159,49 @@ export async function readDispatches(repository: GitRepository): Promise<readonl
   );
 }
 
-async function observedPublication(
-  repository: GitRepository,
-  akumaId: AkumaId,
-  owner: ContractId,
-): Promise<DispatchPublication | null> {
-  const current = await readDispatch(repository, akumaId);
-  if (current === null) return null;
-  return current.contractId === owner
-    ? { kind: "dispatched", dispatch: current }
-    : { kind: "failed", failure: { kind: "conflict", current } };
-}
-
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function dispatchPublicationWithSeatClose(outcome: PrivateStateSeatOutcome<DispatchPublication>): DispatchPublication {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag) => {
-    if (value.kind !== "dispatched") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
-  });
+// Let the shared seat compose the refusal and any independent close failure before projection.
+class DispatchPublicationRefusal extends Error {
+  constructor(
+    readonly failure: DispatchFailure,
+    options?: ErrorOptions,
+  ) {
+    super(
+      failure.kind === "conflict"
+        ? `Dispatch ${failure.current.akumaId} already belongs to ${failure.current.contractId}`
+        : failure.diagnostic,
+      options,
+    );
+  }
+}
+
+function refusedPublication(error: unknown): DispatchPublication {
+  if (!(error instanceof Error)) throw error;
+  const refusal = error instanceof DispatchPublicationRefusal ? error : error.cause;
+  if (!(refusal instanceof DispatchPublicationRefusal)) throw error;
+  if (refusal.failure.kind === "publication-failed")
+    return { kind: "failed", failure: { kind: "publication-failed", diagnostic: error.message } };
+  return {
+    kind: "failed",
+    failure: refusal.failure,
+    ...("retirement" in error ? { seatClose: [privateStateSeatCloseLag(error.retirement)] } : {}),
+  };
+}
+
+function dispatchPublicationWithSeatClose(
+  outcome: Promise<PrivateStateSeatOutcome<DispatchPublication>>,
+): Promise<DispatchPublication> {
+  return outcome.then(
+    (result) =>
+      mergePrivateStateSeatClose(result, (value, closeLag) => {
+        if (value.kind !== "dispatched") throw new Error(closeLag.diagnostic);
+        return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+      }),
+    refusedPublication,
+  );
 }
 
 export async function publishDispatch(
@@ -183,67 +209,76 @@ export async function publishDispatch(
     repository: GitRepository;
     akumaId: AkumaId;
     contractId: ContractId;
+    callerWait?: true;
   }>,
 ): Promise<DispatchPublication> {
   const akumaId = parseAkumaId(input.akumaId).id;
   const owner = contractId(input.contractId);
   const intended: Dispatch = { akumaId, contractId: owner, dispatchedAt: new Date().toISOString() };
   const path = pathFor(akumaId);
-  return dispatchPublicationWithSeatClose(
-    await withPrivateStatePublicationSeat(input.repository, async (seat) => {
-      const snapshot = await readGitPaths(input.repository, [path]);
-      const current = await dispatchFromSnapshot(input.repository, snapshot, akumaId);
-      if (current !== null) {
-        if (current.contractId === owner) confirmPrivateStatePublication(seat);
-        return current.contractId === owner
-          ? { kind: "dispatched", dispatch: current }
-          : { kind: "failed", failure: { kind: "conflict", current } };
-      }
+  return await dispatchPublicationWithSeatClose(
+    withPrivateStatePublicationSeat<DispatchPublication>(
+      input.repository,
+      async (seat) => {
+        const snapshot = await readGitPaths(input.repository, [path]);
+        const current = await dispatchFromSnapshot(input.repository, snapshot, akumaId);
+        if (current !== null) {
+          if (current.contractId !== owner) throw new DispatchPublicationRefusal({ kind: "conflict", current });
+          confirmPrivateStatePublication(seat);
+          return { kind: "dispatched", dispatch: current };
+        }
 
-      const changes = new Map<string, TreeChange>();
-      if (snapshot.commit === null) {
-        changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(input.repository, GIT_FORMAT_BYTES) });
-      }
-      changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
-      const tree = await updateGitTree(input.repository, snapshot.tree, changes);
-      const commit = await writeStateCommit({
-        repository: input.repository,
-        tree,
-        parent: snapshot.commit,
-        message: `dispatch ${akumaId}`,
-        at: intended.dispatchedAt,
-      });
-      const publication = await updateRefsAtomically(input.repository, [
-        {
-          ref: GIT_REF,
-          newOid: commit,
-          expectedOid: snapshot.commit,
-        },
-      ]);
-      if (publication.kind === "published") {
+        const changes = new Map<string, TreeChange>();
+        if (snapshot.commit === null) {
+          changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(input.repository, GIT_FORMAT_BYTES) });
+        }
+        changes.set(path, { oid: await writeBlob(input.repository, bytesFor(intended)) });
+        const tree = await updateGitTree(input.repository, snapshot.tree, changes);
+        const commit = await writeStateCommit({
+          repository: input.repository,
+          tree,
+          parent: snapshot.commit,
+          message: `dispatch ${akumaId}`,
+          at: intended.dispatchedAt,
+        });
+        const publication = await updateRefsAtomically(input.repository, [
+          {
+            ref: GIT_REF,
+            newOid: commit,
+            expectedOid: snapshot.commit,
+          },
+        ]);
+        if (publication.kind === "non-published") {
+          throw new DispatchPublicationRefusal(
+            { kind: "publication-failed", diagnostic: diagnostic(publication.error) },
+            { cause: publication.error },
+          );
+        }
+        if (publication.kind === "unknown") {
+          const message = "Dispatch publication outcome is unknown";
+          try {
+            // Only the exact offered commit proves the whole transaction without decoding a replacement object.
+            const recovery = { ...input.repository, signal: AbortSignal.timeout(5_000) };
+            if ((await readRef(recovery, GIT_REF)) === commit) {
+              confirmPrivateStatePublication(seat);
+              return { kind: "dispatched", dispatch: intended };
+            }
+          } catch (error) {
+            throw new DispatchPublicationRefusal(
+              {
+                kind: "publication-failed",
+                diagnostic: `${message}; exact ref read-back failed: ${diagnostic(error)}`,
+              },
+              { cause: error },
+            );
+          }
+          throw new DispatchPublicationRefusal({ kind: "publication-failed", diagnostic: message });
+        }
         confirmPrivateStatePublication(seat);
         return { kind: "dispatched", dispatch: intended };
-      }
-
-      const observed = await observedPublication(input.repository, akumaId, owner);
-      if (observed !== null) {
-        if (observed.kind === "dispatched") confirmPrivateStatePublication(seat);
-        return observed;
-      }
-      if (publication.kind === "non-published") {
-        const fresh = await readGitPaths(input.repository, [path]);
-        if (fresh.commit === snapshot.commit) {
-          return {
-            kind: "failed",
-            failure: { kind: "publication-failed", diagnostic: diagnostic(publication.error) },
-          };
-        }
-      }
-      return {
-        kind: "failed",
-        failure: { kind: "publication-failed", diagnostic: "Dispatch publication outcome is unknown" },
-      };
-    }),
+      },
+      input.callerWait === true ? { timeoutMs: null } : undefined,
+    ),
   );
 }
 

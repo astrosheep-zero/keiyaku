@@ -2,14 +2,15 @@ import { deferred, temporaryDirectory } from "./support/process.js";
 import { abortableDelay } from "../src/akuma/abort.js";
 import { recordTell, seedLegacySchema, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { AkumaOwner, settleAkumaKill } from "../src/akuma/akuma-owner.js";
-import { AkumaKillError } from "../src/akuma/akuma-errors.js";
-import { executeKillAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { AkumaKillError, AkumaWorkdirMissingError } from "../src/akuma/akuma-errors.js";
+import { executeKillAkuma, executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { tellText } from "../src/cli/render/akuma-activity.js";
 import { projectFailure } from "../src/library/outcome.js";
 import type { LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { tellWakeRuntime } from "../src/akuma/body.js";
@@ -35,6 +36,7 @@ import {
   readForkPoint,
   readLatestTurnForBody,
   readTell,
+  readTellAction,
   recordCurrentModel,
   recordSession,
   recordSurveillance,
@@ -548,32 +550,33 @@ test("latest admitted Turn attribution is scoped to the exact Body", async () =>
     value.close();
   }
 });
-test("wake names the missing frozen execution directory instead of a bare spawn absence", async () => {
+test("retired frozen directory refuses new Tell without changing an exact previously admitted input", async () => {
   const value = await fixture();
+  const { id, paths } = value.allocated;
   const vanishedCwd = join(value.root, "vanished-cwd");
+  mkdirSync(vanishedCwd);
   try {
-    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await born.birth(value.allocated.paths, { ...value.soul, cwd: vanishedCwd });
+    const born = (await HeldAkumaLeash.try(paths))!;
+    await born.birth(paths, { ...value.soul, cwd: vanishedCwd });
     born.release();
-    const result = await tellFixture(value, {
-      body: "continue",
-      tellId: "tell-missing-cwd",
-      runtime: tellWakeRuntime(spawnAkumaBody),
-      recordedAt: value.soul.createdAt,
+    const owner = new AkumaOwner(id, value.root);
+    const input = { tellId: "already-admitted", recordedAt: value.soul.createdAt };
+    const prior = await owner.admitTell("keep the original", input);
+    assert.ok(prior.kind === "recorded");
+    rmdirSync(vanishedCwd);
+    await assert.rejects(owner.tell("new input", "never-admitted", input.recordedAt, tellWakeRuntime(spawnAkumaBody)), (error: unknown) => {
+      assert.ok(error instanceof AkumaWorkdirMissingError);
+      assert.deepEqual(projectFailure(error).frozenWorkdir, { id, cwd: vanishedCwd });
+      assert.ok(error.message.startsWith(`Cannot wake ${id}: frozen execution directory ${vanishedCwd}`));
+      assert.match(error.message, /Spawn a fresh Akuma in a live workdir/u);
+      return true;
     });
-    assert.equal(result.wake.kind, "failed");
-    const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
-    assert.ok(diagnostic.includes(vanishedCwd), diagnostic);
-    assert.match(diagnostic, /frozen execution directory/);
-    assert.match(diagnostic, /no longer exists/);
-    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
-    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
-    const heart = await readHeart(value.allocated.paths);
-    assert.deepEqual(
-      heart.pending.map((tell) => tell.id),
-      ["tell-missing-cwd"],
-    );
-    assert.equal(heart.latestBody, null);
+    const replay = await owner.tell("keep the original", input.tellId, input.recordedAt, {
+      spawn: () => assert.fail("known-missing replay must not wake"),
+    });
+    assert.deepEqual(replay.admission, { tellId: input.tellId });
+    assert.deepEqual((await readHeart(paths)).pending, [prior.tell]);
+    assert.equal(await readTell(paths, "never-admitted"), null);
   } finally {
     value.close();
   }
@@ -599,8 +602,8 @@ test("wake names the missing waking executable instead of a bare spawn absence",
     assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
     assert.match(diagnostic, /waking process executable/);
     assert.match(diagnostic, /no longer exists/);
-    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
-    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
+    assert.ok(diagnostic.startsWith(`Wake of ${value.allocated.id} failed:`));
+    assert.match(diagnostic, /re-enter with a live runtime/u);
     const heart = await readHeart(value.allocated.paths);
     assert.deepEqual(
       heart.pending.map((tell) => tell.id),
@@ -613,39 +616,49 @@ test("wake names the missing waking executable instead of a bare spawn absence",
   }
 });
 
-test("wake names both missing pieces when the executable and frozen directory are gone", async () => {
-  const value = await fixture();
-  const vanishedCwd = join(value.root, "vanished-cwd");
-  const vanishedExecutable = join(value.root, "vanished-runtime", "keiyaku-body");
-  const liveExecPath = process.execPath;
-  Object.defineProperty(process, "execPath", { value: vanishedExecutable, configurable: true });
-  try {
-    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await born.birth(value.allocated.paths, { ...value.soul, cwd: vanishedCwd });
-    born.release();
-    const result = await tellFixture(value, {
-      body: "continue",
-      tellId: "tell-missing-both",
-      runtime: tellWakeRuntime(spawnAkumaBody),
-      recordedAt: value.soul.createdAt,
-    });
-    assert.equal(result.wake.kind, "failed");
-    const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
-    assert.ok(diagnostic.includes(vanishedCwd), diagnostic);
-    assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
-    assert.match(diagnostic, /frozen execution directory/);
-    assert.match(diagnostic, /waking process executable/);
-    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
-    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
-    const heart = await readHeart(value.allocated.paths);
-    assert.deepEqual(
-      heart.pending.map((tell) => tell.id),
-      ["tell-missing-both"],
-    );
-    assert.equal(heart.latestBody, null);
-  } finally {
-    Object.defineProperty(process, "execPath", { value: liveExecPath, configurable: true });
-    value.close();
+test("frozen directory lost after admission reports the exact Tell and settles it only with custody", async () => {
+  for (const settlementFails of [false, true]) {
+    const value = await fixture();
+    const { id, paths } = value.allocated;
+    const cwd = join(value.root, "vanished-at-launch");
+    const retiredLeash = `${paths.leash}.fixture`;
+    const tellId = "lost-at-launch";
+    mkdirSync(cwd);
+    try {
+      const born = (await HeldAkumaLeash.try(paths))!;
+      await born.birth(paths, { ...value.soul, cwd });
+      const body = await born.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+      assert.equal((await finishBodyIfIdle(paths, { sequence: body.sequence, at: value.soul.createdAt })).kind, "finished");
+      born.release();
+      const result = await executeTellAkuma({ id, path: value.root, tellId, body: "continue", spawn: async (launch) => {
+        assert.equal((await readTell(paths, tellId))?.state, "pending");
+        rmdirSync(cwd);
+        if (settlementFails) renameSync(paths.leash, retiredLeash);
+        return await spawnAkumaBody(launch);
+      } });
+      if (settlementFails) renameSync(retiredLeash, paths.leash);
+      assert.ok(result.kind === "failed" && result.tellId === tellId);
+      const [wake] = result.failures;
+      assert.ok(wake.stage === "wake");
+      assert.ok(wake.diagnostic.startsWith(`Cannot wake ${id}: frozen execution directory ${cwd}`));
+      if (settlementFails) {
+        assert.equal(wake.reason, undefined);
+        assert.ok(wake.diagnostic.includes(`Could not settle the exact Tell: Akuma Heart database is absent: ${paths.leash}`));
+        assert.equal((await readTellAction(paths, tellId)).kind, "pending");
+      } else {
+        assert.equal(wake.reason, "undelivered");
+        const text = tellText(result, "continue", undefined);
+        assert.ok(text.includes("! tell delivery failed · undelivered"));
+        assert.ok(text.includes(wake.diagnostic));
+        assert.deepEqual(await readTellAction(paths, tellId), { kind: "undelivered" });
+        const owner = new AkumaOwner(id, value.root);
+        assert.equal((await owner.status()).work.kind, "idle");
+        assert.equal((await owner.waitReceipt({ timeoutMs: 0 })).reason, "completed");
+      }
+      assert.equal(await readLatestTurnForBody(paths, body.sequence), null);
+    } finally {
+      value.close();
+    }
   }
 });
 

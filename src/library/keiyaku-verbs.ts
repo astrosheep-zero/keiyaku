@@ -354,7 +354,7 @@ export const verbs = Object.freeze({
       })
       .readonly(),
     output: spawnResultSchema,
-    normal: spawnNormalResultSchema.unwrap().omit({ wake: true, input: true }).readonly(),
+    normal: spawnNormalResultSchema,
     effect: "write",
   },
   fork: {

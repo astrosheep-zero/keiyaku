@@ -5,6 +5,7 @@ import { akumaIdSchema, parseAkumaId, type AkumaId } from "../akuma/identity.js"
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import {
   acquireSqliteTransactionLock,
+  SqliteTransactionLockError,
   tryAcquireSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -15,7 +16,7 @@ const VERSION = 1;
 
 export const aliasBindingSchema = z.strictObject({ alias: akumaAliasSchema, akumaId: akumaIdSchema }).readonly();
 export type AliasBinding = Readonly<{ alias: AkumaAlias; akumaId: AkumaId }>;
-export type AliasMove = Readonly<{ alias: AliasBinding; previous: AkumaId | null }>;
+export type AliasMove = Readonly<{ alias: AliasBinding; previous: AkumaId | null; closeWarning?: string }>;
 
 type AliasFile = Readonly<{
   version: typeof VERSION;
@@ -155,20 +156,40 @@ export async function moveAlias(
     world: WorldRoot;
     alias: AkumaAlias;
     akumaId: AkumaId;
+    signal?: AbortSignal;
   }>,
 ): Promise<AliasMove> {
   const alias = parseAkumaAlias(input.alias);
   const akumaId = parseAkumaId(input.akumaId).id;
   const location = paths(input.world);
-  const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  const held = await acquireSqliteTransactionLock({
+    path: location.lock,
+    mode: "immediate",
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  let previous: AkumaId | null;
   try {
+    input.signal?.throwIfAborted();
     const current = await read(location.authority);
-    const previous = current.find((binding) => binding.alias === alias)?.akumaId ?? null;
+    previous = current.find((binding) => binding.alias === alias)?.akumaId ?? null;
     const next = [...current.filter((binding) => binding.alias !== alias), { alias, akumaId }];
     await mkdir(dirname(location.authority), { recursive: true });
     await replaceFileDurably(location.authority, canonical(next));
-    return { alias: { alias, akumaId }, previous };
-  } finally {
+  } catch (error) {
+    try {
+      held.close();
+    } catch (retirement) {
+      const message = `${error instanceof Error ? error.message : String(error)}\nAlias writer close also failed: ${String(retirement)}`;
+      throw new AggregateError([error, retirement], message, { cause: error });
+    }
+    throw error;
+  }
+  const move = { alias: { alias, akumaId }, previous };
+  try {
     held.close();
+    return move;
+  } catch (error) {
+    if (!(error instanceof SqliteTransactionLockError) || error.reason !== "release-failed") throw error;
+    return { ...move, closeWarning: error.message };
   }
 }

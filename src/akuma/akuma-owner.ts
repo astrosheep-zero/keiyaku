@@ -3,7 +3,7 @@ import { bareOption, durationSchema, validateAkumaInput } from "./call-input.js"
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
-import { AkumaKillError, AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
+import { AkumaKillError, AkumaNotBornError, AkumaProviderError, AkumaWorkdirMissingError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
   bornStatus,
@@ -17,7 +17,7 @@ import {
 } from "./akuma-observe.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
-import type { BodyLauncher } from "./body-launch.js";
+import { observeLaunchPath, type BodyLauncher } from "./body-launch.js";
 import { evidencedTellWake, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
 import { pendingTellReceipt, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { acquireLeash, confirmAction, confirmationTimedOut } from "./control.js";
@@ -29,6 +29,7 @@ import {
   readStopEvidence,
   readLastAnsweredTurn,
   readSoul,
+  readSoulForTell,
   readTellAction,
   recordReport,
   recordSurveillance,
@@ -50,7 +51,7 @@ import {
   type AkumaId,
   type AkumaPaths,
 } from "./identity.js";
-import { HeartUnbornError, type ReportAdmission } from "./heart/facts.js";
+import { HeartAuthorityCorruptionError, HeartUnbornError, type ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectFact, selectExactHistory, selectHistory } from "./projection.js";
 import { compactTimelineItem } from "./timeline-text.js";
@@ -108,7 +109,7 @@ export type LastAnswer =
   | Readonly<{ kind: "answer"; answer: string; historyId: `turn/${number}` }>
   | Readonly<{ kind: "no-answer" }>;
 
-type AdmittedTell = Readonly<{ tell: TellFact; barrier?: PauseFact }>;
+type AdmittedTell = Readonly<{ tell: TellFact; barrier?: PauseFact; workdirUnavailable?: true }>;
 
 async function awaitInterruptCompletion(
   paths: AkumaPaths,
@@ -335,8 +336,19 @@ export class AkumaOwner {
       signal?: AbortSignal;
       interrupt?: boolean;
     }> = {},
-  ): Promise<InterruptTellAdmission> {
+  ): Promise<InterruptTellAdmission & Readonly<{ workdirUnavailable?: true }>> {
     const { schemaJson, initiator, signal } = options;
+    const soul = await readSoulForTell(this.paths, signal);
+    if (soul === null) return { kind: "not-born" };
+    if (soul.id !== this.id) throw new HeartAuthorityCorruptionError("Akuma soul does not match its coordinate");
+    const directory = await observeLaunchPath(soul.cwd);
+    const newTellStop =
+      directory === "present"
+        ? undefined
+        : directory === "absent"
+          ? { cause: new AkumaWorkdirMissingError(this.id, soul.cwd) }
+          : directory;
+    signal?.throwIfAborted();
     const tell = {
       kind: "tell" as const,
       id: options.tellId ?? randomUUID(),
@@ -345,10 +357,17 @@ export class AkumaOwner {
       ...(initiator === undefined ? {} : { initiator }),
       ...(schemaJson === undefined ? {} : { schemaJson }),
     };
-    const cancellation = signal === undefined ? {} : { signal };
-    return options.interrupt === true
-      ? await recordTell(this.paths, tell, { interrupt: true, ...cancellation })
-      : await recordTell(this.paths, tell, cancellation);
+    const admissionOptions = {
+      ...(signal === undefined ? {} : { signal }),
+      ...(newTellStop === undefined ? {} : { newTellStop }),
+    };
+    const admission =
+      options.interrupt === true
+        ? await recordTell(this.paths, tell, { ...admissionOptions, interrupt: true })
+        : await recordTell(this.paths, tell, admissionOptions);
+    return admission.kind === "recorded" && newTellStop !== undefined
+      ? { ...admission, workdirUnavailable: true }
+      : admission;
   }
 
   /** Observe the exact admitted Tell's bound Turn without substituting Akuma-wide idleness. */
@@ -409,7 +428,7 @@ export class AkumaOwner {
   }
 
   async settleTell(
-    { tell, barrier }: AdmittedTell,
+    { tell, barrier, workdirUnavailable }: AdmittedTell,
     runtime: TellWakeRuntime,
     options: Readonly<{
       signal?: AbortSignal;
@@ -419,6 +438,11 @@ export class AkumaOwner {
   ): Promise<TellResult> {
     const paths = this.paths;
     let receipt = pendingTellReceipt(tell, barrier);
+    // An exact replay behind an unavailable directory is evidence, not a new wake attempt.
+    if (workdirUnavailable === true) {
+      const wake = evidencedTellWake(await readTellAction(paths, tell.id, options.signal));
+      return wake === null ? receipt : { ...receipt, wake };
+    }
     const interruption = (result: Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>) => {
       receipt = { ...receipt, interruption: { ...result, bodySequence: barrier!.bodySequence } };
       if (result.kind === "unavailable") {

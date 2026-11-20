@@ -15,6 +15,7 @@ export type KillAdmission = Readonly<{ id: AkumaId; outcome: KillEvidence | "sto
 declare module "../errors.js" {
   interface KeiyakuError {
     readonly kill?: readonly KillAdmission[];
+    readonly frozenWorkdir?: Readonly<{ id: AkumaId; cwd: string }>;
   }
 }
 
@@ -36,6 +37,28 @@ export class AkumaNotBornError extends KeiyakuError {
   readonly kind = "akuma-not-born";
   constructor(readonly id: AkumaId) {
     super("internal", `Akuma ${id} is not born`);
+  }
+}
+
+export class AkumaWorkdirMissingError extends KeiyakuError {
+  readonly kind = "akuma-workdir-missing";
+  readonly code = "ENOENT";
+  declare readonly frozenWorkdir: NonNullable<KeiyakuError["frozenWorkdir"]>;
+
+  constructor(
+    readonly id: AkumaId,
+    readonly cwd: string,
+    options?: ErrorOptions,
+    executableDiagnostic?: string,
+  ) {
+    super(
+      "internal",
+      `Cannot wake ${id}: frozen execution directory ${cwd} no longer exists` +
+        (executableDiagnostic === undefined ? "" : `; ${executableDiagnostic}`) +
+        "; an accepted or abandoned Contract may have retired the worktree. Spawn a fresh Akuma in a live workdir.",
+      options,
+    );
+    Object.defineProperty(this, "frozenWorkdir", { value: Object.freeze({ id, cwd }), enumerable: true });
   }
 }
 

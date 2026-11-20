@@ -1,10 +1,11 @@
+import { stat } from "node:fs/promises";
 import { z } from "zod";
 import { abortableDelay } from "./abort.js";
+import { AkumaWorkdirMissingError } from "./akuma-errors.js";
 import type { Soul } from "./heart/index.js";
-import type { AkumaPaths } from "./identity.js";
+import { akumaPathsSchema, type AkumaId, type AkumaPaths } from "./identity.js";
 import { decodeSoulSeed } from "./heart/soul.js";
 import { sessionAdmissionSchema } from "./heart/rows.js";
-import { akumaPathsSchema } from "./identity.js";
 
 const launchSeedSchema = z.unknown().transform((value, context) => {
   try {
@@ -48,6 +49,51 @@ export type LiveBodyLaunch = Readonly<{
   release(): void;
 }>;
 export type BodyLauncher = (launch: BodyLaunch) => Promise<LiveBodyLaunch>;
+
+/** Only positive absence is a missing frozen coordinate, not an unreadable path. */
+export async function observeLaunchPath(path: string): Promise<"present" | "absent" | Readonly<{ cause: unknown }>> {
+  try {
+    await stat(path);
+    return "present";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : { cause: error };
+  }
+}
+
+function diagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function diagnoseLaunchFailure(
+  { argv: [executable], cwd, akumaId }: Readonly<{ argv: readonly string[]; cwd: string; akumaId: AkumaId }>,
+  wake: boolean,
+  cause: unknown,
+): Promise<Error> {
+  const action = wake ? `Wake of ${akumaId}` : `Body birth for ${akumaId}`;
+  const native = cause as NodeJS.ErrnoException | undefined;
+  const options = { cause };
+  // Native launch evidence is distinct from filesystem errors opening the run log.
+  if (executable === undefined || !(native?.syscall === "spawn" || native?.syscall?.startsWith("spawn ") === true))
+    return new Error(`${action} failed in ${cwd}: ${diagnostic(cause)}`, options);
+  const detail = [`${native.code ?? "launch error"}: executable ${executable}, frozen execution directory ${cwd}`];
+  if (native.code === "ENOENT") {
+    const [directory, program] = await Promise.all([observeLaunchPath(cwd), observeLaunchPath(executable)]);
+    const executableDiagnostic =
+      program === "present"
+        ? undefined
+        : program === "absent"
+          ? `waking process executable ${executable} no longer exists; re-enter with a live runtime`
+          : `cannot observe executable ${executable}: ${diagnostic(program.cause)}`;
+    if (directory === "absent") {
+      if (wake) return new AkumaWorkdirMissingError(akumaId, cwd, options, executableDiagnostic);
+      detail.push(`frozen execution directory ${cwd} no longer exists`);
+    } else if (directory !== "present") {
+      detail.push(`cannot observe frozen execution directory ${cwd}: ${diagnostic(directory.cause)}`);
+    }
+    if (executableDiagnostic !== undefined) detail.push(executableDiagnostic);
+  }
+  return Object.assign(new Error(`${action} failed: ${detail.join("; ")}`, options), { code: native.code });
+}
 
 /** Observe durable custody first, including once more after live launch completion. */
 export async function observeBodyLaunch<T>(

@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { verbs, type VerbName } from "./keiyaku-verbs.js";
+import { verbs, type VerbCompletion, type VerbDisposition, type VerbName, type VerbOutput } from "./keiyaku-verbs.js";
 
-/** Routing tools publish their producing owner's normal wire answer. */
+/** Routing tools publish native wire answers; Spawn includes confirmed partials. */
 export const modelOutputSchemas = {
   bind: verbs.bind.normal,
   verify: verbs.verify.normal,
@@ -17,6 +17,24 @@ export const modelOutputSchemas = {
 
 export function hasOutputSchema(name: string): name is keyof typeof modelOutputSchemas {
   return Object.hasOwn(modelOutputSchemas, name);
+}
+
+export function modelToolOutput(
+  name: VerbName,
+  completion: VerbCompletion<unknown>,
+  disposition: VerbDisposition,
+  exceptionalSpawn?: VerbOutput<"spawn">,
+) {
+  const normal = disposition === "accepted" || disposition === "unsatisfied";
+  const value =
+    completion.kind === "returned"
+      ? completion.value
+      : name === "spawn" && exceptionalSpawn?.kind === "failed"
+        ? exceptionalSpawn
+        : undefined;
+  return value !== undefined && hasOutputSchema(name) && (normal || name === "spawn")
+    ? { isError: false, structuredContent: JSON.parse(JSON.stringify(value)) }
+    : { isError: !normal };
 }
 
 const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report", "surveil"]);

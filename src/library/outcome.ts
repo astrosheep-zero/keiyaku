@@ -638,6 +638,7 @@ export type FailureProjection = Readonly<{
   spawn?: SpawnResult;
   tell?: AkumaTellResult;
   kill?: NonNullable<KeiyakuError["kill"]>;
+  frozenWorkdir?: NonNullable<KeiyakuError["frozenWorkdir"]>;
 }>;
 export function projectFailure(error: unknown): FailureProjection {
   let cause = error;
@@ -652,6 +653,9 @@ export function projectFailure(error: unknown): FailureProjection {
     ...(error instanceof KeiyakuError && error.spawn !== undefined ? { spawn: error.spawn } : {}),
     ...(error instanceof KeiyakuError && error.tell !== undefined ? { tell: error.tell } : {}),
     ...(error instanceof KeiyakuError && error.kill !== undefined ? { kill: error.kill } : {}),
+    ...(error instanceof KeiyakuError && error.frozenWorkdir !== undefined
+      ? { frozenWorkdir: error.frozenWorkdir }
+      : {}),
     ...(error instanceof KeiyakuError && error.outcome !== undefined ? { outcome: error.outcome } : {}),
   };
 }

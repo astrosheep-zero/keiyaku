@@ -12,7 +12,7 @@ import {
 import { KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure, type FailureProjection } from "../../library/outcome.js";
 import { historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
-import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, renderAskText } from "./akuma.js";
+import { renderCallText, renderForkText, renderKillText, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
 import { renderContractResult, type ContractResultName } from "./contract.js";
@@ -38,13 +38,16 @@ function missing(operation: string, contract: string | undefined): string {
   return renderRefusal({ operation, contract: id, refusal: { kind: "contract-missing" } });
 }
 
-function actionFailure(name: string, failure: FailureProjection, input: VerbInput<VerbName>): string | undefined {
-  if (failure.spawn !== undefined)
-    return renderSpawnFailure(
-      failure.spawn,
-      failure.diagnostic,
-      name === "spawn" ? spawnPresentation(input as VerbInput<"spawn">) : {},
-    );
+function actionFailure(
+  name: string,
+  failure: FailureProjection,
+  input: VerbInput<VerbName>,
+  context: TextRenderContext,
+): string | undefined {
+  if (name === "spawn" && failure.spawn !== undefined)
+    return renderCallText(failure.spawn, spawnPresentation(input as VerbInput<"spawn">, context), failure.diagnostic);
+  if (failure.frozenWorkdir !== undefined)
+    return renderStructuredRefusal(name, "input not admitted", [failure.diagnostic]);
   if (failure.tell !== undefined)
     return [
       `× ${name} failed`,
@@ -70,7 +73,7 @@ function actionFailure(name: string, failure: FailureProjection, input: VerbInpu
 
 function thrown(name: string, error: unknown, context: TextRenderContext, input: VerbInput<VerbName>): string {
   const failure = projectFailure(error);
-  const action = actionFailure(name, failure, input);
+  const action = actionFailure(name, failure, input, context);
   if (action !== undefined) return action;
   if (error instanceof AkumaNotBornError)
     return renderStructuredRefusal(name, "Akuma not found", [`id  ${safeText(error.id)}`]);
@@ -183,17 +186,14 @@ function renderInput(input: VerbInput<"ask" | "tell">, result: VerbOutput<"ask" 
   return renderAskText(result, selectedAlias);
 }
 
-function spawnPresentation(input: VerbInput<"spawn">) {
+function spawnPresentation(input: VerbInput<"spawn">, context: TextRenderContext) {
   return {
+    ...(context.surface === undefined ? {} : { surface: context.surface }),
     ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
     ...(input.workdir === undefined ? {} : { cwd: input.workdir }),
     ...(input.alias === undefined ? {} : { alias: input.alias }),
     ...(input.contract === undefined ? {} : { contractId: input.contract }),
   };
-}
-
-function renderSpawn(input: VerbInput<"spawn">, result: VerbOutput<"spawn">): string {
-  return renderCallText(result, spawnPresentation(input));
 }
 
 function renderReport(result: VerbOutput<"report">, context: TextRenderContext): string {
@@ -274,7 +274,7 @@ export function renderVerb<K extends VerbName>(
           : renderKanshiText(result, context);
     }
     case "spawn":
-      return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">);
+      return renderCallText(value as VerbOutput<"spawn">, spawnPresentation(input as VerbInput<"spawn">, context));
     case "fork":
       return renderForkText(value as VerbOutput<"fork">, input as VerbInput<"fork">);
     case "tell":

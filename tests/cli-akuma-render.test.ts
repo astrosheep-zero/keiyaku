@@ -610,34 +610,42 @@ test("every action receipt leads with a verdict and subject, then indented evide
       spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
       { cwd: "/work/repo" },
     ).split("\n"),
-    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! dispatch failed infrastructure busy"],
+    ["! aku/worker/1234abcd born · dispatch failed · do not respawn", "  /work/repo", "  ! dispatch failed infrastructure busy"],
     "a failed dispatch stage marks the receipt instead of standing under an unqualified success",
   );
   assert.deepEqual(
     renderCallText(
-      spawned({ kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "window lost" }] }),
-      { cwd: "/work/repo" },
+      spawned({ kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "window lost", tellNotAttemptedIn: "/work/World" }] }),
+      { cwd: "/other/workdir", prompt: "go" },
     ).split("\n"),
-    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! birth failed infrastructure window lost"],
-    "a detached failure without an admitted Tell stays an action receipt over the born child",
+    [
+      "! aku/worker/1234abcd born · birth failed · do not respawn",
+      "  /other/workdir",
+      "  ! birth failed infrastructure window lost",
+      "  initial input not attempted · World /work/World",
+      "  available printf '%s' 'go' | keiyaku -C '/work/World' tell aku/worker/1234abcd -",
+    ],
+    "only known unattempted input gets a command with the exact World, child, and prompt",
   );
   assert.deepEqual(
     renderCallText(
       spawned({
         tellId: "tell/specimen",
-        kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost", attemptedTellId: "tell/attempted" }],
+        wake: { kind: "pending" },
+        kind: "failed", failures: [{ stage: "wake", diagnostic: "window lost" }],
       }),
       { cwd: "/work/repo", prompt: "exact prompt" },
     ).split("\n"),
     [
-      "! spawned aku/worker/1234abcd",
+      "! aku/worker/1234abcd born · wake failed · do not respawn",
       "  /work/repo",
-      "  input tell/specimen",
+      "  wake pending",
+      "  input tell/specimen admitted",
       "  exact prompt",
-      "  ! tell failed infrastructure window lost",
-      "  attempted input tell/attempted",
+      "  ! tell delivery failed",
+      "    window lost",
     ],
-    "an attempted Tell coordinate survives beneath the failed spawn verdict",
+    "known admission cannot be sold as a safe recovery call",
   );
   assert.deepEqual(
     renderCallText(

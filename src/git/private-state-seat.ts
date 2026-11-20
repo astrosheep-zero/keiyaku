@@ -84,13 +84,13 @@ export function isPrivateStateSeatContention(error: unknown): error is GitPrivat
 async function acquirePrivateStateSeatLock(
   repository: GitRepository,
   path: string,
-  timeoutMs: number | undefined,
+  timeoutMs: number | null | undefined,
 ): Promise<Awaited<ReturnType<typeof acquireSqliteTransactionLock>>> {
   try {
     return await acquireSqliteTransactionLock({
       path,
       mode: "immediate",
-      timeoutMs: timeoutMs ?? PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS,
+      ...(timeoutMs === null ? {} : { timeoutMs: timeoutMs ?? PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS }),
       ...(repository.signal === undefined ? {} : { signal: repository.signal }),
       ...(repository.onPrivateStateSeatContention === undefined
         ? {}
@@ -105,7 +105,8 @@ async function acquirePrivateStateSeatLock(
 }
 
 type PrivateStateSeatOptions = Readonly<{
-  timeoutMs?: number;
+  /** Null leaves acquisition bounded only by the repository's caller signal. */
+  timeoutMs?: number | null;
   onCloseLag?: (lag: PrivateStateSeatCloseLag) => void;
 }>;
 

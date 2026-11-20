@@ -61,8 +61,11 @@ companionship, atomic admission, and exact read-back. Checkout following and
 conflict projection stay outside it.
 
 Target placement and workspace appointment keep their own outer custody
-boundaries. Waiting to acquire the seat has a default bound and never a held
-deadline; a timed-out wait is typed contention, not a broken lock. The seat is
+boundaries. Waiting to acquire the seat has a default bound; Spawn's post-birth
+Dispatch instead waits only under the caller's stop, with no independent
+acquisition deadline. This does not change any other writer's wait. There is
+never a held deadline; a timed-out wait is typed contention, not a broken lock.
+The seat is
 not reentrant: same-context reacquisition is an invariant failure, not a wait.
 The seat creates no queue, fairness promise, daemon, extra retry
 budget, per-Contract ref, or lock-derived success, and cannot protect against

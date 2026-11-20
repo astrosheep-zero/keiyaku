@@ -33,7 +33,7 @@ isolateUserHome();
 
 const context = { columns: 100, color: false };
 
-async function mcpCall(t: TestContext, cwd: string, name: "spawn" | "tell", input: VerbInput<"spawn" | "tell">, value: VerbOutput<"spawn" | "tell">) {
+async function mcpCall(t: TestContext, cwd: string, name: "tell", input: VerbInput<"tell">, value: VerbOutput<"tell">) {
   const adapter = createKeiyakuMcpServer({ cwd, environment: { HOME: cwd, USERPROFILE: cwd }, version: "test" });
   const client = new Client({ name: "test", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -68,6 +68,8 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const result = await api.spawn({ akumaName: "worker", home, cwd: world, body: input.prompt, mode: "wait", contract: bound.kei, alias });
   assert.ok(result.kind === "failed", "Dispatch must stop the operation");
   assert.deepEqual(result.failures.map(failure => failure.stage), ["dispatch"]);
+  assert.equal(result.requestedContractId, bound.contractId);
+  assert.equal(result.requestedAlias, alias);
   assert.deepEqual(settledInput(result.input), { kind: "answered", answer: "exact text answer" });
   assert.equal((await readSoul(pathsForAkumaId(world, result.akumaId)))?.id, result.akumaId);
   assert.ok(result.tellId);
@@ -77,7 +79,8 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const completion = { kind: "returned" as const, value: result };
   assert.equal(classifyVerb("spawn", input, completion), "failed");
   const text = renderVerb("spawn", input, completion, context);
-  for (const evidence of [result.akumaId, result.tellId, "dispatch failed"]) assert.ok(text.includes(evidence), text);
+  assert.equal(text.split("\n")[0], `! ${result.akumaId} born · dispatch failed · do not respawn`);
+  assert.ok(text.includes(`input ${result.tellId} admitted`), text);
 
   const stopped = await api.spawn({ akumaName: "worker", home, cwd: world, body: "again", mode: "wait", contract: bound.kei,
     observe: { observe() { throw new Error("observation unavailable"); } } });
@@ -130,10 +133,6 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   assert.match(aliasText, /alias failed/u);
   assertWireRoundTrip(spawnResultSchema, aliasStopped);
 
-  const response = await mcpCall(t, world, "spawn", input, result);
-  assert.equal(response.isError, true);
-  assert.equal(response.structuredContent, undefined);
-  assert.deepEqual(response.content, [{ type: "text", text: `failed\n${text}` }]);
 });
 
 test("Ask returns its own Turn answer, not an earlier retained answer", async (t) => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
@@ -8,12 +8,13 @@ import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { harnessOwner } from "@astrosheep/square";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { Akuma, Keiyaku, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
-import { beginTurn, endTurn, readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, readHeart, readLatestTurnForBody, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
@@ -329,6 +330,55 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     await native.session.abort();
     await pending;
     assert.ok(processExists(pid));
+    // Retire the real fixture leash immediately after the new child's first Tell COMMIT.
+    // Both adapters run the native birth, Tell admission, and failing wake; neither makes a receipt.
+    const prompt = "exceptional wake after admission";
+    const args = { akumaName: "acp-worker", prompt, bare: true };
+    const exec = DatabaseSync.prototype.exec;
+    for (const surface of ["pi", "mcp"] as const) {
+      let leash: string | undefined;
+      const hook = t.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
+        const result = exec.call(this, sql);
+        if (sql !== "COMMIT" || leash !== undefined) return result;
+        const location = this.location();
+        if (location !== null && basename(location) === "heart.db" &&
+            this.prepare("SELECT id FROM tells WHERE body = ?").get(prompt) !== undefined) {
+          leash = join(dirname(location), "leash.db");
+          renameSync(leash, `${leash}.fixture`);
+        }
+        return result;
+      });
+      try {
+        const reply = surface === "pi"
+          ? (await native.run(`text(await tools.keiyaku_spawn(${JSON.stringify(args)}));`), resultFor(native.results, "keiyaku_spawn"))
+          : CallToolResultSchema.parse(await client.callTool({ name: "spawn", arguments: args }));
+        assert.equal(reply.isError, false, text(reply));
+        const receipt = Keiyaku.verbs.spawn.output.parse(reply.structuredContent);
+        const schema = native.session.getToolDefinition("keiyaku_spawn")?.outputSchema;
+        assert.ok(schema);
+        const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(reply.structuredContent);
+        assert.equal(validation.valid, true, validation.errorMessage);
+        assert.ok(receipt.kind === "failed" && receipt.tellId);
+        const paths = pathsForAkumaId(world, receipt.akumaId);
+        assert.equal(leash, paths.leash);
+        assert.deepEqual(receipt.failures, [{ stage: "wake", diagnostic: `Akuma Heart database is absent: ${paths.leash}` }]);
+        assert.equal((await readSoul(paths))?.id, receipt.akumaId);
+        const retainedInput = await readTell(paths, receipt.tellId);
+        assert.equal(retainedInput?.body, prompt);
+        assert.equal(retainedInput.state, "pending");
+        const [summary, cause] = reply.content;
+        assert.ok(summary?.type === "text" && cause?.type === "text");
+        assert.equal(summary.text.split("\n")[0], `! ${receipt.akumaId} born · wake failed · do not respawn`);
+        assert.ok(summary.text.includes(`input ${receipt.tellId} admitted`));
+        const projected = JSON.parse(cause.text);
+        assert.equal(projected.causeClass, "HeartAbsentError");
+        assert.equal(projected.causeDiagnostic, `Akuma Heart database is absent: ${paths.leash}`);
+        assert.deepEqual(projected.spawn, reply.structuredContent);
+      } finally {
+        hook.mock.restore();
+        if (leash !== undefined) renameSync(`${leash}.fixture`, leash);
+      }
+    }
     await native.close();
     // Session teardown did not kill the admitted Body; it finishes after its own barrier.
     assert.ok(processExists(pid));

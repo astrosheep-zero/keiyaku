@@ -275,7 +275,7 @@ export function callFailureLines(
       return diagnosticLines(
         "tell delivery",
         failure.diagnostic,
-        "failed",
+        failure.reason === undefined ? "failed" : `failed · ${failure.reason}`,
         failure.logPath === undefined ? "" : ` · log ${failure.logPath}`,
       );
     return [

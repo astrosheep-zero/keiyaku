@@ -33,7 +33,10 @@ write transaction can convert that predecessor. Conversion and version
 publication commit only with an actual admitted fact change, preserving retained
 facts, their relationships, and allocation high-water marks. Refusal, failure,
 and an operation that changes no facts leave the predecessor and its retained
-history intact.
+history intact. Tell admission may observe the unchanged frozen Soul coordinate
+on a verified supported predecessor for its filesystem preflight. This narrow
+observation neither exposes predecessor history to public readers nor converts
+it; the actual admitted write still owns conversion.
 
 To recover history, first stop all writers through their owning build. Once
 quiescent, copy the entire Akuma custody directory, including the Heart's
@@ -206,7 +209,10 @@ Heart normalizes terminal evidence to the exact Tell at admission. A native
 fence names only the Tells mapped to that fence in that Turn; missing mapping
 refuses the receipt. Repeated evidence of the same kind for a Tell preserves
 the first admitted timestamp. Only an exact undelivered witness is negative;
-a matching opaque native kind cannot supply that meaning. Pending and told are
+a matching opaque native kind cannot supply that meaning. A wake that cannot
+launch because its frozen directory has disappeared may record that witness
+only under execution custody, in the same conditional mutation that excludes
+existing delivery evidence. It changes no Turn, control, or other input. Pending and told are
 read models, not durable stages; only the absence of terminal evidence makes a
 Tell pending. Terminal evidence follows the Tell's own retention, not the
 retention of the Turn that supplied it.

@@ -106,18 +106,18 @@ continue from clean history, but hung permanently refuses them and untidy
 remains conservative.
 
 The runtime a wake launches is the waking process's own executable, resolved at
-use time. There is no recorded path and no re-resolution chain. When the spawn
-fails with ENOENT, wake diagnoses the missing piece honestly: it checks the
-executable and the frozen execution cwd separately and names the genuinely
-missing side. A missing frozen directory names its path with the remedy to
-kill this Akuma and spawn a fresh one (a missing directory likely means its
-Contract was accepted and the worktree cleaned up, with deliverables already in
-Git). A missing executable names the waking process executable with the remedy
-to re-enter with a fresh CLI process and retry, or kill and spawn fresh. Both
-missing names both. Non-ENOENT spawn failures pass through unchanged. Wake
-never substitutes another directory for a missing frozen cwd. Diagnosis
-changes no identity, session, pending Tell, history, or Soul interpretation,
-and adds no daemon, watcher, or periodic repair.
+use time. There is no recorded path and no re-resolution chain. Failure to
+launch an existing Akuma names its wake, not a new birth. Native launch failure
+can prove a missing frozen execution directory or a missing executable; it
+checks them independently and does not interpret unreadability as absence.
+A missing executable is not evidence of a missing directory. A missing frozen
+directory may be a retired Contract worktree; wake never substitutes a new path.
+If the directory disappears after Tell admission, only the owned wake's positive
+launch evidence can authorize exact undelivered settlement. The existing leash
+must exclude a consuming Body, and Heart must still find no delivery proof for
+that input. An inconclusive settlement retains uncertainty, the launch
+diagnosis, and any separate settlement failure. Generic launch failure and
+ordinary confirmation deadlines do not terminalize pending input.
 
 Ordinary pending input never retires an active provider attempt. After a
 successful Turn and proof of provider closure, the same Body takes the next
@@ -131,7 +131,10 @@ input, or recovery service; a later ordinary Tell can wake retained work.
 ## Tell And Control
 
 Tell admission is atomic with Soul existence, so unborn targets refuse without
-leaving future input behind. Body records delivery only after provider submission
+leaving future input behind. The one admission owner checks the frozen
+execution directory before recording new input or control. A proved missing
+directory refuses new admission, not an exact replay of already-retained input.
+The filesystem check does not hold Heart write custody. Body records delivery only after provider submission
 evidence. Proven launch delivery or live delivery without a native receipt
 channel settles the Tell; where a native receipt is required, submission alone
 does not settle it. Heart admits a terminal witness for each exact Tell proven

@@ -79,9 +79,9 @@ test("a detached call keeps its born child, execution directory, and native fail
   assert.equal(
     text,
     [
-      `! spawned ${akuma}`,
+      `! ${akuma} born · tell failed · do not respawn`,
       `  ${world}`,
-      "  input tell/msys",
+      "  input tell/msys admitted",
       "  prompt",
       "  ! tell failed infrastructure window lost",
     ].join("\n"),
@@ -100,21 +100,19 @@ test("detached spawn keeps alias and independent partial failures", () => {
   const failures = [
     {
       result: spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
+      stage: "dispatch",
       diagnostic: "! dispatch failed infrastructure busy",
     },
     {
       result: spawned({ kind: "failed", failures: [{ stage: "alias", kind: "infrastructure", diagnostic: "locked" }] }),
+      stage: "alias",
       diagnostic: "! alias failed infrastructure locked",
     },
   ];
-  for (const { result, diagnostic } of failures) {
+  for (const { result, stage, diagnostic } of failures) {
     const text = renderCallText(result, { cwd: world });
     assert.ok(text.split("\n").includes(`  ${diagnostic}`), diagnostic);
-    assert.match(
-      text.split("\n")[0]!,
-      /^! spawned aku\/worker\/1234abcd/u,
-      "a partial failure is marked on the verdict",
-    );
+    assert.equal(text.split("\n")[0], `! ${akuma} born · ${stage} failed · do not respawn`);
     assert.doesNotMatch(text, /keiyaku wait|to wait|-----/u);
   }
 

@@ -189,12 +189,20 @@ coordinate and the useful relation; they do not expose Heart birth terminology,
 observation carrier words, or field labels. A failure to observe an
 established Akuma keeps its reason with that identity. Pre-operation refusals
 remain distinct from provider, lifecycle, and action failures after the target
-has been established.
+has been established. A Tell refusal for a missing frozen directory names the
+existing Akuma and exact directory, without claiming input was admitted or a
+new birth failed.
 
 One Akuma action family covers spawns, forks, tells, and kills, including plural
 and partial outcomes. Receipts lead with the action verdict and complete Akuma
-identity; aliases supplement identity. Association, source, execution directory,
-submitted input, and diagnostics remain distinct supporting facts. No receipt
+identity; aliases supplement identity. A partial Spawn instead leads with the
+born child, the stage that stopped, and a warning against respawning. Returned
+and exceptional partials share this presentation and keep the failed process
+outcome. Requested and confirmed associations stay distinct. A Tell recovery
+call requires proof the original input was not admitted, and must preserve the
+World, exact child and input; otherwise the receipt shows evidence alone.
+Association, source, execution directory, submitted input, and diagnostics
+remain distinct supporting facts. No receipt
 claims success over a failed stage or pending confirmation. An ordinary confirmed
 Tell leads with the selector the caller addressed (its alias alone when supplied,
 otherwise the complete canonical identity) and names its settled start or

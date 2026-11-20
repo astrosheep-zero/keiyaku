@@ -18,7 +18,7 @@ import {
 } from "../library/keiyaku-verbs.js";
 import { projectFailure } from "../library/outcome.js";
 import { renderVerb } from "../cli/render/verbs.js";
-import { describeModelTools, hasOutputSchema, modelCoordinates } from "../library/model-tools.js";
+import { describeModelTools, modelCoordinates, modelToolOutput } from "../library/model-tools.js";
 import { SERVER_DESCRIPTION } from "./description.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
 
@@ -88,19 +88,15 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
         now: Date.now(),
         ...(name === "report" || name === "ls" ? actorContext : {}),
       });
-      const isError = disposition !== "accepted" && disposition !== "unsatisfied";
+      const failure = completion.kind === "threw" ? projectFailure(completion.error) : undefined;
+      const output = modelToolOutput(name, completion, disposition, failure?.spawn);
       return {
         content: [
-          { type: "text", text: isError ? `${disposition}\n${text}` : text },
-          ...(completion.kind === "threw"
-            ? [{ type: "text" as const, text: JSON.stringify(projectFailure(completion.error)) }]
-            : []),
+          { type: "text", text: output.isError ? `${disposition}\n${text}` : text },
+          ...(failure === undefined ? [] : [{ type: "text" as const, text: JSON.stringify(failure) }]),
         ],
-        isError,
+        ...output,
         _meta: { "keiyaku/disposition": disposition },
-        ...(!isError && hasOutputSchema(name) && completion.kind === "returned"
-          ? { structuredContent: JSON.parse(JSON.stringify(completion.value)) }
-          : {}),
       };
     } catch (error) {
       console.error("keiyaku-mcp: failed to project result", error);

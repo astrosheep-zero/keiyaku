@@ -96,6 +96,7 @@ export {
   initializeHeart,
   isHeartAbsent,
   probeLeash,
+  readSoulForTell,
 } from "./storage.js";
 
 export { AkumaBusyError, BodyControlledError, life, lifeAt, projectTell } from "./facts.js";
@@ -412,20 +413,22 @@ function soulAt(heart: DatabaseSync, id: Soul["id"]): Soul | null {
   return soul;
 }
 
+type TellAdmissionOptions = Readonly<{ signal?: AbortSignal; newTellStop?: Readonly<{ cause: unknown }> }>;
+
 export function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
-  options: Readonly<{ interrupt: true; signal?: AbortSignal }>,
+  options: TellAdmissionOptions & Readonly<{ interrupt: true }>,
 ): Promise<InterruptTellAdmission>;
 export function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
-  options?: Readonly<{ interrupt?: false; signal?: AbortSignal }>,
+  options?: TellAdmissionOptions & Readonly<{ interrupt?: false }>,
 ): Promise<TellAdmission>;
 export async function recordTell(
   paths: AkumaPaths,
   tell: TellInput,
-  options: Readonly<{ interrupt?: boolean; signal?: AbortSignal }> = {},
+  options: TellAdmissionOptions & Readonly<{ interrupt?: boolean }> = {},
 ): Promise<TellAdmission | InterruptTellAdmission> {
   const interrupt = options.interrupt === true;
   return await withHeartTransaction(
@@ -433,6 +436,7 @@ export async function recordTell(
     (heart) => {
       if (soulAt(heart, akumaIdFromDirectoryName(basename(paths.directory)).id) === null) return { kind: "not-born" };
       const existing = tellFact(heart, tell.id);
+      if (existing === null && options.newTellStop !== undefined) throw options.newTellStop.cause;
       const body = latestBodyFact(heart);
       const pause = interrupt ? pauseFact(heart) : null;
       const inputs: TellAdmissionInputs = { heart, tell, body, pause, interrupt };

@@ -2109,7 +2109,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
   }
 });
 
-test("spawn ENOENT diagnosis preserves the original failure as cause", async () => {
+test("Body birth ENOENT preserves the original cause and diagnoses both missing coordinates", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-body-spawn-cause-"));
   const liveExecPath = process.execPath;
   try {
@@ -2131,7 +2131,9 @@ test("spawn ENOENT diagnosis preserves the original failure as cause", async () 
       }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /Body spawn failed/);
+        assert.ok(error.message.startsWith(`Body birth for ${allocated.id} failed:`));
+        assert.ok(error.message.includes(`frozen execution directory ${vanishedCwd} no longer exists`));
+        assert.ok(error.message.includes(`waking process executable ${vanishedExecutable} no longer exists`));
         assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
         const cause = (error as Error & { cause?: unknown }).cause as NodeJS.ErrnoException | undefined;
         assert.ok(cause !== undefined, "diagnosis preserves the original ENOENT as cause");

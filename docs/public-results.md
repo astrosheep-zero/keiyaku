@@ -34,7 +34,10 @@ when the group completes. A standalone
 transport publishes normal routing answers with their producing owner's normal
 structural declaration. It serializes the native answer directly, consuming the
 existing owner judgment without reparsing trusted answers or declaring a second
-result model.
+result model. Spawn also publishes a confirmed partial as a structured receipt,
+whether returned or carried by an exception. This is successful receipt
+transport, not successful completion of the stopped operation. Pre-birth
+failures do not establish such a receipt.
 Heterogeneous object answers
 and nested observations identify their alternatives explicitly. Each catalogue
 retains its owner-family identity through empty, absent, and unavailable answers;

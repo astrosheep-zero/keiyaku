@@ -163,7 +163,12 @@ that input was submitted, distinguishing start from steering. It does not await
 an answer or claim continuing execution. No pending submission or interrupt is
 ordinary success. A confirmation stop or exceptional cancellation keeps known
 admission and control evidence and the native cause, without exposing Body
-identity or promising that pending work cannot advance.
+identity or promising that pending work cannot advance. A proved missing frozen
+execution directory refuses new input with the exact Akuma and directory; the
+Akuma cannot be woken there. Fresh work requires a new Akuma in a live directory.
+When that directory instead disappears after admission and the exact input is
+proved undelivered, the wake receipt retains the diagnosis. Status and Wait
+observe the settled input as no longer pending without inventing a Turn.
 `ask` admits a Tell under a required JSON Schema document and observes its parsed
 JSON answer. Only Ask distinguishes invalid output from execution failure; a
 text observer of invalid schema output sees the same failure diagnostic as the

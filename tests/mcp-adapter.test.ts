@@ -36,7 +36,8 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
-import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, readSoul } from "../src/akuma/heart/index.js";
+import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
@@ -210,6 +211,42 @@ test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name 
   const cli = await runCli(["spawn", "child", "go"], { cwd, environment });
   assert.equal(cli.exit, 1);
   assert.match(cli.stdout, /available  keiyaku ls aku\//u);
+});
+
+test("MCP and CLI report a real returned partial Spawn without losing the born identity", async (t) => {
+  const cwd = await World.at(temporaryDirectory(t, "mcp-partial-spawn-"));
+  const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
+  installHostAcpFixture(cwd);
+  mkdirSync(join(cwd, ".keiyaku", "akuma"), { recursive: true });
+  const authority = join(cwd, ".keiyaku", "akuma", "alias.json");
+  writeFileSync(authority, "malformed Alias authority\n");
+  const pidReceiptPath = join(cwd, "body-pids");
+  const restoreReceipt = installAkumaBodyPidReceipt(pidReceiptPath);
+  let operationFailed = true;
+  try {
+    const { client } = await mcpFixture(t, { cwd, environment, version: "test" });
+    const reply = await client.callTool({ name: "spawn", arguments: { akumaName: "acp-worker", alias: "lane", bare: true } });
+    assert.equal(reply.isError, false);
+    assert.equal(reply._meta?.["keiyaku/disposition"], "failed");
+    const value = Keiyaku.verbs.spawn.output.parse(reply.structuredContent);
+    assert.ok(value.kind === "failed");
+    assert.equal(value.requestedAlias, "@lane");
+    assert.deepEqual(value.failures.map(({ stage }) => stage), ["alias"]);
+    const head = `! ${value.akumaId} born · alias failed · do not respawn`;
+    assert.equal((reply.content as { text: string }[])[0]?.text.split("\n")[0], head);
+    assert.equal((await readSoul(pathsForAkumaId(cwd, value.akumaId)))?.id, value.akumaId);
+    const cli = await runCli(["spawn", "acp-worker", "--bare", "--alias", "lane"], { cwd, environment });
+    assert.equal(cli.exit, 3, cli.stderr);
+    assert.match(cli.stdout, /^! aku\/acp-worker\/[a-f0-9]{8} born · alias failed · do not respawn\n/u);
+    assert.match(cli.stdout, /requested Alias @lane/u);
+    assert.match(cli.stdout, /invalid Alias JSON/u);
+    assert.equal(readFileSync(authority, "utf8"), "malformed Alias authority\n");
+    operationFailed = false;
+  } finally {
+    try {
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: cwd, pidReceiptPath, timeoutMs: 30_000, operationFailed });
+    } finally { restoreReceipt(); }
+  }
 });
 
 test("bad spawn workdir agrees on CLI usage and MCP failure category", async (t) => {

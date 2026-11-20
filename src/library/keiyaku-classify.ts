@@ -1,4 +1,4 @@
-import { AkumaNotBornError } from "../akuma/akuma-errors.js";
+import { AkumaNotBornError, AkumaWorkdirMissingError } from "../akuma/akuma-errors.js";
 import { AkumaNameError } from "../akuma/archetype.js";
 import type { AkumaAskResult, AkumaKillResult, AkumaTellResult } from "../akuma/selection-observation.js";
 import type { RegionRead } from "../kanshi/report.js";
@@ -13,7 +13,7 @@ import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
 import type { InvocationWaitResult } from "./keiyaku-wait.js";
 import { KeiyakuArcDocumentError } from "./keiyaku-coordinates.js";
-import { errorCategory } from "../errors.js";
+import { errorCategory, KeiyakuError } from "../errors.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
 import { contractOutcomeDisposition, invocationIssueIsFailure } from "./outcome.js";
 import { resetIssueIsRequired } from "./nuke.js";
@@ -32,9 +32,11 @@ function classifyDebt(result: DebtNativeResult): VerbDisposition {
 }
 
 function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
+  if (name === "spawn" && error instanceof KeiyakuError && error.spawn?.kind === "failed") return "failed";
   if (
     error instanceof AkumaAddressError ||
     error instanceof AkumaNotBornError ||
+    error instanceof AkumaWorkdirMissingError ||
     error instanceof AkumaWorldScopeError ||
     error instanceof KeiyakuArcDocumentError ||
     (name === "spawn" && error instanceof AkumaNameError)

@@ -1758,7 +1758,6 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
     provider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
-  rmSync(seat, { recursive: true, force: true });
 
   const owner = new AkumaOwner(allocated.id, await World.at(root));
   const held = await HeldAkumaLeash.try(allocated.paths);

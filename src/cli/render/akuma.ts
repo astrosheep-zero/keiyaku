@@ -49,68 +49,66 @@ export function renderAskText(result: AkumaAskResult, alias: string | undefined)
   return [askResultText(result, alias), ...(answer === undefined ? [] : [answer])].join("\n");
 }
 
-type SpawnPresentation = Readonly<{ prompt?: string; cwd?: string; alias?: string; contractId?: string }>;
-type SpawnHead = Readonly<{
-  id: string;
-  alias?: string;
-  contract: Readonly<{ kind: "none" }> | Readonly<{ kind: "associated"; contractId: string }>;
-  facts: readonly string[];
+type SpawnPresentation = Readonly<{
+  prompt?: string;
   cwd?: string;
+  alias?: string;
+  contractId?: string;
+  surface?: "cli" | "mcp";
 }>;
+type PartialSpawn = Extract<SpawnResult, { kind: "failed" }>;
 
-function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): SpawnHead {
-  const alias = input.kind === "failed" ? input.aliasName : presentation.alias;
-  const contractId = input.kind === "failed" ? input.contractId : presentation.contractId;
-  const cwd = presentation.cwd;
-  const facts = [
-    ...(input.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(input.dispatchWarning)}`]),
-    ...(input.alias === undefined ? [] : [`alias moved · previous ${input.alias.previousAkumaId}`]),
-  ];
-  return {
-    id: input.akumaId,
-    ...(alias === undefined ? {} : { alias }),
-    contract: contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
-    facts,
-    ...(cwd === undefined ? {} : { cwd }),
-  };
+function spawnRecovery(result: PartialSpawn, { prompt, surface }: SpawnPresentation): string[] {
+  if (result.tellId !== undefined) return [];
+  const birth = result.failures.find((stage) => stage.stage === "birth" && stage.tellNotAttemptedIn !== undefined);
+  if (birth?.stage !== "birth" || birth.tellNotAttemptedIn === undefined) return [];
+  const world = birth.tellNotAttemptedIn;
+  const evidence = [`initial input not attempted · World ${safeText(world)}`];
+  if (surface === "mcp" || prompt === undefined || prompt.trim() === "") return evidence;
+  const quote = (arg: string) => `'${arg.replaceAll("'", "'\"'\"'")}'`;
+  const call = `printf '%s' ${quote(prompt)} | keiyaku -C ${quote(world)} tell ${result.akumaId} -`;
+  return safeText(call) === call ? [...evidence, `available ${call}`] : evidence;
 }
 
-function spawnEvidence(result: SpawnResult, input: SpawnPresentation, exceptional = false): readonly string[] {
-  const head = spawnHead(result, input);
-  const showInput = exceptional || result.kind === "failed" || result.action === undefined;
+function spawnEvidence(result: SpawnResult, input: SpawnPresentation): readonly string[] {
+  const contractId = result.kind === "failed" ? result.contractId : input.contractId;
+  const showInput = result.tellId !== undefined && (result.kind === "failed" || result.action === undefined);
   return [
-    ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
-    ...(head.cwd === undefined ? [] : [safeText(head.cwd)]),
-    ...head.facts,
+    ...(contractId === undefined ? [] : [safeText(contractId)]),
+    ...(input.cwd === undefined ? [] : [safeText(input.cwd)]),
+    ...(result.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(result.dispatchWarning)}`]),
+    ...(result.alias === undefined ? [] : [`alias moved · previous ${result.alias.previousAkumaId}`]),
+    ...(result.aliasWarning === undefined ? [] : [`alias lag ${safeText(result.aliasWarning)}`]),
     ...tellControlLines({ action: result.action, wake: result.wake }),
-    ...(result.tellId === undefined || !showInput ? [] : [`input ${result.tellId}`]),
-    ...(result.tellId === undefined || input.prompt === undefined || !showInput
-      ? []
-      : previewLines(input.prompt, "", 1).filter(Boolean)),
-    ...(result.kind === "failed" ? callFailureLines(result.failures) : []),
+    ...(showInput ? [`input ${result.tellId}${result.kind === "failed" ? " admitted" : ""}`] : []),
+    ...(showInput && input.prompt !== undefined ? previewLines(input.prompt, "", 1).filter(Boolean) : []),
   ];
 }
 
-export function renderCallText(result: SpawnResult, input: SpawnPresentation = {}): string {
-  const head = spawnHead(result, input);
-  return actionReceipt({
-    mark: result.kind === "failed" ? "!" : "✓",
-    verb: "spawned",
-    id: result.akumaId,
-    ...(head.alias === undefined ? {} : { alias: head.alias }),
-    evidence: spawnEvidence(result, input),
-  }).join("\n");
-}
-
-export function renderSpawnFailure(result: SpawnResult, diagnostic: string, input: SpawnPresentation = {}): string {
-  const head = spawnHead(result, input);
-  return actionReceipt({
-    mark: "!",
-    verb: "spawn failed",
-    id: result.akumaId,
-    ...(head.alias === undefined ? {} : { alias: head.alias }),
-    evidence: [...spawnEvidence(result, input, true), ...exactIndentedLines(`reason ${diagnostic}`, "")],
-  }).join("\n");
+export function renderCallText(result: SpawnResult, input: SpawnPresentation = {}, diagnostic?: string): string {
+  const evidence = spawnEvidence(result, input);
+  if (result.kind === "spawned") {
+    return actionReceipt({
+      mark: "✓",
+      verb: "spawned",
+      id: result.akumaId,
+      ...(input.alias === undefined ? {} : { alias: input.alias }),
+      evidence,
+    }).join("\n");
+  }
+  const stopped = [
+    ...(result.aliasName === undefined ? [] : [`alias ${result.aliasName}`]),
+    ...(result.requestedContractId === undefined ? [] : [`requested Contract ${result.requestedContractId}`]),
+    ...(result.requestedAlias === undefined ? [] : [`requested Alias ${result.requestedAlias}`]),
+    ...evidence,
+    ...callFailureLines(result.failures),
+    ...(diagnostic === undefined ? [] : exactIndentedLines(`reason ${diagnostic}`, "")),
+    ...spawnRecovery(result, input),
+  ];
+  return [
+    `! ${result.akumaId} born · ${result.failures[0].stage} failed · do not respawn`,
+    ...stopped.map((line) => (line === "" ? "" : `  ${line}`)),
+  ].join("\n");
 }
 
 export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: string; at: string }>): string {

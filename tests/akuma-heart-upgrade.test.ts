@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -9,7 +9,7 @@ import { wakeRecordedTell } from "../src/akuma/body.js";
 import { allocateAkumaDirectory, type AkumaPaths } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { Akuma, Akumas, nuke } from "../src/index.js";
+import { Akuma, Akumas, KeiyakuError, nuke } from "../src/index.js";
 import {
   appendActivity,
   cancelBodyTurns,
@@ -345,8 +345,13 @@ test("v31 readers preserve retained WAL; a Tell write converts without losing hi
 
 test("addressed Tell, Ask and Kill reach their first real admission on v31", async () => {
   for (const verb of ["Tell", "Ask", "Kill", "Kill glob"] as const) {
+    let frozenDirectory: string | undefined;
     const { root, id, paths, close } = await legacyFixture(31, true, (db) => {
       db.exec("DELETE FROM control WHERE kind = 'stop'");
+      if (verb === "Tell") {
+        frozenDirectory = join(dirname(db.location()!), "retired-worktree");
+        db.prepare("UPDATE soul SET soul_json = json_set(soul_json, '$.cwd', ?)").run(frozenDirectory);
+      }
     });
     const holder = await HeldAkumaLeash.try(paths);
     assert.ok(holder);
@@ -379,6 +384,17 @@ test("addressed Tell, Ask and Kill reach their first real admission on v31", asy
         const alias = parseAkumaAlias("@legacy");
         if (verb === "Ask") await moveAlias({ world: root, alias, akumaId: id });
         const input = { akuma: verb === "Ask" ? alias : id, body: `first ${verb}`, timeoutMs: 0 };
+        if (frozenDirectory !== undefined) {
+          const original = custodyBytes(paths);
+          await assert.rejects(api.tell({ ...input, wait: true }), (error: unknown) => {
+            assert.ok(error instanceof KeiyakuError);
+            assert.deepEqual(error.frozenWorkdir, { id, cwd: frozenDirectory });
+            return true;
+          });
+          await assert.rejects(readHeart(paths), needsUpgrade);
+          assert.deepEqual(custodyBytes(paths), original);
+          mkdirSync(frozenDirectory);
+        }
         const receipt =
           verb === "Tell"
             ? await api.tell({ ...input, wait: true })

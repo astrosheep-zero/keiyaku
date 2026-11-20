@@ -60,7 +60,11 @@ const aliasStageSchema = operationDiagnosticSchema
 const spawnFailureSchema = z.union([
   operationDiagnosticSchema
     .unwrap()
-    .extend({ stage: z.enum(["birth", "tell"]), attemptedTellId: z.string().exactOptional() })
+    .extend({
+      stage: z.enum(["birth", "tell"]),
+      attemptedTellId: z.string().exactOptional(),
+      tellNotAttemptedIn: z.string().exactOptional(),
+    })
     .readonly(),
   dispatchStageSchema,
   aliasStageSchema,
@@ -69,6 +73,7 @@ const spawnFailureSchema = z.union([
 type SpawnFailure = z.output<typeof spawnFailureSchema>;
 const publicationFields = {
   dispatchWarning: z.string().exactOptional(),
+  aliasWarning: z.string().exactOptional(),
   alias: z
     .strictObject({ kind: z.literal("moved"), previousAkumaId: akumaIdSchema })
     .readonly()
@@ -91,18 +96,23 @@ const spawnAnswer = {
   wake: pendingWakeSchema.exactOptional(),
   input: completedTextObservationSchema.exactOptional(),
 };
-export const spawnNormalResultSchema = z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly();
-export const spawnResultSchema = z.union([
-  spawnNormalResultSchema,
-  z
-    .strictObject({
-      kind: z.literal("failed"),
-      ...spawnAnswer,
-      contractId: contractIdSchema.exactOptional(),
-      aliasName: akumaAliasSchema.exactOptional(),
-      failures: z.tuple([spawnFailureSchema], spawnFailureSchema).readonly(),
-    })
-    .readonly(),
+const spawnedReceiptSchema = z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly();
+const stoppedSpawnReceiptSchema = z
+  .strictObject({
+    kind: z.literal("failed"),
+    ...spawnAnswer,
+    contractId: contractIdSchema.exactOptional(),
+    aliasName: akumaAliasSchema.exactOptional(),
+    requestedContractId: contractIdSchema.exactOptional(),
+    requestedAlias: akumaAliasSchema.exactOptional(),
+    failures: z.tuple([spawnFailureSchema], spawnFailureSchema).readonly(),
+  })
+  .readonly();
+export const spawnResultSchema = z.union([spawnedReceiptSchema, stoppedSpawnReceiptSchema]);
+// The invocation does not observe an answer; a confirmed partial still carries its exact receipt.
+export const spawnNormalResultSchema = z.union([
+  spawnedReceiptSchema.unwrap().omit({ wake: true, input: true }).readonly(),
+  stoppedSpawnReceiptSchema,
 ]);
 const parentFields = { parentAkumaId: akumaIdSchema.exactOptional() };
 export const forkNormalResultSchema = z
@@ -192,9 +202,9 @@ function settingsOption(value: unknown): Settings | undefined {
   return value as Settings;
 }
 
-function integrationFailure(error: unknown): IntegrationFailure {
+function integrationFailure(error: unknown, primary = error): IntegrationFailure {
   return {
-    kind: errorCategory(error) === "authority-corruption" ? "authority-corruption" : "infrastructure",
+    kind: errorCategory(primary) === "authority-corruption" ? "authority-corruption" : "infrastructure",
     diagnostic: error instanceof Error ? error.message : String(error),
   };
 }
@@ -230,12 +240,12 @@ type DispatchAnswer = Readonly<{ failure?: z.output<typeof dispatchStageSchema>;
 async function callDispatch(input: Parameters<typeof publishDispatch>[0]): Promise<DispatchAnswer> {
   try {
     const published = await publishDispatch(input);
-    if (published.kind === "dispatched") {
-      const warning = published.seatClose?.map((lag) => lag.diagnostic).join("\n");
-      return warning === undefined || warning.length === 0 ? {} : { dispatchWarning: warning };
-    }
+    const warning = published.seatClose?.map((lag) => lag.diagnostic).join("\n");
+    const evidence = warning === undefined || warning.length === 0 ? {} : { dispatchWarning: warning };
+    if (published.kind === "dispatched") return evidence;
     const failure = published.failure;
     return {
+      ...evidence,
       failure: {
         stage: "dispatch",
         failure:
@@ -266,15 +276,22 @@ async function callAlias(
   path: WorldRoot,
   alias: AkumaAlias | undefined,
   akuma: AkumaId,
-): Promise<Readonly<{ alias?: SpawnResult["alias"]; failure?: z.output<typeof aliasStageSchema> }>> {
+  signal?: AbortSignal,
+): Promise<
+  Readonly<{ alias?: SpawnResult["alias"]; aliasWarning?: string; failure?: z.output<typeof aliasStageSchema> }>
+> {
   if (alias === undefined) return {};
   try {
-    const moved = await moveAlias({ world: path, alias, akumaId: akuma });
-    return moved.previous === null || moved.previous === akuma
-      ? {}
-      : { alias: { kind: "moved", previousAkumaId: moved.previous } };
+    const moved = await moveAlias({ world: path, alias, akumaId: akuma, ...(signal === undefined ? {} : { signal }) });
+    return {
+      ...(moved.closeWarning === undefined ? {} : { aliasWarning: moved.closeWarning }),
+      ...(moved.previous === null || moved.previous === akuma
+        ? {}
+        : { alias: { kind: "moved", previousAkumaId: moved.previous } }),
+    };
   } catch (error) {
-    return { failure: { stage: "alias", ...integrationFailure(error) } };
+    const primary = error instanceof AggregateError ? error.cause : error;
+    return { failure: { stage: "alias", ...integrationFailure(error, primary) } };
   }
 }
 
@@ -363,19 +380,24 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
 }
 
 /** Project native birth and initial-Tell stops before association work. */
-function callAdmissionFailures(admitted: AdmittedAkumaCall, initialTell: InitialCallTell | undefined): SpawnFailure[] {
-  if (admitted.failure !== undefined)
+function callAdmissionFailures(admitted: AdmittedAkumaCall, parsed: ParsedCallInput): SpawnFailure[] {
+  const { initialTell } = parsed;
+  if (admitted.failureStage !== undefined) {
+    const { failureStage: stage, failure } = admitted;
+    const cause = integrationFailure(failure);
+    if (stage === "wake") return [{ stage, diagnostic: cause.diagnostic }];
     return [
-      admitted.failureStage === "wake"
-        ? { stage: "wake", diagnostic: integrationFailure(admitted.failure).diagnostic }
-        : {
-            stage: admitted.failureStage ?? "birth",
-            ...integrationFailure(admitted.failure),
-            ...(initialTell === undefined || admitted.tell !== undefined
-              ? {}
-              : { attemptedTellId: initialTell.tellId }),
-          },
+      {
+        stage,
+        ...cause,
+        ...(initialTell === undefined
+          ? {}
+          : stage === "birth"
+            ? { tellNotAttemptedIn: parsed.path }
+            : { attemptedTellId: initialTell.tellId }),
+      },
     ];
+  }
   return initialTell !== undefined && admitted.tell === undefined
     ? [
         {
@@ -388,6 +410,44 @@ function callAdmissionFailures(admitted: AdmittedAkumaCall, initialTell: Initial
     : [];
 }
 
+function callInputEvidence(admitted: AdmittedAkumaCall, parsed: ParsedCallInput) {
+  const failures = callAdmissionFailures(admitted, parsed);
+  if (admitted.tell === undefined) return { failures };
+  const { kind, tellId, action, wake, ...rest } = completeTell(tellAdmissionEvidence(admitted.id, admitted.tell));
+  if (kind === "failed" && "failures" in rest) failures.push(...rest.failures);
+  return {
+    failures,
+    evidence: {
+      tellId,
+      ...(action === undefined ? {} : { action }),
+      ...(wake === undefined ? {} : { wake }),
+    },
+  };
+}
+
+function observeSpawnInput(
+  parsed: ParsedCallInput,
+  id: AkumaId,
+  receipt: TellResult,
+  head: SpawnWaitHead,
+  reportDiagnostic?: (message: string) => void,
+) {
+  return observeAdmittedTellAkuma({
+    ...parsed,
+    id,
+    receipt,
+    onObserve: {
+      ...parsed.observe,
+      admitted: (tell, akuma) => parsed.observe?.admitted?.(tell, akuma, head),
+    },
+    outcomeObserved: outcomePluginObserver({
+      ...parsed,
+      world: parsed.path,
+      reportDiagnostic: callDiagnosticSink(pathsForAkumaId(parsed.path, id), "outcome observation", reportDiagnostic),
+    }),
+  });
+}
+
 /** Settle one admitted birth: detach, observe, or report the exact initial-Tell failure. */
 async function settleCall(
   parsed: ParsedCallInput,
@@ -397,21 +457,10 @@ async function settleCall(
 ): Promise<SpawnResult> {
   const receipt = admitted.tell;
   const { cwd: _cwd, contractId, aliasName, failures: associationFailures, ...publication } = head;
-  const compact = receipt === undefined ? undefined : completeTell(tellAdmissionEvidence(admitted.id, receipt));
-  const failures = callAdmissionFailures(admitted, parsed.initialTell);
-  if (compact?.kind === "failed") failures.push(...compact.failures);
+  const { evidence, failures } = callInputEvidence(admitted, parsed);
   failures.push(...(associationFailures ?? []));
-  const answer = {
-    akumaId: admitted.id,
-    ...publication,
-    ...(compact === undefined
-      ? {}
-      : {
-          tellId: compact.tellId,
-          ...(compact.action === undefined ? {} : { action: compact.action }),
-          ...(compact.wake === undefined ? {} : { wake: compact.wake }),
-        }),
-  };
+  const answer = { akumaId: admitted.id, ...publication, ...evidence };
+  const requestedContract = parsed.seat?.id;
   let input: SpawnResult["input"];
   const result = (): SpawnResult => {
     const [first, ...rest] = failures;
@@ -424,42 +473,30 @@ async function settleCall(
           failures: [first, ...rest],
           ...(contractId === undefined ? {} : { contractId }),
           ...(aliasName === undefined ? {} : { aliasName }),
+          ...(requestedContract === undefined || contractId !== undefined
+            ? {}
+            : { requestedContractId: requestedContract }),
+          ...(parsed.alias === undefined || aliasName !== undefined ? {} : { requestedAlias: parsed.alias }),
         };
   };
   const failed = (reason: unknown) => withSpawnFailureReceipt(reason, spawnResultSchema.parse(result()), parsed.signal);
-  if (parsed.signal?.aborted === true) throw failed(parsed.signal.reason);
-  if (admitted.failure !== undefined && (parsed.initialTell === undefined || admitted.failureStage === "wake"))
+  // The wake's native exception still leads if cancellation also stopped a later association.
+  if (admitted.failureStage !== undefined && (parsed.initialTell === undefined || admitted.failureStage === "wake"))
     throw failed(admitted.failure);
   if (receipt !== undefined && parsed.mode === "wait") {
     try {
-      const { observation } = await observeAdmittedTellAkuma({
-        ...parsed,
-        id: admitted.id,
-        receipt,
-        onObserve: {
-          ...parsed.observe,
-          admitted: async (tell, id) => {
-            await parsed.observe?.admitted?.(tell, id, head);
-          },
-        },
-        outcomeObserved: outcomePluginObserver({
-          ...parsed,
-          world: parsed.path,
-          reportDiagnostic: callDiagnosticSink(
-            pathsForAkumaId(parsed.path, admitted.id),
-            "outcome observation",
-            reportDiagnostic,
-          ),
-        }),
-      });
+      parsed.signal?.throwIfAborted();
+      const { observation } = await observeSpawnInput(parsed, admitted.id, receipt, head, reportDiagnostic);
       if (observation.kind === "failed" || observation.kind === "invalid-output")
         failures.push({ stage: "observation", diagnostic: observation.diagnostic });
       else input = observation;
     } catch (error) {
-      if (parsed.signal?.aborted) throw failed(error);
       failures.push({ stage: "observation", diagnostic: integrationFailure(error).diagnostic });
+      if (parsed.signal?.aborted) throw failed(error);
     }
   }
+  // Cancellation after the last confirmed stage cannot undo a complete receipt.
+  if (failures.length !== 0 && parsed.signal?.aborted) throw failed(parsed.signal.reason);
   return result();
 }
 
@@ -491,16 +528,19 @@ export async function callAkumas(
       seat === undefined
         ? {}
         : await callDispatch({
-            repository: seat.scope,
+            repository: parsed.signal === undefined ? seat.scope : { ...seat.scope, signal: parsed.signal },
             akumaId: admitted.id,
             contractId: seat.id,
+            callerWait: true,
           });
-    const alias = dispatch.failure === undefined ? await callAlias(parsed.path, parsed.alias, admitted.id) : {};
+    const alias =
+      dispatch.failure === undefined ? await callAlias(parsed.path, parsed.alias, admitted.id, parsed.signal) : {};
     const failures = [dispatch.failure, alias.failure].filter((failure) => failure !== undefined);
     const head: SpawnWaitHead = {
       cwd: admitted.cwd,
       ...(dispatch.dispatchWarning === undefined ? {} : { dispatchWarning: dispatch.dispatchWarning }),
       ...(alias.alias === undefined ? {} : { alias: alias.alias }),
+      ...(alias.aliasWarning === undefined ? {} : { aliasWarning: alias.aliasWarning }),
       ...(failures.length === 0 ? {} : { failures }),
       ...(seat === undefined || dispatch.failure !== undefined ? {} : { contractId: seat.id }),
       ...(parsed.alias === undefined || dispatch.failure !== undefined || alias.failure !== undefined
