@@ -37,7 +37,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { contractLocator } from "../src/git/identity.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import { Keis, KeiyakuError, Repo } from "../src/index.js";
+import { Keis, KeiyakuError, Repo, type KanshiReport } from "../src/index.js";
 import { Debts } from "../src/debt/index.js";
 import { World } from "../src/world.js";
 import { cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
@@ -491,24 +491,12 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     await assert.rejects(() => bound.kei.deliver(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     await assert.rejects(() => bound.kei.review({ verdict: "satisfied", summary: "Worktree review passed" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     await assert.rejects(async () => Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
-    type StatusReport = Readonly<{
-      contracts: Readonly<{ kind: string; diagnostic?: string }>;
-      debts: Readonly<{ kind: string; rows?: readonly Readonly<{ id: string }>[] }>;
-      akumas: Readonly<{ kind: string }>;
-    }>;
-    const status = await cliJson<StatusReport>(["-C", repository.path, "kanshi"]);
+    const { value: { contracts, debts: ledger, akumas } } = await cliJson<KanshiReport>(["-C", repository.path, "kanshi"]);
     // World observation keeps the corrupt Place local to its Contract section.
-    assert.equal(status.value.contracts.kind, "failed");
-    if (status.value.contracts.kind === "failed")
-      assert.match(status.value.contracts.diagnostic ?? "", /Place file has invalid fields/u);
-    assert.equal(status.value.debts.kind, "present");
-    if (status.value.debts.kind === "present") {
-      assert.equal(
-        (status.value.debts.rows ?? []).some((row) => row.id === added.id),
-        true,
-      );
-    }
-    assert.notEqual(status.value.akumas.kind, "failed");
+    assert.ok("kind" in contracts && contracts.kind === "failed");
+    assert.match(contracts.diagnostic, /Place file has invalid fields/u);
+    assert.ok(!("kind" in ledger) && ledger.rows?.some((row) => row.id === added.id));
+    assert.ok(!("kind" in akumas) || akumas.kind !== "failed");
     type ContractStatus = Readonly<{ kind: string; diagnostic?: string }>;
     const selected = await cliJson<ContractStatus>([
       "-C",

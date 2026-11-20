@@ -28,9 +28,9 @@ function report(rows: readonly AkumaKanshiRow[]): KanshiReport {
   return {
     kind: "world",
     observedAt: at,
-    contracts: { kind: "present", rows: [first, second] },
-    akumas: { kind: "present", rows },
-    debts: { kind: "present" },
+    contracts: { rows: [first, second] },
+    akumas: { rows },
+    debts: {},
   };
 }
 function once(text: string, identity: string): void {
@@ -54,13 +54,12 @@ test("World keeps three flat owner-ordered sections with complete links and nati
   const input: KanshiReport = {
     ...report([peer, child, free, outside, unknown]),
     contracts: {
-      kind: "present",
       rows: [
         {
           ...first,
           associations: [
-            { kind: "akuma", akumaId: child.id, aliases: ["@delivery"] },
-            { kind: "akuma", akumaId: "aku/worker/99999999" },
+            { akumaId: child.id, aliases: [parseAkumaAlias("@delivery")] },
+            { akumaId: parseAkumaId("aku/worker/99999999").id },
             { kind: "debt", debtId: "debt/held" },
           ],
         },
@@ -68,8 +67,8 @@ test("World keeps three flat owner-ordered sections with complete links and nati
       ],
       more: true,
     },
-    akumas: { kind: "present", rows: [peer, child, free, outside, unknown], more: true },
-    debts: { kind: "present", rows: [{ id: "debt/free", title: "Independent", priority: 2, disposition: "ready" }], more: true },
+    akumas: { rows: [peer, child, free, outside, unknown], more: true },
+    debts: { rows: [{ id: "debt/free", title: "Independent", priority: 2, disposition: "ready" }], more: true },
   };
   const text = renderKanshiText(input, { columns: 120, color: false });
   for (const row of [child, peer, free, outside, unknown]) once(text, row.id);
@@ -106,7 +105,6 @@ test("a populated Akuma section reports Alias failure once and keeps its omissio
   const input: KanshiReport = {
     ...report([child, peer]),
     akumas: {
-      kind: "present",
       rows: [child, peer],
       more: true,
       aliasesError: "Alias file unreadable",
@@ -148,8 +146,8 @@ test("World and standalone catalogues share thin rows at every width without age
   const debt = { id: "debt/catalogue", title: "Owned facts", priority: 2, disposition: "ready" } as const;
   const input: KanshiReport = {
     ...report([akuma]),
-    contracts: { kind: "present", rows: [contract] },
-    debts: { kind: "present", rows: [debt] },
+    contracts: { rows: [contract] },
+    debts: { rows: [debt] },
   };
   for (const columns of [24, 120]) {
     const context = { columns, color: true };
@@ -182,8 +180,8 @@ test("World reports pending input by native coordinates when current work suppli
 test("empty Alias failure and unavailable current work stay beside readable peers", () => {
   const empty = renderKanshiText({
     ...report([]),
-    contracts: { kind: "present" },
-    akumas: { kind: "present", aliasesError: "Alias read failed" },
+    contracts: {},
+    akumas: { aliasesError: "Alias read failed" },
   });
   assert.equal(empty, "AKUMA\n\n! aliases unavailable · Alias read failed");
   const peer = worker("00000001");

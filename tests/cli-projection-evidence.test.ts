@@ -20,6 +20,7 @@ import { requirementLines } from "../src/cli/render/receipt.js";
 import { modelOutputSchemas as mcpOutputSchemas } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
@@ -172,9 +173,8 @@ test("selected Contract status preserves every supplied requirement and workspac
   const at = "2026-08-12T00:00:00.000Z";
   const failed = { kind: "attested", verdict: "unsatisfied", summary: "Second check failed", at } as const;
   const report = contractDetail({
-    holder: { kind: "unavailable" },
     delivery: { candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)) },
-    gates: [{ gate: "verified", satisfied: false, current: failed, requirements: [
+    gates: [{ gate: "verified", current: "unsatisfied", requirements: [
       { index: 1, requirement: requirementId("check-pass"), current: { kind: "attested", verdict: "satisfied", summary: "First check passed", at } },
       { index: 2, requirement: requirementId("check-fail"), current: failed },
       { index: 3, requirement: requirementId("check-missing"), current: { kind: "missing" } },
@@ -185,10 +185,13 @@ test("selected Contract status preserves every supplied requirement and workspac
     after: [{ contractId: contractId("kei/prerequisite"), state: "abandoned" }],
     workspace: { kind: "unavailable", path },
     issue: { kind: "unavailable", diagnostic: "checkout read failed" },
-    roster: [{ id: "aku/worker/11112222" }],
+    associations: [
+      { kind: "unavailable", source: "holder", diagnostic: "holder read failed" },
+      { akumaId: parseAkumaId("aku/worker/11112222").id },
+    ],
   });
   const expectedFacts = [
-    "holder  unavailable",
+    "holder  unavailable · holder read failed",
     "candidate  aaaaaaa",
     "integration result  bbbbbbb",
     "verification 1 · current · satisfied",
@@ -319,13 +322,12 @@ test("Contract history renders semantic evidence and explicitly requested histor
 
 const verifiedSummary = (): ContractSummary =>
   contractSummary({
-    gates: [{ name: gate("verified"), verdict: "satisfied" }],
+    gates: [{ gate: gate("verified"), current: "satisfied" }],
   });
 
 const verifiedGate = {
   gate: gate("verified"),
-  satisfied: true,
-  current: { kind: "attested" as const, verdict: "satisfied" as const, at: "2026-08-12T00:00:00.000Z" },
+  current: "satisfied" as const,
   requirements: [
     {
       requirement: requirementId("check-original"),
@@ -337,8 +339,7 @@ const verifiedGate = {
 
 const staleGate = {
   gate: gate("verified"),
-  satisfied: false,
-  current: { kind: "stale" as const, priorVerdict: "satisfied" as const },
+  current: "stale" as const,
   requirements: [
     {
       requirement: requirementId("check-original"),
@@ -355,7 +356,7 @@ test("catalogue and selected terminal status retain their supplied gate facts", 
   assert.match(catalogText, /verification satisfied/u);
   assert.doesNotMatch(catalogText, /candidate|integration result/u);
 
-  const report = kanshiReport({ kind: "present", rows: [row] });
+  const report = kanshiReport({ rows: [row] });
   const selected = contractReport(contractDetail({ phase: "claimed", gates: [verifiedGate] }));
   assert.match(renderKanshiText(selected, { columns: 80, color: false }), /verification 1 · current · satisfied/u);
 
@@ -373,7 +374,7 @@ test("selected delivered Kanshi keeps requirement evidence separate from the int
   const integration = snapshotId("4".repeat(40));
   const summary = contractSummary({
     delivered: true,
-    gates: [{ name: gate("verified"), verdict: "satisfied" }],
+    gates: [{ gate: gate("verified"), current: "satisfied" }],
   });
   const detail = contractDetail({
     phase: "bound",
@@ -387,10 +388,7 @@ test("selected delivered Kanshi keeps requirement evidence separate from the int
   assert.equal((selected.match(/^  integration result  4444444$/gmu) ?? []).length, 1);
   assert.match(selected, /verification 1 · current · satisfied/u);
   assert.doesNotMatch(selected, /predecessor|verification satisfied · on 4444444/u);
-  const world = renderKanshiText(kanshiReport({ kind: "present", rows: [summary] }), {
-    columns: 120,
-    color: false,
-  });
+  const world = renderKanshiText(kanshiReport({ rows: [summary] }), { columns: 120, color: false });
   assert.match(world, /verification satisfied/u);
   assert.doesNotMatch(world, /integration result/u);
 });
@@ -399,7 +397,7 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
   const integration = snapshotId("4".repeat(40));
   const summary = contractSummary({
     delivered: true,
-    gates: [{ name: gate("verified"), verdict: "stale" }],
+    gates: [{ gate: gate("verified"), current: "stale" }],
   });
   const detail = contractDetail({
     phase: "bound",
@@ -413,10 +411,7 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
   assert.match(selected, /(?:^|\n)  integration result  4444444$/mu);
   assert.match(selected, /(?:^|\n)  verification 1 · stale$/mu);
   assert.doesNotMatch(selected, /integration result  4444444 · verification satisfied/u);
-  const world = renderKanshiText(kanshiReport({ kind: "present", rows: [summary] }), {
-    columns: 120,
-    color: false,
-  });
+  const world = renderKanshiText(kanshiReport({ rows: [summary] }), { columns: 120, color: false });
   assert.doesNotMatch(world, /integration result|verification satisfied/u);
 });
 
@@ -429,7 +424,7 @@ test("stale snapshot evidence keeps native identities across observations, recei
   const current = { kind: "stale", priorVerdict: "satisfied", reason } as const;
   const requirement = requirementId("verification:sha256:historical-check");
   assert.deepEqual(gateRequirementFacts({
-    gate: "verified", satisfied: false, current, requirements: [{ requirement, index: 2, current }],
+    gate: "verified", current: "stale", requirements: [{ requirement, index: 2, current }],
   }), ["verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
   const problem = { gate: "verified", requirement, state: "stale" as const, reason };
   const receipt = requirementLines([problem]).join("\n");

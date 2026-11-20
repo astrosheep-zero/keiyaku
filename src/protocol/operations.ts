@@ -9,7 +9,6 @@ export {
   gateCurrentSchema,
   requirementIdSchema,
   requirementReportSchema,
-  gateReportSchema,
 } from "./result-leaves.js";
 import { observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";

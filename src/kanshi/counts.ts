@@ -22,7 +22,7 @@ import {
   readContractCount,
 } from "../protocol/read/status.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
-import { sectionSchema, type Section } from "./report.js";
+import { observationSectionSchema, type ObservationSection } from "./report.js";
 import type { KanshiCoordinates } from "./read.js";
 
 export type KanshiCountsReport = z.output<typeof kanshiCountsReportSchema>;
@@ -31,24 +31,24 @@ const countsOptionsSchema = z.strictObject({ akumaCaller: akumaCallerSchema.null
 /** Omit akumaCaller for exact World totals; null marks only that section unavailable. */
 export type KanshiCountsOptions = z.output<typeof countsOptionsSchema>;
 
+const count = z.number().int().nonnegative();
 export const kanshiCountsReportSchema = z
   .strictObject({
     root: worldRootSchema.nullable(),
     observedAt: z.string(),
-    akuma: sectionSchema(z.number()),
-    contracts: sectionSchema(z.number()),
-    debts: sectionSchema(z.number()),
+    akuma: observationSectionSchema(count),
+    contracts: observationSectionSchema(count),
+    debts: observationSectionSchema(count),
   })
   .readonly();
 
-const count = z.number().int().nonnegative();
 const activeDebtCountsSchema = z.strictObject({ total: count, ready: count, blocked: count }).readonly();
 export const kanshiStatusSummarySchema = z
   .strictObject({
     kind: z.literal("active-work-summary"),
-    contracts: sectionSchema(activeContractCountsSchema),
-    akumas: sectionSchema(activeAkumaCountsSchema),
-    debts: sectionSchema(activeDebtCountsSchema),
+    contracts: observationSectionSchema(activeContractCountsSchema),
+    akumas: observationSectionSchema(activeAkumaCountsSchema),
+    debts: observationSectionSchema(activeDebtCountsSchema),
     currentContract: currentContractSummarySchema.exactOptional(),
   })
   .readonly();
@@ -56,7 +56,7 @@ export type KanshiStatusSummary = z.output<typeof kanshiStatusSummarySchema>;
 
 const absent = { kind: "absent" } as const;
 
-function failure(error: unknown): Extract<Section<never>, { kind: "failed" }> {
+function failure(error: unknown): Extract<ObservationSection<never>, { kind: "failed" }> {
   const text = (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/gu, " ").trim();
   return {
     kind: "failed",
@@ -69,9 +69,9 @@ function failure(error: unknown): Extract<Section<never>, { kind: "failed" }> {
   };
 }
 
-async function section<Value>(read: () => Value | Promise<Value>): Promise<Section<Value>> {
+async function section<Value>(read: () => Value | Promise<Value>): Promise<ObservationSection<Value>> {
   try {
-    return { kind: "present", value: await read() };
+    return await read();
   } catch (error) {
     return failure(error);
   }
@@ -91,7 +91,7 @@ async function worldSections<A, D>(
   world: WorldRoot | null,
   akumas: (world: WorldRoot) => Promise<A>,
   debts: (world: WorldRoot) => Promise<D>,
-): Promise<readonly [Section<A>, Section<D>]> {
+): Promise<readonly [ObservationSection<A>, ObservationSection<D>]> {
   if (world === null) return [absent, absent];
   try {
     if (!(await World.established(world))) return [absent, absent];
@@ -145,11 +145,11 @@ export async function kanshiStatusSummary(
     contractSection(input.repo, (at) => readActiveContractSummary(at, invocationWorktree)),
     worldSections(input.world, countActiveAkumas, activeDebtCounts),
   ]);
-  if (contract.kind !== "present") return { kind: "active-work-summary", contracts: contract, akumas, debts };
-  const { counts, currentContract } = contract.value;
+  if ("kind" in contract) return { kind: "active-work-summary", contracts: contract, akumas, debts };
+  const { counts, currentContract } = contract;
   return {
     kind: "active-work-summary",
-    contracts: { kind: "present", value: counts },
+    contracts: counts,
     akumas,
     debts,
     ...(currentContract === undefined ? {} : { currentContract }),

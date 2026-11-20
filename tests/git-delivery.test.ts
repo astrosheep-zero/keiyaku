@@ -863,7 +863,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(state.id, receipt.contractId);
     assert.equal(state.terminal, null);
     const observation = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: state.id });
-    assert.equal(observation.kind, "present");
+    assert.equal(observation.kind, "contract");
   });
 
   test("distinct no-op candidates share the empty patch ChangeId", async () => {

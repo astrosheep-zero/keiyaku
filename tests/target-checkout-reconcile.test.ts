@@ -183,13 +183,13 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const repo = await cachedRepoAt(repository.path);
     const contractId = present(await contract.state()).id;
     const placed = await Keis.of(repo).observe({ id: contractId });
-    assert.ok(placed.kind === "present", 'expected placed.kind = "present"');
-    assert.equal(placed.row.targetObservation, undefined);
+    assert.equal(placed.kind, "contract");
+    assert.equal(placed.targetObservation, undefined);
 
     repository.run(["reset", "--hard", delivery.integration.predecessor]);
     const rewound = await Keis.of(repo).observe({ id: contractId });
-    assert.ok(rewound.kind === "present", 'expected rewound.kind = "present"');
-    assert.deepEqual(rewound.row.targetObservation, {
+    assert.equal(rewound.kind, "contract");
+    assert.deepEqual(rewound.targetObservation, {
       kind: "moved",
       before: delivery.integration.snapshot,
       after: delivery.integration.predecessor,

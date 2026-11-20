@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { NoGitWorldError } from "../src/index.js";
+import { NoGitWorldError, World } from "../src/index.js";
 import { harnessOwner } from "@astrosheep/square";
 import { registerKeiyakuStatus } from "../src/pi/status.js";
-import { deferred } from "./support/process.js";
+import { deferred, temporaryDirectory } from "./support/process.js";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
 type Readers = NonNullable<Parameters<typeof registerKeiyakuStatus>[2]>;
 const flush = async () => await new Promise<void>((resolve) => setImmediate(resolve));
 
-function fixture(readers: Readers) {
+function fixture(readers?: Readers, onStatus?: (text: string | undefined) => void) {
   const handlers = new Map<string, Handler[]>();
   const writes: Array<[string, string | undefined]> = [];
   const commands: string[] = [];
@@ -20,7 +20,7 @@ function fixture(readers: Readers) {
   } as unknown as ExtensionAPI;
   const context = (mode: string, cwd = "/fixture", session = "session") => ({
     mode, cwd, sessionManager: { getSessionId: () => session },
-    ui: { setStatus: (key: string, text: string | undefined) => writes.push([key, text]) },
+    ui: { setStatus(key: string, text: string | undefined) { writes.push([key, text]); onStatus?.(text); } },
   }) as unknown as ExtensionContext;
   const emit = (name: string, ctx: ExtensionContext) => {
     for (const handler of handlers.get(name) ?? []) void handler({}, ctx);
@@ -35,7 +35,6 @@ function fixture(readers: Readers) {
 const report = (akuma: unknown, contracts: unknown, debts: unknown) => ({
   root: null, observedAt: new Date().toISOString(), akuma, contracts, debts,
 });
-const present = (value: number) => ({ kind: "present", value });
 const absent = { kind: "absent" };
 const failed = { kind: "failed", failure: { message: "unavailable" } };
 
@@ -67,7 +66,7 @@ test("only TUI starts asynchronous observations; scope and section availability 
     { path: "/worktree" }, { cwd: "/worktree", repositoryRoot: "/primary" },
     { scope: { world: "/primary", repo }, options: { akumaCaller: { kind: "external", integration: "pi", id: "session" } } },
   ]);
-  first.resolve(report(present(0), absent, failed));
+  first.resolve(report(0, absent, failed));
   await flush();
   assert.deepEqual(f.writes.at(-1), ["keiyaku", "aku 0 · kei - · debt ?"]);
   t.mock.timers.tick(5_000);
@@ -80,6 +79,18 @@ test("only TUI starts asynchronous observations; scope and section availability 
   await flush();
   assert.deepEqual(calls.at(-1), { scope: { world: "/primary", repo }, options: { akumaCaller: null } });
   f.emit("session_shutdown", ctx);
+});
+
+test("the Pi footer renders zero from an actual empty World", { timeout: 10_000 }, async (t) => {
+  const world = await World.at(temporaryDirectory(t, "pi-footer-world-"));
+  const shown = deferred<string>();
+  const f = fixture(undefined, (text) => {
+    if (text !== undefined && text !== "aku ? · kei ? · debt ?") shown.resolve(text);
+  });
+  const ctx = f.context("tui", world);
+  t.after(() => f.emit("session_shutdown", ctx));
+  f.emit("session_start", ctx);
+  assert.equal(await shown.promise, "aku 0 · kei - · debt 0");
 });
 
 test("settled bursts coalesce, replacement fences delayed reads, and failures do not preserve old values", async (t) => {
@@ -100,7 +111,7 @@ test("settled bursts coalesce, replacement fences delayed reads, and failures do
   assert.deepEqual(worlds, [{ cwd: "/old" }]);
   f.emit("agent_settled", old); f.emit("agent_settled", old); f.emit("agent_settled", old);
   assert.equal(reads.length, 1);
-  reads[0]!.resolve(report(present(3), absent, present(1)));
+  reads[0]!.resolve(report(3, absent, 1));
   await flush();
   assert.equal(reads.length, 2);
   const current = f.context("tui", "/new", "new-session");
@@ -111,10 +122,10 @@ test("settled bursts coalesce, replacement fences delayed reads, and failures do
     akumaCaller: { kind: "external", integration: "pi", id },
   })));
   const before = f.writes.length;
-  reads[1]!.resolve(report(present(99), absent, present(99)));
+  reads[1]!.resolve(report(99, absent, 99));
   await flush();
   assert.equal(f.writes.length, before);
-  reads[2]!.resolve(report(present(1), absent, present(2)));
+  reads[2]!.resolve(report(1, absent, 2));
   await flush();
   assert.deepEqual(f.writes.at(-1), ["keiyaku", "aku 1 · kei - · debt 2"]);
   discoveryFails = true;
@@ -129,7 +140,7 @@ test("settled bursts coalesce, replacement fences delayed reads, and failures do
   f.emit("session_shutdown", current);
   f.emit("session_shutdown", current);
   const closed = f.writes.length;
-  reads[3]!.resolve(report(present(7), absent, present(8)));
+  reads[3]!.resolve(report(7, absent, 8));
   await flush();
   t.mock.timers.tick(10_000);
   await flush();

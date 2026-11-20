@@ -398,12 +398,11 @@ test("strict currency keeps prior checks tied to their tested snapshot after tar
   assert.ok(receipt.includes(`current snapshot  ${currentSnapshot}`));
   const detail = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: reviewed.contractId });
   assertWireRoundTrip(contractObservationSchema, detail);
-  assert.ok(detail.kind === "present");
+  assert.ok(detail.kind === "contract");
   const stale = { kind: "stale", priorVerdict: "satisfied", reason };
-  assert.deepEqual(detail.row.gates?.find(({ gate }) => gate === "verified"), {
+  assert.deepEqual(detail.gates?.find(({ gate }) => gate === "verified"), {
     gate: "verified",
-    satisfied: false,
-    current: stale,
+    current: "stale",
     requirements: original.checks.map(({ requirement, index }) => ({ requirement, index, current: stale })),
   });
   const next = accepted(await contract.verify({ index: 1 }));
@@ -543,7 +542,7 @@ test("addressed status keeps native Verification evidence as declarations reorde
   assert.ok(passAttestation && failAttestation);
   const passed = { kind: "attested", verdict: "satisfied", at: passAttestation.at };
   const failed = { kind: "attested", verdict: "unsatisfied", at: failAttestation.at, summary: fail.summary };
-  const checked = { gate: "verified", satisfied: false, current: failed };
+  const checked = { gate: "verified", current: "unsatisfied" };
   const passedRequirement = { requirement: pass.requirement, current: passed };
   const failedRequirement = { requirement: fail.requirement, current: failed };
   const amend = async (...scripts: string[]) =>
@@ -551,8 +550,8 @@ test("addressed status keeps native Verification evidence as declarations reorde
   const readGate = async (checkWire = false) => {
     const detail = await contracts.observe({ id: contract.id });
     if (checkWire) assertWireRoundTrip(contractObservationSchema, detail);
-    assert.ok(detail.kind === "present");
-    return detail.row.gates?.find(({ gate }) => gate === "verified");
+    assert.ok(detail.kind === "contract");
+    return detail.gates?.find(({ gate }) => gate === "verified");
   };
 
   assert.deepEqual(await readGate(true), {
@@ -569,8 +568,7 @@ test("addressed status keeps native Verification evidence as declarations reorde
   await amend(passing);
   assert.deepEqual(await readGate(), {
     gate: "verified",
-    satisfied: true,
-    current: passed,
+    current: "satisfied",
     requirements: [{ ...passedRequirement, index: 1 }],
   });
   accepted(await contract.abandon());

@@ -111,9 +111,8 @@ test("CLI accepts native repository coordinate spellings through managed worktre
     const observed = await Keis.of(await Repo.at({ path })).observe({
       id: contractId(result.value.contractId),
     });
-    assert.equal(observed.kind, "present");
-    if (observed.kind !== "present") continue;
-    const workspace = observed.row.workspace;
+    assert.equal(observed.kind, "contract");
+    const workspace = observed.workspace;
     assert.ok(workspace.kind !== "unappointed" && "path" in workspace);
     assert.equal(existsSync(workspace.path), true);
   }

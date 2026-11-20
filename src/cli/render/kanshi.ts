@@ -1,5 +1,10 @@
 import type { KanshiStatusSummary } from "../../kanshi/counts.js";
-import type { KanshiContractReport, KanshiReport, ContractKanshiDetail, Section } from "../../kanshi/report.js";
+import type {
+  KanshiContractReport,
+  KanshiReport,
+  ContractKanshiDetail,
+  ObservationSection,
+} from "../../kanshi/report.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -23,8 +28,13 @@ function payload(label: string, text: string): readonly string[] {
 
 function renderSelectedContractRow(row: ContractKanshiDetail): readonly string[] {
   const abbreviations = abbreviateGitIds(gitIdsInDetail(row));
+  const associations = row.associations ?? [];
+  const [holder = "none"] = associations.flatMap((link) => {
+    if ("debtId" in link) return [link.debtId];
+    return "kind" in link && link.source === "holder" ? [`unavailable · ${link.diagnostic}`] : [];
+  });
   const facts = [
-    `holder  ${typeof row.holder === "string" ? row.holder : row.holder === undefined ? "none" : "unavailable"}`,
+    `holder  ${holder}`,
     ...(row.delivery === undefined
       ? []
       : [
@@ -45,13 +55,12 @@ function renderSelectedContractRow(row: ContractKanshiDetail): readonly string[]
             ? "checkout behind"
             : `checkout unavailable · ${row.issue.diagnostic}`,
         ]),
-    ...(row.roster === undefined
-      ? []
-      : "kind" in row.roster
-        ? ["akuma association unavailable"]
-        : row.roster.map((attached) =>
-            `akuma  ${attached.id} ${akumaLabel(attached, attached.aliasesUnavailable === true)}`.trimEnd(),
-          )),
+    ...associations.flatMap((link) => {
+      if ("akumaId" in link) return [`akuma  ${link.akumaId} ${akumaLabel(link)}`.trimEnd()];
+      if (link.kind === "unavailable" && link.source !== "holder")
+        return [`${link.source === "roster" ? "akuma association" : "aliases"} unavailable · ${link.diagnostic}`];
+      return [];
+    }),
   ];
   return [
     `${safeText(row.id)} · ${lifecycleWord(row.phase)} · ${safeText(row.title ?? "title unavailable")}`,
@@ -75,8 +84,12 @@ function renderSelectedContract(report: KanshiContractReport): readonly string[]
   return renderSelectedContractRow(report);
 }
 
-function countLine<Value>(label: string, section: Section<Value>, render: (value: Value) => string): string {
-  if (section.kind === "present") return `${label}  ${render(section.value)}`;
+function countLine<Value extends object>(
+  label: string,
+  section: ObservationSection<Value>,
+  render: (value: Value) => string,
+): string {
+  if (!("kind" in section)) return `${label}  ${render(section)}`;
   if (section.kind === "absent") return `${label}  absent`;
   const { message, coordinate } = section.failure;
   return `${label}  unavailable · ${safeText(coordinate === undefined ? message : `${coordinate} · ${message}`)}`;
@@ -117,32 +130,32 @@ export function renderKanshiText(
   const contracts = report.contracts;
   const debts = report.debts;
   const blocks = [
-    contracts.kind === "absent"
-      ? ["CONTRACTS // absent"]
-      : contracts.kind === "failed"
-        ? ["CONTRACTS // unavailable", "", `! ${safeText(contracts.diagnostic)}`]
-        : (contracts.rows ?? []).length === 0 && contracts.more !== true
-          ? []
-          : [
-              "CONTRACTS",
-              "",
-              ...(contracts.rows ?? []).flatMap((row) => contractRowLines(row, report.observedAt)),
-              ...(contracts.more === true ? ["…"] : []),
-            ],
+    "kind" in contracts
+      ? contracts.kind === "absent"
+        ? ["CONTRACTS // absent"]
+        : ["CONTRACTS // unavailable", "", `! ${safeText(contracts.diagnostic)}`]
+      : (contracts.rows ?? []).length === 0 && contracts.more !== true
+        ? []
+        : [
+            "CONTRACTS",
+            "",
+            ...(contracts.rows ?? []).flatMap((row) => contractRowLines(row, report.observedAt)),
+            ...(contracts.more === true ? ["…"] : []),
+          ],
     renderAkumaBoard(report.akumas, report.observedAt, context, false),
-    debts.kind === "absent"
-      ? ["DEBTS // absent"]
-      : debts.kind === "failed"
-        ? [
+    "kind" in debts
+      ? debts.kind === "absent"
+        ? ["DEBTS // absent"]
+        : [
             "DEBTS // unavailable",
             "",
             `! ${safeText(
               debts.coordinate === undefined ? debts.diagnostic : `${debts.coordinate} · failed ${debts.diagnostic}`,
             )}`,
           ]
-        : (debts.rows ?? []).length === 0 && debts.more !== true
-          ? []
-          : ["DEBTS", "", ...(debts.rows ?? []).flatMap(debtRowLines), ...(debts.more === true ? ["…"] : [])],
+      : (debts.rows ?? []).length === 0 && debts.more !== true
+        ? []
+        : ["DEBTS", "", ...(debts.rows ?? []).flatMap(debtRowLines), ...(debts.more === true ? ["…"] : [])],
   ].filter((block) => block.length > 0);
   return blocks.length === 0 ? "○ world empty" : blocks.map((block) => block.join("\n")).join("\n\n");
 }

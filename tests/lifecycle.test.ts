@@ -104,7 +104,7 @@ test("malformed journals and folds refuse without inventing status", () => {
   assert.throws(() =>
     gateReportSchema.parse({
       gate: "reviewed",
-      current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" },
+      current: "passed",
     }),
   );
 });

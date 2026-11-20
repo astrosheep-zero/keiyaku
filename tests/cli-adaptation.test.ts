@@ -47,9 +47,8 @@ test("show reads native bytes once for explicit Contract selection and refuses o
   const row = (await library.list({})).rows?.find((entry) => entry.id === bound.contractId);
   assert.ok(row !== undefined);
   const observed = await library.observe({ id: row.id });
-  assert.equal(observed.kind, "present");
-  if (observed.kind !== "present" || observed.row.workspace.kind === "unappointed") assert.fail("missing workspace");
-  const worktreePath = observed.row.workspace.path;
+  assert.ok(observed.kind === "contract" && observed.workspace.kind !== "unappointed", "missing workspace");
+  const worktreePath = observed.workspace.path;
   const expected = await library.kei({ id: row.id }).guidance();
   assert.equal(expected.kind, "present");
   if (expected.kind !== "present") assert.fail("missing native guidance");

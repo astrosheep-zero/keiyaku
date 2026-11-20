@@ -9,9 +9,10 @@ export function contractRowLines(
   observedAt: string,
 ): readonly string[] {
   const associations = (row.associations ?? []).flatMap((association) => {
-    if (association.kind === "unavailable")
-      return [`${association.source} association unavailable · ${association.diagnostic}`];
-    return association.kind === "debt" ? [`debt  ${association.debtId}`] : [];
+    if ("debtId" in association) return [`debt  ${association.debtId}`];
+    return "kind" in association && association.source !== "aliases"
+      ? [`${association.source} association unavailable · ${association.diagnostic}`]
+      : [];
   });
   return [
     `${safeText(row.id)} · ${lifecycleWord(row.phase)} · ${ageText(row.phaseAt, observedAt, "future")} · ${safeText(row.title ?? "title unavailable")}`,

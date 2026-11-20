@@ -38,7 +38,7 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/projection.js";
-import type { AkumaObservation, ContractGateCurrent, DeliverOutcome, Placement, Placed } from "../src/index.js";
+import type { AkumaObservation, ContractGate, ContractGateCurrent, DeliverOutcome, Placement, Placed } from "../src/index.js";
 import { renderAkumaBoard } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { exactIndentedLines, previewLines } from "../src/cli/render/terminal.js";
@@ -209,10 +209,9 @@ function debtSummary(overrides: Partial<DebtSummary> = {}): DebtSummary {
 }
 
 function debtPage(rows: readonly DebtSummary[], more = false): DebtList {
-  const [first, ...rest] = rows;
   return {
     kind: "debt-catalogue",
-    ...(first === undefined ? {} : { rows: [first, ...rest] as const }),
+    rows,
     ...(more ? { more: true as const } : {}),
   };
 }
@@ -239,10 +238,10 @@ test("delivery and supplied gate verdicts remain distinct native words", () => {
   assert.equal(progressStrip({}), "delivery absent");
   assert.equal(progressStrip({ delivered: true }), "delivery present");
   assert.equal(progressStrip({ delivered: true, gates: [
-    { name: gate("reviewed"), verdict: "missing" },
-    { name: gate("verified"), verdict: "satisfied" },
-    { name: gate("security"), verdict: "unsatisfied" },
-    { name: gate("manual"), verdict: "stale" },
+    { gate: gate("reviewed"), current: "missing" },
+    { gate: gate("verified"), current: "satisfied" },
+    { gate: gate("security"), current: "unsatisfied" },
+    { gate: gate("manual"), current: "stale" },
   ] }), "delivery present · review missing · verification satisfied · security unsatisfied · manual stale");
 });
 
@@ -591,9 +590,9 @@ test("empty World status has one explicit empty row", () => {
       {
         kind: "world",
         observedAt: "2026-08-12T00:00:00.000Z",
-        contracts: { kind: "present" },
-        debts: { kind: "present" },
-        akumas: { kind: "present" },
+        contracts: {},
+        debts: {},
+        akumas: {},
       },
       { columns: 120, color: false },
     ),
@@ -601,7 +600,7 @@ test("empty World status has one explicit empty row", () => {
   );
 });
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderDebtList({ kind: "debt-catalogue" }), "debts  none");
+  assert.equal(renderDebtList({ kind: "debt-catalogue", rows: [] }), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(renderVerb("ls", { selector: "aku/*" }, { kind: "returned", value: { kind: "akuma-catalogue", observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
@@ -625,7 +624,7 @@ test("World roster names a bound Contract once without a bare unavailable parent
   assert.doesNotMatch(free, /·\s*$/mu);
 });
 test("Debt listings retain empty and absent observations", () => {
-  const empty = { kind: "debt-catalogue" as const };
+  const empty = debtPage([]);
   assert.equal(renderDebtList(empty), "debts  none");
   assert.equal(renderDebtList({ kind: "debt-catalogue", absent: true }), "debt world absent");
   const text = renderDebtList(debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true));
@@ -652,7 +651,7 @@ test("World status debt rows state a Contract association only when one exists",
   const text = renderKanshiText(
     {
       ...akumaWorldReport([]),
-      debts: { kind: "present", rows: [row] },
+      debts: { rows: [row] },
     },
     { columns: 120, color: false },
   );
@@ -675,10 +674,7 @@ test("World roster states the activity age only when it differs from the state a
 test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
   const summary = (
     delivery: "pending" | "delivered",
-    gates: readonly {
-      name: ReturnType<typeof gate>;
-      verdict: "satisfied" | "unsatisfied" | "missing" | "stale";
-    }[],
+    gates: readonly ContractGate[],
   ) =>
     contractSummary({
       id: contractId("kei/selected-contract"),
@@ -689,10 +685,10 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const catalog = contractCatalog(
     [
       summary("pending", [
-        { name: gate("reviewed"), verdict: "satisfied" },
-        { name: gate("verified"), verdict: "unsatisfied" },
-        { name: gate("security"), verdict: "stale" },
-        { name: gate("manual"), verdict: "missing" },
+        { gate: gate("reviewed"), current: "satisfied" },
+        { gate: gate("verified"), current: "unsatisfied" },
+        { gate: gate("security"), current: "stale" },
+        { gate: gate("manual"), current: "missing" },
       ]),
     ],
     { more: true },
@@ -709,10 +705,10 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const delivered = renderContractCatalogue(
     contractCatalog([
       summary("delivered", [
-        { name: gate("reviewed"), verdict: "satisfied" },
-        { name: gate("verified"), verdict: "unsatisfied" },
-        { name: gate("security"), verdict: "stale" },
-        { name: gate("manual"), verdict: "missing" },
+        { gate: gate("reviewed"), current: "satisfied" },
+        { gate: gate("verified"), current: "unsatisfied" },
+        { gate: gate("security"), current: "stale" },
+        { gate: gate("manual"), current: "missing" },
       ]),
     ]),
   );
@@ -721,17 +717,18 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.doesNotMatch(delivered, /candidate|predecessor|content identity|method|behind/u);
 });
 test("selected Contract roster preserves terminal associations and unavailable observations", () => {
-  const attached = { id: "aku/worker/11110001", aliases: [parseAkumaAlias("@lead")] };
-  const missing = { id: "aku/worker/22220002", aliasesUnavailable: true as const };
+  const attached = { akumaId: parseAkumaId("aku/worker/11110001").id, aliases: [parseAkumaAlias("@lead")] };
+  const peer = { akumaId: parseAkumaId("aku/worker/22220002").id };
   const report = contractReport(
     contractDetail({
       phase: "claimed",
-      roster: [attached, missing],
+      associations: [attached, peer, { kind: "unavailable", source: "aliases", diagnostic: "Alias read failed" }],
     }),
   );
   const text = renderKanshiText(report, { columns: 80, color: false });
   assert.match(text, /aku\/worker\/11110001 \(@lead\)/u);
-  assert.match(text, /aku\/worker\/22220002 \(aliases unavailable\)/u);
+  assert.match(text, /aku\/worker\/22220002/u);
+  assert.match(text, /aliases unavailable · Alias read failed/u);
   assert.match(text, /worktree  \/tmp\/wt/u);
   assert.doesNotMatch(text, /activity|candidate/u);
 });
@@ -740,9 +737,8 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   const tender = snapshotId("b".repeat(40));
   const long = "👩‍💻".repeat(161);
   const reviewGate = (current: ContractGateCurrent) => ({
-    gate: "reviewed",
-    satisfied: current.kind === "attested" && current.verdict === "satisfied",
-    current,
+    gate: gate("reviewed"),
+    current: current.kind === "attested" ? current.verdict : current.kind,
     requirements: [{ requirement: requirementId("gate:reviewed"), current }],
   });
   const at = "2026-08-12T00:00:00.000Z";
@@ -814,7 +810,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
     phase: "claimed",
     delivery: { candidate: tender, integration },
     gates: [reviewGate({ kind: "attested", verdict: "satisfied", at, summary: long })],
-    targetLag: { kind: "counted", behind: 5 },
+    targetLag: 5,
   });
   assert.match(claimed, /integration result  aaaaaaa/u);
   assert.match(claimed, /candidate  bbbbbbb/u);
@@ -830,10 +826,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   assert.match(abandoned, /worktree  \/tmp\/wt/u);
   assert.match(abandoned, /review · missing/u);
   const world = renderKanshiText(
-    kanshiReport({
-      kind: "present",
-      rows: [contractSummary({ delivered: true })],
-    }),
+    kanshiReport({ rows: [contractSummary({ delivered: true })] }),
     { columns: 60, color: false },
   );
   assert.match(world, /delivery present/u);
@@ -2431,8 +2424,8 @@ test("a failed selected Contract retains its identity and failure", () => {
 });
 
 test("a selected Contract renders its explicit held Debt and unavailable association", () => {
-  const report = contractReport(contractDetail({ holder: "debt/held-work" }));
+  const report = contractReport(contractDetail({ associations: [{ kind: "debt", debtId: "debt/held-work" }] }));
   assert.match(renderKanshiText(report, { columns: 120, color: false }), /holder  debt\/held-work/u);
-  const failed = contractReport(contractDetail({ holder: { kind: "unavailable" } }));
-  assert.match(renderKanshiText(failed, { columns: 120, color: false }), /holder  unavailable/u);
+  const failed = contractReport(contractDetail({ associations: [{ kind: "unavailable", source: "holder", diagnostic: "Holder read failed" }] }));
+  assert.match(renderKanshiText(failed, { columns: 120, color: false }), /holder  unavailable · Holder read failed/u);
 });

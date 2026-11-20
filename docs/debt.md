@@ -96,10 +96,12 @@ prerequisite and distinguish missing endpoints. Debt's board, readiness, blocked
 and diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues
 are bounded observations: they retain the selected rows and whether the same
 observation establishes another matching row, without becoming a traversal or
-counting interface. Recent package catalogue order remains canonical Debt
-activity and reads its selected Debt authority before projection; filesystem
-metadata never becomes Debt authority or a returned fact. A missing World, an empty board, a corrupt
-document, and an unavailable observation remain distinct outcomes. Diagnosis
+counting interface. A successfully observed empty listing still reports its
+empty selection, without claiming any remainder. Recent package catalogue order
+remains canonical Debt activity and reads its selected Debt authority before
+projection; filesystem metadata never becomes Debt authority or a returned fact.
+A missing World, an empty board, a corrupt document, and an unavailable
+observation remain distinct outcomes. Diagnosis
 explains graph or authority problems but never repairs them merely by observing
 them.
 

@@ -180,14 +180,11 @@ function readPage<T>(
     ...(bounded.hasMore ? { more: true as const } : {}),
   };
 }
-export async function listDebts(
-  world: WorldRoot,
-  selection: LifecycleSelection,
-  limit?: number,
-): Promise<Extract<DebtReadPage<DebtSummary>, { kind: "present" }>> {
+export async function listDebts(world: WorldRoot, selection: LifecycleSelection, limit?: number) {
   const selectedLimit = boundedListLimit(limit);
   const board = (await readBoard(world)).board;
-  return readPage(projectBoundedList(projectRows(board, selection), selectedLimit));
+  const { rows, hasMore } = projectBoundedList(projectRows(board, selection), selectedLimit);
+  return { rows, ...(hasMore ? { more: true as const } : {}) };
 }
 export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<DebtDetail | null> {
   const debt = await readDebtDocument(world, id);

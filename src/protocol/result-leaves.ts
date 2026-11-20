@@ -98,9 +98,7 @@ export const requirementReportSchema = z
 export const gateReportSchema = z
   .strictObject({
     gate: gateSchema,
-    requirements: z.array(requirementReportSchema).readonly(),
-    satisfied: z.boolean(),
-    current: gateCurrentSchema,
+    current: z.enum(["missing", "stale", "satisfied", "unsatisfied", "applicability-pending"]),
   })
   .readonly();
 const documentKeySchema = z.string().transform(documentKey);

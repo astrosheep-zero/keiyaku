@@ -1278,9 +1278,9 @@ test("named Address resolves a retained Alias outside Kanshi roster rows", async
   assert.ok("akumas" in observation.report);
   if (!("akumas" in observation.report)) throw new Error("expected a world report");
   const akumas = observation.report.akumas;
-  assert.equal(akumas.kind, "present");
+  assert.ok(!("kind" in akumas));
   assert.equal(
-    akumas.kind === "present" && akumas.rows,
+    akumas.rows,
     undefined,
     "an empty roster omits rows while the retained Alias stays addressable",
   );

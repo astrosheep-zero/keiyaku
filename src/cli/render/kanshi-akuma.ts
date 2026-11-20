@@ -1,12 +1,11 @@
-import type { AkumaKanshiRow, AkumaKanshiWorld, BoardSection } from "../../kanshi/report.js";
+import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/report.js";
+import type { AkumaList } from "../../index.js";
 import { currentWorkLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
 import { ageText, emptyCatalogue, identityLine, safeText, type TextRenderContext } from "./terminal.js";
 
-export function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable = false): string {
-  const aliases = row.aliases ?? [];
-  if (aliases.length > 0) return `(${aliases.join(" ")})`;
-  return aliasesUnavailable ? "(aliases unavailable)" : "";
+export function akumaLabel({ aliases }: Pick<AkumaKanshiRow, "aliases">): string {
+  return aliases === undefined ? "" : `(${aliases.join(" ")})`;
 }
 
 export function associationFact(contract: NonNullable<AkumaKanshiRow["contract"]>): string {
@@ -44,16 +43,17 @@ function akumaRowLines(row: AkumaKanshiRow, observedAt: string, caller?: string)
 
 /** World omits empty sections; standalone catalogues name their surface. */
 export function renderAkumaBoard(
-  section: BoardSection<AkumaKanshiWorld>,
+  section: KanshiReport["akumas"] | AkumaList,
   observedAt: string,
   context: TextRenderContext & Readonly<{ caller?: string }>,
   standalone = true,
 ): readonly string[] {
-  if (section.kind === "absent") return ["AKUMA // absent"];
-  if (section.kind === "failed") return ["AKUMA // unavailable", "", `! ${safeText(section.diagnostic)}`];
-  const rows = section.rows ?? [];
+  if ("kind" in section && section.kind === "absent") return ["AKUMA // absent"];
   const diagnostics =
     section.aliasesError === undefined ? [] : [`! aliases unavailable · ${safeText(section.aliasesError)}`];
+  if ("kind" in section && section.kind === "failed")
+    return ["AKUMA // unavailable", "", `! ${safeText(section.diagnostic)}`, ...diagnostics];
+  const rows = section.rows ?? [];
   if (rows.length === 0 && diagnostics.length === 0 && section.more !== true)
     return standalone ? [emptyCatalogue("akuma")] : [];
   return [

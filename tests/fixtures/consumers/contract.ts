@@ -106,7 +106,7 @@ Keis.of(repo, local).kei({ id }).review(cancellable);
 // @ts-expect-error the execution carrier is no longer a public construction input
 Keis.of(repo, { execution: {} });
 const observed: ContractObservation = await Keis.of(repo).observe({ id });
-if (observed.kind === "present") observed.row.gates?.forEach(({ gate, requirements }) => void [gate, requirements]);
+if (observed.kind === "contract") observed.gates?.forEach(({ gate, current, requirements }) => void [gate, current, requirements]);
 const reconciled = await Keis.of(repo).reconcile({ contract: id });
 if (reconciled.kind === "contract") void [reconciled.effects, reconciled.issues];
 const worldReconciled = await Keis.of(repo).reconcile({ retryHooks: true });

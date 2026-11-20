@@ -19,6 +19,6 @@ function firstFound(items: readonly DebtShowItem[]): DebtDetail | undefined {
 }
 async function selectedTitles() {
   const result = await catalogue;
-  return result.kind === "debt-catalogue" && !("absent" in result) ? result.rows?.map(row => row.title) : undefined;
+  return result.kind === "debt-catalogue" && !("absent" in result) ? result.rows.map(row => row.title) : undefined;
 }
 void [one, completed, native, firstFound, selectedTitles, World];

@@ -176,13 +176,11 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       const expected: ContractDetail[] = [];
       for (const { id } of contracts) {
         const observed = await Keis.of(repo).observe({ id });
-        assert.equal(observed.kind, "present");
-        if (observed.kind !== "present") throw new Error("missing fixture row");
-        expected.push(observed.row);
-        assert.equal(observed.row.workspace.kind, "present");
-        if (observed.row.workspace.kind !== "present") throw new Error("missing conflict");
-        assert.deepEqual(observed.row.workspace.merge, ["shared.txt"]);
-        assert.deepEqual(observed.row.targetLag, { kind: "counted", behind: 1 });
+        assert.equal(observed.kind, "contract");
+        expected.push(observed);
+        assert.equal(observed.workspace.kind, "present");
+        assert.deepEqual(observed.workspace.merge, ["shared.txt"]);
+        assert.equal(observed.targetLag, 1);
       }
       const reference = await Keis.of(repo).list({});
       const referenceRows = reference.rows!;
@@ -247,9 +245,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const before = await Keis.of(repo).list({});
     const detailFor = async (id: ContractId): Promise<ContractDetail> => {
       const exact = await Keis.of(repo).observe({ id });
-      assert.equal(exact.kind, "present");
-      if (exact.kind !== "present") throw new Error("missing fixture detail");
-      return exact.row;
+      assert.equal(exact.kind, "contract");
+      return exact;
     };
     const beforeDetails = await Promise.all(before.rows!.map((row) => detailFor(row.id)));
     const absent = contracts[1]!;
@@ -308,12 +305,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         writeFileSync(calls, "");
         writeFileSync(refs, "");
         const exact = await Keis.of(traced).observe({ id: selected.id });
-        assert.equal(exact.kind, "present");
-        if (exact.kind === "present")
-          assert.deepEqual(
-            exact.row,
-            afterDetails.find(({ id }) => id === selected.id),
-          );
+        assert.equal(exact.kind, "contract");
+        assert.deepEqual(exact, afterDetails.find(({ id }) => id === selected.id));
         assert.equal(readFileSync(calls, "utf8").includes(unrelated.worktree), false);
       },
     );
@@ -323,8 +316,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       "the summary catalogue does not read the malformed handoff receipt",
     );
     const malformed = await Keis.of(repo).observe({ id: unrelated.id });
-    assert.equal(malformed.kind, "present");
-    if (malformed.kind === "present") assert.equal(malformed.row.issue, undefined);
+    assert.equal(malformed.kind, "contract");
+    assert.equal(malformed.issue, undefined);
     repository.run(["update-ref", "-d", unrelated.ref]);
 
     const matching = contracts[0]!;
@@ -333,10 +326,9 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     accepted(await matching.contract.deliver({ includeDirty: true }));
     assert.equal(await readRef(git, matching.ref), null);
     const resolved = await Keis.of(repo).observe({ id: matching.id });
-    assert.equal(resolved.kind, "present");
-    if (resolved.kind !== "present") throw new Error("missing resolved row");
-    assert.equal(resolved.row.workspace.kind, "present");
-    if (resolved.row.workspace.kind === "present") assert.equal(resolved.row.workspace.merge, undefined);
+    assert.equal(resolved.kind, "contract");
+    assert.equal(resolved.workspace.kind, "present");
+    assert.equal(resolved.workspace.merge, undefined);
   });
 
   test("an older admitted delivery cannot retire a newer conflict handoff", async () => {

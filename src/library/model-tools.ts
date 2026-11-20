@@ -57,12 +57,16 @@ export function modelInputSchema(input: z.core.$ZodType, worldOnly = false): z.Z
 type JsonSchema = z.core.JSONSchema.BaseSchema;
 
 /** Zod visits schema positions; authored const/default JSON is not traversed. */
-export function modelJsonSchema(schema: z.ZodType): JsonSchema {
+export function modelJsonSchema(schema: z.ZodType, position: "input" | "output" = "input"): JsonSchema {
   const { $schema: _dialect, ...json } = z.toJSONSchema(schema, {
     io: "input",
     override: ({ jsonSchema }) => {
       delete jsonSchema.$schema;
       if (typeof jsonSchema.readOnly === "boolean") delete jsonSchema.readOnly;
+      if (position === "output" && jsonSchema.type === "integer" && jsonSchema.maximum === Number.MAX_SAFE_INTEGER) {
+        delete jsonSchema.maximum;
+        if (jsonSchema.minimum === 0) delete jsonSchema.minimum;
+      }
       if (
         jsonSchema.anyOf?.every((branch) => typeof branch === "object" && branch.type === "string") &&
         jsonSchema.anyOf.some((branch) => typeof branch === "object" && Object.keys(branch).length === 1) &&
@@ -80,7 +84,7 @@ export function describeModelTools() {
   const entries = Object.entries(verbs).filter(([name]) => !excluded.has(name as VerbName));
   return entries.map(([name, entry]) => {
     const schema = modelJsonSchema(modelInputSchema(entry.input, NO_REPO_TOOLS.has(name as VerbName)));
-    const outputSchema = hasOutputSchema(name) ? modelJsonSchema(modelOutputSchemas[name]) : undefined;
+    const outputSchema = hasOutputSchema(name) ? modelJsonSchema(modelOutputSchemas[name], "output") : undefined;
     return {
       verb: name as VerbName,
       name: name.replaceAll(".", "_"),

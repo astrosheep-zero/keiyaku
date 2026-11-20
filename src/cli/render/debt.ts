@@ -64,11 +64,9 @@ export function debtRowLines(row: DebtSummary & Pick<DebtKanshiRow, "contract">)
 }
 
 export function renderDebtList(result: DebtCatalogue): string {
-  const page = result;
-  if ("absent" in page) return "debt world absent";
-  const rows = page.rows ?? [];
-  if (rows.length === 0) return emptyCatalogue("debts");
-  return ["DEBTS", "", ...rows.flatMap(debtRowLines), ...(page.more === true ? ["…"] : [])].join("\n");
+  if ("absent" in result) return "debt world absent";
+  if (result.rows.length === 0) return emptyCatalogue("debts");
+  return ["DEBTS", "", ...result.rows.flatMap(debtRowLines), ...(result.more === true ? ["…"] : [])].join("\n");
 }
 
 function textTimestamp(timestamp: string): string {

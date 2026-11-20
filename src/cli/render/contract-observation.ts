@@ -36,8 +36,8 @@ export function progressStrip(row: Pick<ContractSummary, "delivered" | "gates">)
   return [
     `delivery ${row.delivered === true ? "present" : "absent"}`,
     ...(row.gates ?? []).map(
-      (gate) =>
-        `${gateDisplayName(gate.name)} ${gate.verdict === "applicability-pending" ? "applicability pending" : gate.verdict}`,
+      ({ gate, current }) =>
+        `${gateDisplayName(gate)} ${current === "applicability-pending" ? "applicability pending" : current}`,
     ),
   ].join(" · ");
 }
@@ -156,7 +156,7 @@ export function displayGitId(value: string, abbreviations: ReadonlyMap<string, s
  * that owner supplied the moved-from identity, never by comparing a head against a current candidate.
  */
 export function targetFacts(
-  row: Pick<ContractDetail, "target" | "targetObservation" | "targetLag">,
+  row: Pick<ContractDetail, "target" | "targetObservation" | "targetLag" | "targetLagUnavailable">,
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const observation = row.targetObservation;
@@ -170,6 +170,7 @@ export function targetFacts(
       : observation?.kind === "unknown"
         ? ["target observation unavailable"]
         : []),
-    ...(lag === undefined ? [] : [lag.kind === "unknown" ? "target lag unknown" : `target behind ${lag.behind ?? 0}`]),
+    ...(lag === undefined ? [] : [`target behind ${lag}`]),
+    ...(row.targetLagUnavailable ? ["target lag unknown"] : []),
   ];
 }

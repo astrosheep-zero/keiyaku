@@ -10,12 +10,7 @@ import type { Dispatch } from "../dispatch/index.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "../library/repo.js";
 import { readDocuments } from "../protocol/read/documents.js";
-import {
-  readContractCatalogue,
-  readContractObservation,
-  readContractPhase,
-  type ContractSummaryAssociation,
-} from "../protocol/read/status.js";
+import { readContractCatalogue, readContractObservation, readContractPhase } from "../protocol/read/status.js";
 import { readDebtHolderProjectionAt, type DebtHolderProjection } from "../settlement/holder.js";
 import { observeRecentDebtStatus, DebtAuthorityCorruptionError } from "../debt/index.js";
 import type { WorldRoot } from "../world.js";
@@ -24,7 +19,8 @@ import type {
   BoardSection,
   DebtSection,
   ContractKanshiBoard,
-  ContractRosterAttachment,
+  ContractAssociation,
+  ContractKanshiDetail,
   DebtKanshiWorld,
   KanshiContractReport,
   KanshiRegionSelection,
@@ -55,6 +51,11 @@ export const kanshiObservationSchema = z
   .readonly();
 type Holders = Section<DebtHolderProjection>;
 type Dispatches = Section<readonly Dispatch[]>;
+type AssociationSources = Readonly<{
+  holders: Holders;
+  dispatches: Dispatches;
+  aliases: Section<readonly AliasBinding[]>;
+}>;
 const absent = { kind: "absent" } as const;
 
 function failure(error: unknown): Extract<Section<never>, { kind: "failed" }> {
@@ -146,7 +147,6 @@ async function debtRowsAt(world: WorldRoot | null): Promise<DebtSection<DebtKans
   try {
     const recent = await observeRecentDebtStatus(world, { limit: 10 });
     return {
-      kind: "present",
       ...(recent.rows.length === 0 ? {} : { rows: recent.rows }),
       ...(recent.hasMore ? { more: true } : {}),
     };
@@ -155,7 +155,7 @@ async function debtRowsAt(world: WorldRoot | null): Promise<DebtSection<DebtKans
   }
 }
 function joinedDebts(debts: DebtSection<DebtKanshiWorld>, holders: Holders): DebtSection<DebtKanshiWorld> {
-  if (debts.kind !== "present") return debts;
+  if ("kind" in debts || debts.rows === undefined) return debts;
   const byDebt = new Map(
     holders.kind === "present"
       ? [...holders.value.values()]
@@ -163,7 +163,7 @@ function joinedDebts(debts: DebtSection<DebtKanshiWorld>, holders: Holders): Deb
           .map((item) => [item.debtId, item.contractId])
       : [],
   );
-  const rows = (debts.rows ?? []).map((row) => {
+  const rows = debts.rows.map((row) => {
     const id = byDebt.get(row.id);
     return {
       ...row,
@@ -174,19 +174,13 @@ function joinedDebts(debts: DebtSection<DebtKanshiWorld>, holders: Holders): Deb
           : { contract: { kind: "associated" as const, contractId: id } }),
     };
   });
-  return {
-    kind: "present",
-    ...(rows.length === 0 ? {} : { rows }),
-    ...(debts.more === true ? { more: true } : {}),
-  };
+  return { ...debts, rows };
 }
 function contractAssociations(
   id: ContractId,
-  holders: Holders,
-  dispatches: Dispatches,
-  aliases: Section<readonly AliasBinding[]>,
-): readonly ContractSummaryAssociation[] {
-  const items: ContractSummaryAssociation[] = [];
+  { holders, dispatches, aliases }: AssociationSources,
+): Pick<ContractKanshiDetail, "associations"> {
+  const items: ContractAssociation[] = [];
   if (holders.kind === "failed")
     items.push({ kind: "unavailable", source: "holder", diagnostic: holders.failure.message });
   else if (holders.kind === "present") {
@@ -202,32 +196,22 @@ function contractAssociations(
         aliases.kind === "present"
           ? aliases.value.filter((binding) => binding.akumaId === item.akumaId).map((binding) => binding.alias)
           : [];
-      items.push({
-        kind: "akuma",
-        akumaId: item.akumaId,
-        ...(names.length === 0 ? {} : { aliases: names }),
-        ...(aliases.kind === "failed" ? { aliasesUnavailable: true } : {}),
-      });
+      items.push({ akumaId: item.akumaId, ...(names.length === 0 ? {} : { aliases: names }) });
     }
-  return items;
+  if (aliases.kind === "failed")
+    items.push({ kind: "unavailable", source: "aliases", diagnostic: aliases.failure.message });
+  return items.length === 0 ? {} : { associations: items };
 }
 async function contractsAt(
   observation: GitReadObservation,
   limit: number,
-  holders: Holders,
-  dispatches: Dispatches,
-  aliases: Section<readonly AliasBinding[]>,
+  links: AssociationSources,
 ): Promise<BoardSection<ContractKanshiBoard>> {
   try {
-    const source = await readContractCatalogue(observation, limit, "active");
-    const rows = (source.rows ?? []).map((row) => {
-      const associations = contractAssociations(row.id, holders, dispatches, aliases);
-      return { ...row, ...(associations.length === 0 ? {} : { associations }) };
-    });
+    const { rows, more } = await readContractCatalogue(observation, limit, "active");
     return {
-      kind: "present",
-      ...(rows.length === 0 ? {} : { rows }),
-      ...(source.more ? { more: true } : {}),
+      ...(rows === undefined ? {} : { rows: rows.map((row) => ({ ...row, ...contractAssociations(row.id, links) })) }),
+      ...(more === undefined ? {} : { more }),
     };
   } catch (error) {
     return boardFailure(error);
@@ -236,40 +220,12 @@ async function contractsAt(
 async function selectedContract(
   observation: GitReadObservation,
   id: ContractId,
-  links: Readonly<{ holders: Holders; dispatches: Dispatches; aliases: Section<readonly AliasBinding[]> }>,
+  links: AssociationSources,
 ): Promise<KanshiContractReport> {
-  const { holders, dispatches, aliases } = links;
   try {
     const selected = await readContractObservation(observation, id);
     if (selected.kind === "missing") return { kind: "contract-missing", id };
-    const row = selected.row;
-    const held = holders.kind === "present" ? holders.value.get(id) : undefined;
-    const roster: ContractRosterAttachment[] =
-      dispatches.kind !== "present"
-        ? []
-        : dispatches.value
-            .filter((item) => item.contractId === id)
-            .map((item) => {
-              const names =
-                aliases.kind === "present"
-                  ? aliases.value.filter((binding) => binding.akumaId === item.akumaId).map((binding) => binding.alias)
-                  : [];
-              return {
-                id: item.akumaId,
-                ...(names.length === 0 ? {} : { aliases: names }),
-                ...(aliases.kind === "failed" ? { aliasesUnavailable: true as const } : {}),
-              };
-            });
-    return {
-      ...row,
-      kind: "contract",
-      ...(holders.kind === "failed"
-        ? { holder: { kind: "unavailable" } }
-        : held?.disposition === "held"
-          ? { holder: held.debtId }
-          : {}),
-      ...(dispatches.kind === "failed" ? { roster: { kind: "unavailable" } } : roster.length === 0 ? {} : { roster }),
-    };
+    return { ...selected, ...contractAssociations(id, links) };
   } catch (error) {
     return { kind: "contract-failed", id, diagnostic: diagnostic(error) };
   }
@@ -319,10 +275,7 @@ export async function observeKanshi(input: KanshiInput, options: KanshiBoardOpti
           selection: "active",
           snapshotRows: ROSTER_SNAPSHOT_ROWS,
         }).then(
-          ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({
-            kind: "present",
-            ...rows,
-          }),
+          ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => rows,
           boardFailure,
         )
       : Promise.resolve(absent),
@@ -337,7 +290,11 @@ export async function observeKanshi(input: KanshiInput, options: KanshiBoardOpti
     observedAt,
     contracts,
     debts: joinedDebts(debts, holders),
-    akumas: akumaProduct.kind === "present" ? joinedAkumas(akumaProduct, aliases, dispatches) : akumaProduct,
+    akumas: !("kind" in akumaProduct)
+      ? joinedAkumas(akumaProduct, aliases, dispatches)
+      : akumaProduct.kind === "failed" && aliases.kind === "failed"
+        ? { ...akumaProduct, aliasesError: aliases.failure.message }
+        : akumaProduct,
   });
   if (repo === undefined)
     return {
@@ -352,7 +309,7 @@ export async function observeKanshi(input: KanshiInput, options: KanshiBoardOpti
         if (contract !== undefined) {
           observed = await selectedContract(observation, contract, { holders, dispatches, aliases });
         } else {
-          const contracts = await contractsAt(observation, 10, holders, dispatches, aliases);
+          const contracts = await contractsAt(observation, 10, { holders, dispatches, aliases });
           observed = worldReport(contracts, holders, dispatches);
         }
         return { report: observed, aliases };

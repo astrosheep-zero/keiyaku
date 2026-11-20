@@ -256,7 +256,7 @@ export function renderVerb<K extends VerbName>(
       if (result.kind === "akuma-name-catalogue") return renderAkumaNameCatalogue(result);
       if (result.kind === "debt-catalogue") return renderDebtList(result);
       const query = input as VerbInput<"ls">;
-      return renderAkumaBoard({ ...result, kind: "present" }, result.observedAt, {
+      return renderAkumaBoard(result, result.observedAt, {
         ...context,
         ...("mine" in query && query.mine === true ? { caller: context.actor ?? "external" } : {}),
       }).join("\n");

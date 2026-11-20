@@ -155,18 +155,18 @@ test("pre-delivery reads separate recorded verdicts from pending applicability a
   assert.deepEqual(evidence(first, "verified"), checksPending);
   const native = await keis.observe({ id });
   const selected = await Kanshi.of({ repo, world: await World.at(raw.path) }).contract(id);
-  assert.equal(native.kind, "present");
+  assert.equal(native.kind, "contract");
   assert.equal(selected.kind, "contract");
-  assert.deepEqual([first.gates, selected.gates], [native.row.gates, native.row.gates]);
+  assert.deepEqual([first.gates, selected.gates], [native.gates, native.gates]);
   const exactText = (await runCli([...args, "status", id], env)).stdout;
   assert.match(exactText, /verification 2 · recorded unsatisfied · applicability pending/u);
 
   const { value: catalogue } = await cliJson<ContractCatalogue>([...args, "ls", "kei/"], env);
   const { value: world } = await cliJson<KanshiReport>([...args, "kanshi"], env);
   assertWireRoundTrip(Keiyaku.verbs.ls.normal, catalogue);
-  assert.equal(world.contracts.kind, "present");
+  assert.ok(!("kind" in world.contracts));
   const row = catalogue.rows?.find((row) => row.id === id);
-  assert.deepEqual(row?.gates, ["reviewed", "verified"].map((name) => ({ name, verdict: "applicability-pending" })));
+  assert.deepEqual(row?.gates, ["reviewed", "verified"].map((gate) => ({ gate, current: "applicability-pending" })));
   assert.deepEqual(world.contracts.rows?.find((row) => row.id === id)?.gates, row?.gates);
   assert.match((await runCli([...args, "ls", "kei/"], env)).stdout, /verification applicability pending/u);
 

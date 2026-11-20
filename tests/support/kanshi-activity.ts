@@ -60,9 +60,6 @@ export function akumaWorldReport(rows: readonly AkumaKanshiRow[]): KanshiReport 
     observedAt: AKUMA_OBSERVED_AT,
     contracts: { kind: "absent" },
     debts: { kind: "absent" },
-    akumas: {
-      kind: "present",
-      ...(rows.length === 0 ? {} : { rows }),
-    },
+    akumas: rows.length === 0 ? {} : { rows },
   };
 }

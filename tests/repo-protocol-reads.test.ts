@@ -192,9 +192,8 @@ test("public Contract rows select the source entry for every phase", async () =>
         contractId: id,
       }),
     );
-    assert.equal(observed.kind, "present");
-    if (observed.kind !== "present") continue;
-    assert.equal(observed.row.phase, phase);
+    assert.equal(observed.kind, "contract");
+    assert.equal(observed.phase, phase);
   }
   const detailed = await withGitDecodeChannel(scope, (channel) =>
     contractObservationOperation({ scope, channel, contractId: ids.bound }),
@@ -203,13 +202,12 @@ test("public Contract rows select the source entry for every phase", async () =>
     withGitReadObservation(scope, channel, (observation) => readContractObservation(observation, ids.bound)),
   );
   assert.deepEqual(detailed, fromWorld);
-  assert.equal(detailed.kind, "present");
-  if (detailed.kind === "present")
-    assert.deepEqual(detailed.row.after, [
-      { contractId: ids.delivered, state: "active" },
-      { contractId: ids.abandoned, state: "abandoned" },
-      { contractId: protocolContractId("Missing"), state: "missing" },
-    ]);
+  assert.equal(detailed.kind, "contract");
+  assert.deepEqual(detailed.after, [
+    { contractId: ids.delivered, state: "active" },
+    { contractId: ids.abandoned, state: "abandoned" },
+    { contractId: protocolContractId("Missing"), state: "missing" },
+  ]);
   const membership = await withGitDecodeChannel(scope, (channel) =>
     contractsOperation({
       scope,
@@ -289,7 +287,8 @@ test("readable Contract catalogue skips one malformed journal while exact author
   assert.match(text, /! 1 journal skipped/u);
   assert.ok(!text.includes(malformed), "the omitted record has no placeholder row");
   await assert.rejects(contracts.observe({ id: malformed }), { category: "authority-corruption" });
-  assert.equal((await Kanshi.of({ world: null, repo }).board()).contracts.kind, "failed");
+  const { contracts: section } = await Kanshi.of({ world: null, repo }).board();
+  assert.ok("kind" in section && section.kind === "failed");
 });
 
 test("counts and selection observe only their membership authority", async () => {
@@ -324,7 +323,7 @@ test("counts and selection observe only their membership authority", async () =>
   );
   await publish(badPath, brokenTarget.map(encodeEntry).join(""));
   await assert.rejects(library.observe({ id: bad }), /invalid Git ref/u);
-  assert.deepEqual((await Kanshi.of({ world: null, repo }).counts()).contracts, { kind: "present", value: 2 });
+  assert.equal((await Kanshi.of({ world: null, repo }).counts()).contracts, 2);
   assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
   assert.deepEqual(await library.resolve({ cwd }), { kind: "resolved", id: good });
   const authority = await observeNamedAddress({ world: null, repo, selectors: [selector] });
@@ -356,7 +355,7 @@ test("counts and selection observe only their membership authority", async () =>
     }),
   );
   await publish(badPath, "corrupt journal\n");
-  assert.deepEqual((await Kanshi.of({ world: null, repo }).counts()).contracts, { kind: "present", value: 2 });
+  assert.equal((await Kanshi.of({ world: null, repo }).counts()).contracts, 2);
   assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
   assert.deepEqual(
     resolveNamedAddress({
@@ -368,7 +367,8 @@ test("counts and selection observe only their membership authority", async () =>
   await assert.rejects(library.resolve({ selector: `@${bad.slice(4)}` }));
   await assert.rejects(library.resolve({ cwd }));
   await publish(GIT_FORMAT_PATH, "corrupt membership format\n");
-  assert.equal((await Kanshi.of({ world: null, repo }).counts()).contracts.kind, "failed");
+  const { contracts: count } = await Kanshi.of({ world: null, repo }).counts();
+  assert.ok(typeof count !== "number" && count.kind === "failed");
 });
 
 test("world reconcile distinguishes empty from failed discovery and starts no repair on incomplete authority", async () => {

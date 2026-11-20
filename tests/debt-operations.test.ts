@@ -576,7 +576,7 @@ test("listing failures retain corrupt authority and unavailable custody rather t
   const { root, debts } = await world();
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const facet = Keiyaku.for({ cwd: root, environment: {} });
-  assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue" });
+  assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue", rows: [] });
   const id = acceptedId(await debts.add({ title: "Readable" }));
   const corrupt = join(root, ".keiyaku", "debts", "broken.md");
   writeFileSync(corrupt, "not Debt authority\n");

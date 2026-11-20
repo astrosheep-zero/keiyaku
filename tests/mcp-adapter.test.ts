@@ -564,9 +564,9 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(summary.isError, false);
   assert.deepEqual(summary.structuredContent, {
     kind: "active-work-summary",
-    contracts: { kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } } },
-    akumas: { kind: "present", value: { total: 0, byLife: {} } },
-    debts: { kind: "present", value: { total: 1, ready: 1, blocked: 0 } },
+    contracts: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } },
+    akumas: { total: 0, byLife: {} },
+    debts: { total: 1, ready: 1, blocked: 0 },
   });
   const catalogue = await Akumas.of(world).list({ repo, limit: 1, selection: "all" });
   assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
@@ -638,8 +638,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(partialSummary.isError, false);
   const partial = Keiyaku.verbs.status.normal.parse(partialSummary.structuredContent);
   assert.equal(partial.kind, "active-work-summary");
-  assert.equal(partial.contracts.kind, "failed");
-  assert.deepEqual(partial.debts, { kind: "present", value: { total: 1, ready: 1, blocked: 0 } });
+  assert.ok("kind" in partial.contracts && partial.contracts.kind === "failed");
+  assert.deepEqual(partial.debts, { total: 1, ready: 1, blocked: 0 });
   const failedWorld = await client.callTool({ name: "kanshi", arguments: { repo: otherRepo.path } });
   assert.equal(failedWorld.isError, false);
   assert.equal(failedWorld.structuredContent, undefined);
@@ -669,16 +669,14 @@ test("SDK routing preserves optional observation failures and attention in struc
     const response = await client.callTool({ name: "status", arguments: { selector: id } });
     assert.equal(response.isError, false, JSON.stringify(response));
     const projected = response.structuredContent as Record<string, unknown>;
-    assert.equal(Object.hasOwn(projected, "holder"), id === bound.contractId);
-    assert.equal(Object.hasOwn(projected, "roster"), id === bound.contractId);
+    assert.equal(Object.hasOwn(projected, "associations"), id === bound.contractId);
     assert.equal(Object.hasOwn(projected, "contract"), id === worker.id);
     assert.match(JSON.stringify(response.content), /association unavailable/u);
     const native = await facet.status({ selector: id });
     if (native.kind === "contract") {
-      assert.deepEqual(native.holder, { kind: "unavailable" });
-      assert.deepEqual(native.roster, { kind: "unavailable" });
-      assert.deepEqual(projected.holder, native.holder);
-      assert.deepEqual(projected.roster, native.roster);
+      assert.deepEqual(native.associations?.map((link) => "kind" in link && link.kind === "unavailable" && link.source), ["holder", "roster", "aliases"]);
+      assert.ok(native.associations?.every((link) => "diagnostic" in link && link.diagnostic.length > 0));
+      assert.deepEqual(projected.associations, native.associations);
       assert.deepEqual(projected.issue, native.issue);
     } else {
       assert.ok(native.kind === "akuma" && native.contract?.kind === "failed");
@@ -708,7 +706,7 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     const response = await client.callTool({ name: "ls", arguments: { selector } });
     assert.equal(response.isError, false);
     assert.equal((response.structuredContent as { kind: string }).kind, ({ "kei/": "contract-catalogue", "aku/": "akuma-name-catalogue", "aku/*": "akuma-catalogue", "debt/": "debt-catalogue" })[selector]);
-    assert.equal((response.structuredContent as { rows?: unknown }).rows, undefined);
+    assert.deepEqual((response.structuredContent as { rows?: unknown }).rows, selector === "debt/" ? [] : undefined);
   }
   const bound = accepted(await facet.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const nativeGuidance = await bound.kei.guidance();

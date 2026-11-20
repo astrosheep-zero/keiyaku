@@ -1,8 +1,7 @@
 import { errorCategory } from "../../errors.js";
 import { z } from "zod";
 import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../git/identity.js";
-import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
-import { gateCurrentSchema, gateReportSchema, gateSchema, requirementReportSchema } from "../result-leaves.js";
+import { gateReportSchema, gateCurrentSchema, requirementReportSchema } from "../result-leaves.js";
 import {
   contractJournal,
   countActiveContractJournals,
@@ -15,14 +14,18 @@ import {
 import { decodeContractDocument } from "../../body/decode.js";
 import { observeTargetLag, observeWorkspace, workspaceHasUnmergedPaths, worktreePath } from "../../git/workspace.js";
 import { readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
-import type { ContractWorkspaceObservation, HandoffReceiptCoordinate } from "../../git/workspace.js";
+import type {
+  ContractTargetLag as GitContractTargetLag,
+  ContractWorkspaceObservation,
+  HandoffReceiptCoordinate,
+} from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import {
   withGitTargetedReadObservation,
   type GitDecodeChannel,
   type GitReadObservation,
 } from "../../git/read-observation.js";
-import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
+import { gateReports, type GateReport } from "../../core/facts/gate.js";
 import { contractState } from "../../core/facts/observation.js";
 import { verificationRequirement } from "../../verification/declaration.js";
 import {
@@ -41,34 +44,6 @@ export type ContractPhase = z.output<typeof phaseSchema>;
 export function contractLifecycle(phase: ContractPhase): "active" | "settled" {
   return phase === "bound" ? "active" : "settled";
 }
-
-const summaryGateSchema = z
-  .strictObject({
-    name: gateSchema,
-    verdict: z.enum(["missing", "stale", "satisfied", "unsatisfied", "applicability-pending"]),
-  })
-  .readonly();
-export type ContractSummaryGate = z.output<typeof summaryGateSchema>;
-
-export const contractSummaryAssociationSchema = z.union([
-  z.strictObject({ kind: z.literal("debt"), debtId: z.string().min(1) }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("akuma"),
-      akumaId: z.string().min(1),
-      aliases: z.array(z.string().min(1)).min(1).readonly().exactOptional(),
-      aliasesUnavailable: z.literal(true).exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      kind: z.literal("unavailable"),
-      source: z.enum(["holder", "roster"]),
-      diagnostic: z.string(),
-    })
-    .readonly(),
-]);
-export type ContractSummaryAssociation = z.output<typeof contractSummaryAssociationSchema>;
 
 export const contractAttentionSchema = z.union([
   z.strictObject({ kind: z.literal("workspace-unavailable"), path: z.string().min(1) }).readonly(),
@@ -99,7 +74,7 @@ export const contractSummarySchema = z
     phase: phaseSchema,
     phaseAt: z.string(),
     delivered: z.literal(true).exactOptional(),
-    gates: z.array(summaryGateSchema).min(1).readonly().exactOptional(),
+    gates: z.array(gateReportSchema).min(1).readonly().exactOptional(),
     attention: z.array(contractAttentionSchema).min(1).readonly().exactOptional(),
   })
   .readonly();
@@ -146,17 +121,6 @@ export const contractDetailWorkspaceSchema = z.union([
 ]);
 export type ContractDetailWorkspace = z.output<typeof contractDetailWorkspaceSchema>;
 
-export const contractDetailTargetLagSchema = z.union([
-  z
-    .strictObject({
-      kind: z.literal("counted"),
-      behind: z.number().int().positive().exactOptional(),
-    })
-    .readonly(),
-  z.strictObject({ kind: z.literal("unknown") }).readonly(),
-]);
-export type ContractDetailTargetLag = z.output<typeof contractDetailTargetLagSchema>;
-
 export const contractDetailTargetObservationSchema = z.union([
   z.strictObject({ kind: z.literal("moved"), before: snapshotIdSchema, after: snapshotIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("unknown") }).readonly(),
@@ -165,12 +129,14 @@ export type ContractDetailTargetObservation = z.output<typeof contractDetailTarg
 
 export const contractDetailSchema = z
   .strictObject({
+    kind: z.literal("contract"),
     id: contractIdSchema,
     title: z.string().min(1).exactOptional(),
     phase: phaseSchema,
     workspace: contractDetailWorkspaceSchema,
     target: z.string().exactOptional(),
-    targetLag: contractDetailTargetLagSchema.exactOptional(),
+    targetLag: z.number().int().nonnegative().exactOptional(),
+    targetLagUnavailable: z.literal(true).exactOptional(),
     delivery: z.strictObject({ candidate: snapshotIdSchema, integration: snapshotIdSchema }).readonly().exactOptional(),
     targetObservation: contractDetailTargetObservationSchema.exactOptional(),
     gates: z.array(statusGateSchema).min(1).readonly().exactOptional(),
@@ -194,12 +160,12 @@ export type ContractDetail = z.output<typeof contractDetailSchema>;
 
 export const contractObservationSchema = z.union([
   z.strictObject({ kind: z.literal("missing"), id: contractIdSchema }).readonly(),
-  z.strictObject({ kind: z.literal("present"), row: contractDetailSchema }).readonly(),
+  contractDetailSchema,
 ]);
 
+export type ContractGate = z.output<typeof gateReportSchema>;
 export type ContractGateCurrent = z.output<typeof gateCurrentSchema>;
 export type ContractGateReport = z.output<typeof statusGateSchema>;
-export type ContractTargetLag = ContractDetailTargetLag;
 export type { ContractWorkspaceObservation };
 export type ContractAfterEdge = NonNullable<ContractDetail["after"]>[number];
 export type ContractObservation = z.output<typeof contractObservationSchema>;
@@ -333,17 +299,14 @@ function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string 
   return last.at;
 }
 
-function summaryVerdict(current: GateCurrent): ContractSummaryGate["verdict"] {
-  return current.kind === "attested" ? current.verdict : current.kind;
+function compactGate({ gate, current }: GateReport): ContractGate {
+  return { gate, current: current.kind === "attested" ? current.verdict : current.kind };
 }
 
 export function summaryFor({ state, bindAt }: Pick<SelectedContractState, "state" | "bindAt">): ContractSummary {
   const document = documentFor(state);
   const title = titleFor(document);
-  const gates = gateReports(state).reports.map((report) => ({
-    name: report.gate,
-    verdict: summaryVerdict(report.current),
-  }));
+  const gates = gateReports(state).reports.map(compactGate);
   return {
     id: state.id,
     ...(title === undefined ? {} : { title }),
@@ -395,13 +358,6 @@ function detailWorkspace(path: string, observed: ContractWorkspaceObservation): 
   }
 }
 
-function detailTargetLag(lag: GitContractTargetLag): ContractDetailTargetLag | undefined {
-  if (lag.kind === "none") return undefined;
-  return lag.kind === "counted"
-    ? { kind: "counted", ...(lag.behind === 0 ? {} : { behind: lag.behind }) }
-    : { kind: "unknown" };
-}
-
 function detailTargetObservation(
   observed: Readonly<{ head: SnapshotId | null; drift: boolean }> | null,
   state: ContractState,
@@ -425,14 +381,13 @@ async function managedWorkspaceFacts(
 ): Promise<
   Readonly<{
     workspace: ContractDetailWorkspace;
-    targetLag: ContractDetailTargetLag | undefined;
-    lagSubject?: string;
+    targetLag: GitContractTargetLag;
   }>
 > {
   if (appointed === undefined) {
     return {
       workspace: { kind: "unappointed" },
-      targetLag: state.coordinates.target === undefined ? undefined : { kind: "unknown" },
+      targetLag: { kind: state.coordinates.target === undefined ? "none" : "unknown" },
     };
   }
   const path = appointed.workspace;
@@ -440,17 +395,12 @@ async function managedWorkspaceFacts(
     observeWorkspace(repository, { kind: "worktree", path }, path),
     observeTargetLag(repository, path, targetObservation?.head),
   ]);
-  return {
-    workspace: detailWorkspace(path, workspaceObservation),
-    targetLag: detailTargetLag(targetLag),
-    ...(targetLag.kind === "none" || targetLag.subject === undefined ? {} : { lagSubject: targetLag.subject.path }),
-  };
+  return { workspace: detailWorkspace(path, workspaceObservation), targetLag };
 }
 
 function summaryAttention({
   workspace,
   targetLag,
-  lagSubject,
 }: Awaited<ReturnType<typeof managedWorkspaceFacts>>): readonly ContractAttention[] {
   const attention: ContractAttention[] = [];
   switch (workspace.kind) {
@@ -466,14 +416,11 @@ function summaryAttention({
         attention.push({ kind: "merge-in-progress", path: workspace.path, ...(conflicts === 0 ? {} : { conflicts }) });
       }
   }
-  if (targetLag?.kind === "unknown")
-    attention.push({ kind: "target-unknown", ...(lagSubject === undefined ? {} : { subject: lagSubject }) });
-  else if (targetLag?.behind !== undefined)
-    attention.push({
-      kind: "target-behind",
-      behind: targetLag.behind,
-      ...(lagSubject === undefined ? {} : { subject: lagSubject }),
-    });
+  if (targetLag.kind !== "none") {
+    const subject = targetLag.subject === undefined ? {} : { subject: targetLag.subject.path };
+    if (targetLag.kind === "unknown") attention.push({ kind: "target-unknown", ...subject });
+    else if (targetLag.behind > 0) attention.push({ kind: "target-behind", behind: targetLag.behind, ...subject });
+  }
   return attention;
 }
 
@@ -514,22 +461,29 @@ export async function readContractObservation(
   });
   const facts = await managedWorkspaceFacts(repository, state, workspace, rawTargetObservation);
   const gates = gateReports(state).reports.map((report) => {
-    if (report.gate !== "verified") return report;
-    const requirements = report.requirements.map((requirement) => {
-      const index = indexes.get(requirement.requirement);
-      return index === undefined ? requirement : { ...requirement, index };
-    });
-    return { ...report, requirements };
+    const requirements =
+      report.gate !== "verified"
+        ? report.requirements
+        : report.requirements.map((requirement) => {
+            const index = indexes.get(requirement.requirement);
+            return index === undefined ? requirement : { ...requirement, index };
+          });
+    return { ...compactGate(report), requirements };
   });
   const title = titleFor(document);
   const targetObservation = detailTargetObservation(rawTargetObservation, state);
-  const row = {
+  const row: ContractDetail = {
+    kind: "contract",
     id: state.id,
     ...(title === undefined ? {} : { title }),
     phase: phaseFor(state),
     workspace: facts.workspace,
     ...(state.coordinates.target === undefined ? {} : { target: targetName(state.coordinates.target) }),
-    ...(facts.targetLag === undefined ? {} : { targetLag: facts.targetLag }),
+    ...(facts.targetLag.kind === "counted"
+      ? { targetLag: facts.targetLag.behind }
+      : facts.targetLag.kind === "unknown"
+        ? { targetLagUnavailable: true }
+        : {}),
     ...(state.delivery === null
       ? {}
       : {
@@ -545,7 +499,7 @@ export async function readContractObservation(
       ? { abandonNote: state.terminal.data.note }
       : {}),
   };
-  return { kind: "present", row: await selectedDetailWithIssue(repository, state, row, rawTargetObservation) };
+  return await selectedDetailWithIssue(repository, state, row, rawTargetObservation);
 }
 
 type SelectedContractState = Readonly<{

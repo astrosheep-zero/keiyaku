@@ -270,9 +270,9 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const observed = await Keis.of(await Repo.at({ path: repository.path })).observe({
       id: keiyaku.toJSON().contract,
     });
-    assert.ok(observed.kind === "present");
+    assert.equal(observed.kind, "contract");
     assert.equal(
-      observed.row.gates?.some(({ gate }) => gate === "verified"),
+      observed.gates?.some(({ gate }) => gate === "verified"),
       false,
     );
     const audited = await keiyaku.previewDelivery();

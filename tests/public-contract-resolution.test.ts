@@ -24,10 +24,8 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   const bound = accepted(await library.bind({ terms: markdown, gates: ["reviewed"] }));
   const [summary] = (await library.list({  })).rows!;
   assert.ok(summary);
-  const observed = await library.observe({ id: summary.id });
-  assert.equal(observed.kind, "present");
-  if (observed.kind !== "present") throw new Error("missing bound contract");
-  const row = observed.row;
+  const row = await library.observe({ id: summary.id });
+  assert.equal(row.kind, "contract");
   assert.ok(row.workspace.kind !== "unappointed" && "path" in row.workspace);
   const worktreePath = row.workspace.path;
   const expected: ContractResolution = { kind: "resolved", id: bound.contractId };

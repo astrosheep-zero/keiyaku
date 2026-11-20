@@ -14,11 +14,12 @@ permission, persistence, or repair decision.
 ## Report and failure isolation
 
 Kanshi obtains each section from its public owner and retains whether that
-section is present, absent, or unavailable. An absent World, an empty present
-section, a missing selected entity, and a failed section are different facts.
-A failed or unreadable section does not prevent other sections from being
-observed, and no unavailable section is rendered as an empty list or zero
-count.
+section is present, absent, or unavailable. Successful observations speak through
+the observed values themselves; absence and failure retain their own evidence.
+An absent World, an observed empty section, a missing selected entity, and a
+failed section are different facts. A failed or unreadable section does not
+prevent other sections from being observed. A witnessed zero count, including
+zero target lag, remains a count; no unavailable count becomes zero.
 
 One report is a bounded read-time observation: its sections and their
 observation time describe what Kanshi actually read, not a durable transaction
@@ -34,11 +35,11 @@ known emptiness.
 Read-time association is enrichment, not a prerequisite for observing either
 product. A failed DebtHolder or Dispatch observation makes affected links
 unavailable; it does not fail readable Debt or Akuma rows or establish that no
-link exists. Alias availability belongs to the composite Akuma section, not to
-any single row: a failed Alias read leaves the Akuma section and empty roster
-present with Alias marked unavailable, while readable alias values remain the
-Alias owner's and attached Contract rosters derive availability from that
-section fact.
+link exists. Alias availability belongs to the observation, not to any single Akuma: a
+failed Alias read leaves readable Akumas and an observed empty roster intact.
+Contract catalogue and addressed reads use the same projection from frozen
+association observations. Holder, roster, and Alias failures remain independent,
+with their causes, even when no Akuma row is attached.
 
 The World Debt section is a bounded active catalogue, using the Debt owner's
 selection before its display limit. It attaches only relationships already

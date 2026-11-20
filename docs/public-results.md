@@ -41,8 +41,8 @@ retains its owner-family identity through empty, absent, and unavailable answers
 World observation has its own family and is not an addressed-status alternative.
 Missing
 authority, unavailable observation, unrequested detail, and known emptiness are
-different answers; an omitted optional collection means known empty, not a
-failed or skipped observation. An omitted catalogue remainder means the
+different answers. An omitted optional collection, where used for known
+emptiness, never represents a failed or skipped observation. An omitted catalogue remainder means the
 observation is known complete. A readable-only catalogue keeps the rows it
 proved readable apart from records omitted locally; its skipped count is
 independent of the bounded row budget and remainder and never becomes a
@@ -77,9 +77,13 @@ than validators or a schema implementation. Transports consuming untrusted wire
 values own their local structural admission without acquiring product authority.
 Trusted local results are not parsed again. Shared semantic declarations remain
 shared in composed answers rather than expanding a separate vocabulary for each
-use. Addressed Contract status preserves the native gate judgment and complete
-current evidence for each requirement, including its stable identity. A current
-Verification position is additional display information, not evidence identity.
+use. Contract observations publish one compact owner-adjudicated verdict per
+selected gate. Addressed status also preserves each requirement's current
+evidence and stable identity; stale causes belong with that evidence, not the
+aggregate verdict. A current Verification position is additional display
+information, not evidence identity. Model discovery may omit representational
+constraints generated for output numbers without weakening native validation or
+changing authored caller constraints and literal values.
 Core does not depend on a schema implementation. The nearest
 schema-using owner projecting a core fact owns its declaration; shared
 declarations live below their consumers without cycles. Caller values are

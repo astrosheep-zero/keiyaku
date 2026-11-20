@@ -35,8 +35,8 @@ function overlay(lines: readonly string[], theme: Theme, done: () => void) {
   };
 }
 
-const countValue = (section: { kind: "present"; value: number } | { kind: "absent" | "failed" }): string =>
-  section.kind === "present" ? String(section.value) : section.kind === "absent" ? "-" : "?";
+const countValue = (section: number | { kind: "absent" | "failed" }): string =>
+  typeof section === "number" ? String(section) : section.kind === "absent" ? "-" : "?";
 
 type StatusReaders = {
   repo: typeof Repo.at;

@@ -190,8 +190,8 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     }).board();
     assert.ok("contracts" in report, "the bare World read still answers the World board");
     if (!("contracts" in report)) return;
-    assert.ok(report.contracts.kind === "present", 'expected report.contracts.kind = "present"');
-    const row = report.contracts.kind === "present" ? report.contracts.rows?.find((candidate) => candidate.id === id) : undefined;
+    assert.ok(!("kind" in report.contracts));
+    const row = report.contracts.rows?.find((candidate) => candidate.id === id);
     assert.equal(row?.title, undefined, "an unreadable document leaves the title unknown");
     assert.equal(row?.gates, undefined, "no declared gates leave the summary gates omitted");
     const failed = await runCli(["region"], { cwd: repository.path, environment: {} });

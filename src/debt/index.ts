@@ -92,9 +92,12 @@ export const debtDoctorReportSchema = z
   })
   .readonly();
 export type DebtDoctorReport = z.output<typeof debtDoctorReportSchema>;
-export const debtListSchema = debtReadPageSchema(debtSummarySchema)
-  .options[0].unwrap()
-  .extend({ kind: z.literal("debt-catalogue") })
+export const debtListSchema = z
+  .strictObject({
+    kind: z.literal("debt-catalogue"),
+    rows: z.array(debtSummarySchema).readonly(),
+    more: z.literal(true).exactOptional(),
+  })
   .readonly();
 export const debtReadyListSchema = z.union([debtReadPageSchema(readyDebtRowSchema).options[0], debtAbsentSchema]);
 export const blockedDebtListSchema = z.union([debtReadPageSchema(blockedDebtRowSchema).options[0], debtAbsentSchema]);

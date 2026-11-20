@@ -85,6 +85,9 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(countsSchema, await Kanshi.of({ world: null }).counts());
   assertWireRoundTrip(countsSchema, await Kanshi.of({ world }).counts());
   const debts = DebtCollection.of(world);
+  const emptyCatalogue = await debts.list();
+  assert.deepEqual(emptyCatalogue, { kind: "debt-catalogue", rows: [] });
+  assertWireRoundTrip(listSchema, emptyCatalogue);
   const first = await debts.add({ title: "First" });
   assert.equal(first.kind, "accepted");
   assertWireRoundTrip(mutationSchema, first);
@@ -162,9 +165,9 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const selected = await Kanshi.of({ world, repo }).contract(bound.contractId);
   assertWireRoundTrip(contractReportSchema, selected);
   const native = await Keis.of(repo).observe({ id: bound.contractId });
-  assert.ok(selected.kind === "contract" && native.kind === "present");
-  assert.ok(native.row.gates?.length);
-  assert.deepEqual(selected.gates, native.row.gates);
+  assert.ok(selected.kind === "contract" && native.kind === "contract");
+  assert.ok(native.gates?.length);
+  assert.deepEqual(selected.gates, native.gates);
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
   const declarations = [{ id: bound.contractId, patterns: ["src/**"] }];
   assertWireRoundTrip(

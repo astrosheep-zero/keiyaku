@@ -33,7 +33,7 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const repo = await Repo.at({ path: repository.path });
   const world = await World.at(repository.path);
   const empty = await Kanshi.of({ world, repo }).counts();
-  assert.deepEqual([empty.akuma, empty.contracts, empty.debts], Array(3).fill({ kind: "present", value: 0 }));
+  assert.deepEqual([empty.akuma, empty.contracts, empty.debts], [0, 0, 0]);
   const debts = Debts.of(world);
   const ready = accepted(await debts.add({ title: "Pioneer" })).id;
   accepted(await debts.add({ title: "Waiting", needs: [ready] }));
@@ -80,9 +80,9 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const summary = await summaryAt(world);
   assert.deepEqual(summary, {
     kind: "active-work-summary",
-    contracts: { kind: "present", value: { total: 12, awaitingReview: 1, conflicts: { known: 0, unavailable: 0 } } },
-    akumas: { kind: "present", value: { total: 13, byLife: { running: 12, stranded: 1 } } },
-    debts: { kind: "present", value: { total: 12, ready: 11, blocked: 1 } },
+    contracts: { total: 12, awaitingReview: 1, conflicts: { known: 0, unavailable: 0 } },
+    akumas: { total: 13, byLife: { running: 12, stranded: 1 } },
+    debts: { total: 12, ready: 11, blocked: 1 },
   });
   const worktree = waiting.worktreePath;
   assert.ok(worktree);
@@ -92,26 +92,24 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   assert.deepEqual(await summaryAt(worktree), contextual);
   assert.deepEqual(await summaryAt(child, world), contextual);
   const report = await Kanshi.of({ world, repo }).counts();
-  assert.deepEqual([report.akuma, report.contracts, report.debts], [
-    { kind: "present", value: 12 }, { kind: "present", value: 12 }, { kind: "present", value: 12 },
-  ]);
+  assert.deepEqual([report.akuma, report.contracts, report.debts], [12, 12, 12]);
   const unavailable = await Kanshi.of({ world, repo }).counts({ akumaCaller: null });
-  assert.equal(unavailable.akuma.kind, "failed");
+  assert.ok(typeof unavailable.akuma !== "number" && unavailable.akuma.kind === "failed");
   assert.deepEqual([unavailable.contracts, unavailable.debts], [report.contracts, report.debts]);
   writeFileSync(stopped.paths.heart, "corrupt");
   const broken = await Kanshi.of({ world, repo }).counts();
-  assert.equal(broken.akuma.kind, "failed");
+  assert.ok(typeof broken.akuma !== "number" && broken.akuma.kind === "failed");
   assert.deepEqual(broken.contracts, report.contracts);
   assert.deepEqual(broken.debts, report.debts);
   const partial = await summaryAt(world);
   assert.equal(partial.kind, "active-work-summary");
   assert.equal(summary.kind, "active-work-summary");
-  assert.equal(partial.akumas.kind, "failed");
+  assert.ok("kind" in partial.akumas && partial.akumas.kind === "failed");
   assert.deepEqual(partial.contracts, summary.contracts);
   assert.deepEqual(partial.debts, summary.debts);
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   const brokenDebt = await Kanshi.of({ world, repo }).counts();
-  assert.equal(brokenDebt.debts.kind, "failed");
+  assert.ok(typeof brokenDebt.debts !== "number" && brokenDebt.debts.kind === "failed");
   assert.deepEqual(brokenDebt.contracts, report.contracts);
 });
 
@@ -134,8 +132,8 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   const independent = await Kanshi.of({ world: null, repo }).counts();
-  assert.deepEqual(independent.contracts, { kind: "present", value: 0 });
-  assert.equal(independent.akuma.kind, "absent");
+  assert.equal(independent.contracts, 0);
+  assert.deepEqual(independent.akuma, { kind: "absent" });
   const call = (value: unknown) => Kanshi.of(value as KanshiScopeInput).counts();
   assert.throws(
     () => call({ world: directory, repo: {} }),
@@ -146,24 +144,24 @@ test("absence, explicit Repo and crossing validation remain independent", async 
     (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
   );
   await assert.rejects(call({ world: `${directory}/.` }));
-  assert.equal((await Kanshi.of({ world }).counts()).debts.kind, "absent");
+  assert.deepEqual((await Kanshi.of({ world }).counts()).debts, { kind: "absent" });
   const selection = { akumaCaller: { kind: "external", integration: "pi", id: "S" } } as const;
-  assert.equal((await Kanshi.of({ world }).counts(selection)).akuma.kind, "absent");
+  assert.deepEqual((await Kanshi.of({ world }).counts(selection)).akuma, { kind: "absent" });
   await assert.rejects(Kanshi.of({ world }).counts({ akumaCaller: {} } as KanshiCountsOptions),
     (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input");
   await World.at(world);
   assert.deepEqual(await Keiyaku.for({ cwd: world, repo: repository.path, environment: {} }).status(), {
     kind: "active-work-summary",
-    contracts: { kind: "present", value: { total: 0, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } } },
-    akumas: { kind: "present", value: { total: 0, byLife: {} } },
-    debts: { kind: "present", value: { total: 0, ready: 0, blocked: 0 } },
+    contracts: { total: 0, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } },
+    akumas: { total: 0, byLife: {} },
+    debts: { total: 0, ready: 0, blocked: 0 },
   });
   assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "run"), "not a directory");
   const unavailable = await Kanshi.of({ world }).counts(selection);
-  assert.equal(unavailable.akuma.kind, "failed");
-  assert.deepEqual(unavailable.debts, { kind: "present", value: 0 });
+  assert.ok(typeof unavailable.akuma !== "number" && unavailable.akuma.kind === "failed");
+  assert.equal(unavailable.debts, 0);
 });
 
 async function divergentFixture() {
@@ -189,7 +187,7 @@ test("active status counts a relative linked-worktree conflict, not target drift
   const before = await invocation.status();
   assert.equal(before.kind, "active-work-summary");
   assert.deepEqual(before.contracts, {
-    kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } },
+    total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 },
   });
   assert.equal((await conflicting.kei.deliver({ materializeConflict: true })).kind, "handoff");
   repository.run(["-c", "worktree.useRelativePaths=true", "worktree", "repair", conflictPath]);
@@ -212,7 +210,7 @@ test("active status counts a relative linked-worktree conflict, not target drift
   const observed = await invocation.status();
   assert.equal(observed.kind, "active-work-summary");
   assert.deepEqual(observed.contracts, {
-    kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 1, unavailable: 1 } },
+    total: 2, awaitingReview: 0, conflicts: { known: 1, unavailable: 1 },
   });
   const text = await runCli(["-C", repository.path, "status"], { environment: {} });
   assert.equal(text.exit, 0, text.stderr);
@@ -233,7 +231,7 @@ test("active status cannot turn a missing index during a real merge into a zero 
     const observed = await invocation.status();
     assert.equal(observed.kind, "active-work-summary");
     assert.deepEqual(observed.contracts, {
-      kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 1 } },
+      total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 1 },
     });
     assert.equal(existsSync(index), false);
   } finally {
@@ -246,7 +244,7 @@ test("caller running count preserves readable ancestry beyond the display bound"
   const root: AkumaCaller = { kind: "external", integration: "pi", id: "flagship" };
   const kanshi = Kanshi.of({ world });
   const selected = () => kanshi.counts({ akumaCaller: root });
-  assert.deepEqual((await selected()).akuma, { kind: "present", value: 0 });
+  assert.equal((await selected()).akuma, 0);
   let draw = 0;
   const born = async (akumaName: string, caller?: AkumaCaller) => {
     const child = await bornDirectAkuma({
@@ -280,8 +278,8 @@ test("caller running count preserves readable ancestry beyond the display bound"
     diagnostic: "cannot retire",
     at: hung.soul.createdAt,
   });
-  assert.deepEqual((await selected()).akuma, { kind: "present", value: 13 });
-  assert.deepEqual((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, { kind: "present", value: 13 });
+  assert.equal((await selected()).akuma, 13);
+  assert.equal((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, 13);
   // A life failure must not erase the readable Soul edge to its descendants.
   const database = new DatabaseSync(ancestor.paths.heart);
   try {
@@ -290,12 +288,13 @@ test("caller running count preserves readable ancestry beyond the display bound"
     database.close();
   }
   assert.equal((await readSoul(ancestor.paths))?.id, ancestor.id);
-  assert.deepEqual((await selected()).akuma, { kind: "present", value: 13 });
-  assert.equal((await kanshi.counts()).akuma.kind, "failed");
+  assert.equal((await selected()).akuma, 13);
+  const total = (await kanshi.counts()).akuma;
+  assert.ok(typeof total !== "number" && total.kind === "failed");
   writeFileSync(ancestor.paths.heart, "corrupt");
   unrelated.leash.release();
   writeFileSync(unrelated.paths.heart, "corrupt");
-  assert.deepEqual((await selected()).akuma, { kind: "present", value: 0 });
+  assert.equal((await selected()).akuma, 0);
   await born("direct", root);
-  assert.deepEqual((await selected()).akuma, { kind: "present", value: 1 });
+  assert.equal((await selected()).akuma, 1);
 });
