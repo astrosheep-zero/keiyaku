@@ -15,22 +15,16 @@ import {
 } from "../git/target-placement.js";
 import { readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { contractJournal, observeContractsAt } from "../git/observe.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
 import { activeContract, targetContractRefusal } from "../core/facts/observation.js";
 import { gateReports } from "../core/facts/gate.js";
 import { unmetPrerequisites } from "../core/verbs/placement.js";
 import type { ContractState, DeliverData } from "../core/facts/types.js";
 import { observeTargetLag, contractTargetLagSchema } from "../git/workspace.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
-import { accepted } from "./outcome.js";
 import { deliveryIntegrationSnapshots, prepareDelivery } from "./deliver.js";
 import { compactScope, compactScopeSchema, requirementProblemSchema, unmetGateProblems } from "./completion.js";
-import type {
-  DocumentDerivation,
-  IntentOutcome,
-  MechanicalPreparationRefusal,
-  MutationOperationInput,
-  RepositoryScope,
-} from "./operations.js";
+import type { DocumentDerivation, MechanicalPreparationRefusal, RepositoryScope } from "./operations.js";
 
 const placeableTargetSchema = z
   .strictObject({
@@ -95,14 +89,15 @@ export const deliveryPreviewReportSchema = z.union([
 ]);
 export type DeliveryPreviewReport = z.output<typeof deliveryPreviewReportSchema>;
 type ReadyPreview = Extract<DeliveryPreviewReport, { kind: "ready" }>;
-type DeliveryPreviewOperationInput = MutationOperationInput &
-  Readonly<{
-    deriveDocument: (state: ContractState) => DocumentDerivation;
-    requireBranchesToBeUpToDate?: boolean;
-    includeDirty?: boolean;
-    showDiff?: boolean;
-    signal?: AbortSignal;
-  }>;
+type DeliveryPreviewOperationInput = Readonly<{
+  scope: RepositoryScope;
+  channel: GitDecodeChannel;
+  contractId: ContractState["id"];
+  deriveDocument: (state: ContractState) => DocumentDerivation;
+  requireBranchesToBeUpToDate?: boolean;
+  includeDirty?: boolean;
+  showDiff?: boolean;
+}>;
 
 function deliveryRelation(state: ContractState, candidate: DeliverData): ReadyPreview["previousContentId"] {
   const contentId = state.delivery?.data.integration.changeId;
@@ -132,9 +127,6 @@ async function targetAnswer(
 function blockedPreview(contractId: ContractState["id"], reason: MechanicalPreparationRefusal): DeliveryPreviewReport {
   return { kind: "blocked", contractId, reason: compactPreparationReason(reason) };
 }
-type PreviewRefusal =
-  | Exclude<import("../core/verbs/deliver.js").DeliverRefusal, { kind: "document-moved" }>
-  | import("../verification/declaration.js").VerificationDeclarationRefusal;
 
 function compactTargetLag(
   lag: z.output<typeof contractTargetLagSchema> | undefined,
@@ -201,28 +193,26 @@ async function observeReadyPreview(
 }
 
 /** A native read answer, never an admission or an invitation to run Verification. */
-export async function previewDeliveryOperation(
-  input: DeliveryPreviewOperationInput,
-): Promise<Exclude<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>, { kind: "retry" }>> {
-  input.signal?.throwIfAborted();
-  const observed = await observeContractsAt(input.scope, input.channel, [input.contractId], { after: true });
-  const state = activeContract(observed.decision, input.contractId);
-  if ("kind" in state) return { kind: "refused", refusal: state };
+export async function previewDeliveryOperation(input: DeliveryPreviewOperationInput) {
+  const { scope, channel, contractId } = input;
+  scope.signal?.throwIfAborted();
+  const observed = await observeContractsAt(scope, channel, [contractId], { after: true });
+  const state = activeContract(observed.decision, contractId);
+  if ("kind" in state) return { kind: "refused", contractId, reason: state } as const;
   const targetRefusal = targetContractRefusal(observed.decision, state.coordinates.target);
-  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
+  if (targetRefusal !== undefined) return { kind: "refused", contractId, reason: targetRefusal } as const;
   const derivation = input.deriveDocument(state);
   if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused")
-    return { kind: "refused", refusal: derivation.verification.refusal };
-  const appointment = await readManagedWorktreeAppointment(input.scope, state.id);
+    return { kind: "refused", contractId, reason: derivation.verification.refusal } as const;
+  const appointment = await readManagedWorktreeAppointment(scope, contractId);
   if (appointment.kind === "failed") throw new Error(appointment.diagnostic);
-  if (appointment.kind === "unappointed")
-    return accepted(state, [], blockedPreview(state.id, { kind: "worktree-missing" }));
+  if (appointment.kind === "unappointed") return blockedPreview(contractId, { kind: "worktree-missing" });
   const prepared = await prepareDelivery(
-    input.scope,
+    scope,
     {
-      contractId: state.id,
+      contractId,
       coordinates: state.coordinates,
-      recordedIntegrations: deliveryIntegrationSnapshots(contractJournal(observed.journals, state.id).entries),
+      recordedIntegrations: deliveryIntegrationSnapshots(contractJournal(observed.journals, contractId).entries),
       appointment,
     },
     {
@@ -232,15 +222,11 @@ export async function previewDeliveryOperation(
       includeDirty: input.includeDirty ?? false,
     },
   );
-  if (prepared.kind === "refused") return accepted(state, [], blockedPreview(state.id, prepared.refusal));
-  return accepted(
+  if (prepared.kind === "refused") return blockedPreview(contractId, prepared.refusal);
+  return await observeReadyPreview(input, {
     state,
-    [],
-    await observeReadyPreview(input, {
-      state,
-      candidate: prepared.data,
-      workspacePath: appointment.path,
-      decision: observed.decision,
-    }),
-  );
+    candidate: prepared.data,
+    workspacePath: appointment.path,
+    decision: observed.decision,
+  });
 }

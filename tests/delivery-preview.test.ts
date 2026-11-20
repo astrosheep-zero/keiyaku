@@ -13,7 +13,6 @@ import { decodeContractDocument, verificationDefinition } from "../src/body/deco
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { contractId, entryUlid } from "../src/core/facts/types.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
-import { previewDeliveryOperation } from "../src/protocol/delivery-preview.js";
 import { admitDeliveryOperation, prepareDelivery } from "../src/protocol/deliver.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
@@ -95,40 +94,21 @@ test("a stale document derivation is refused by the pure decision and restarts t
   });
 });
 
-test("preview without Verification still returns an accepted ready candidate", async () => {
+test("targetless preview without Verification returns ready without changing the journal", async () => {
   const repository = repositoryWithMain();
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: verificationBody(null),
-      // This preview fixture observes a deliberately targetless Contract.
-      target: null,
-    }),
+  const { kei } = accepted(
+    await Keis.of(await Repo.at({ path: repository.path })).bind({ terms: verificationBody(null), target: null }),
   );
-
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const contractId = present(await bound.kei.state()).id;
-  const observed = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, contractId));
-  const decoded = decodeContractDocument(observed.state!.terms.document.bytes);
-  const result = await withGitDecodeChannel(scope, (channel) =>
-    previewDeliveryOperation({
-      scope,
-      channel,
-      contractId,
-      deriveDocument: () => ({
-        document: decoded.document.key,
-        bytes: decoded.document.bytes,
-        title: decoded.title,
-        verification: prepareVerificationDeclaration(verificationDefinition(decoded)),
-      }),
-    }),
-  );
-  assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
-  assert.deepEqual(result.facts, []);
-  assert.equal(result.head, observed.state!.head);
-  assert.ok(result.value.kind === "ready");
-  assert.equal(result.value.diff, undefined);
-  assert.equal(result.value.unmetGates, undefined);
-  assert.equal(result.value.target, undefined);
+  const { head } = present(await kei.state());
+  const history = await kei.history();
+  const result = await kei.previewDelivery();
+  assert.ok(result.kind === "ready");
+  assert.equal(result.contractId, kei.id);
+  assert.equal(result.diff, undefined);
+  assert.equal(result.unmetGates, undefined);
+  assert.equal(result.target, undefined);
+  assert.equal(present(await kei.state()).head, head);
+  assert.deepEqual(await kei.history(), history);
 });
 
 test("ungated preview reports undeclared without executing declarations or admitting testimony", async () => {

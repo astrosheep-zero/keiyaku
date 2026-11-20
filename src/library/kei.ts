@@ -495,22 +495,16 @@ export class Kei {
     const requireBranchesToBeUpToDate = derivedFreshness(this.composition);
     return await this.local(
       "deliver-preview",
-      async (accumulator, localChannel, scope): Promise<DeliveryPreviewOutcome> => {
-        const admission = await previewDeliveryOperation({
+      (_accumulator, channel, scope) =>
+        previewDeliveryOperation({
           scope,
-          channel: localChannel,
-          progress: accumulator,
+          channel,
           contractId: this.id,
           deriveDocument: derivedDocument,
           includeDirty,
           showDiff,
           requireBranchesToBeUpToDate,
-          ...(scope.signal === undefined ? {} : { signal: scope.signal }),
-        });
-        return admission.kind === "refused"
-          ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
-          : admission.value;
-      },
+        }),
       signal,
       observer,
     );
