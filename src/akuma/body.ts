@@ -1,5 +1,6 @@
 import { projectAkumaBirth } from "./caller.js";
 import { appendFile } from "node:fs/promises";
+import { boundedDiagnostic } from "../settings.js";
 import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import { driveTurn } from "./turn-drive.js";
@@ -122,11 +123,6 @@ async function bornSoul(
     throw new Error("Akuma birth identity does not match its directory");
   }
   return { soul: born, created: result === "born" };
-}
-
-function boundedDiagnostic(error: unknown): string {
-  const text = diagnostic(error);
-  return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
 }
 
 export async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, error: unknown): Promise<void> {

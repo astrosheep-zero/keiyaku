@@ -111,8 +111,13 @@ function freezeJson<T>(value: T): T {
   return value;
 }
 
-function bounded(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 500);
+export function boundedDiagnostic(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  const limit = 500;
+  const omission = "...";
+  if (text.length <= limit) return text;
+  const prefix = text.slice(0, limit - omission.length);
+  return `${/[\uD800-\uDBFF]$/.test(prefix) ? prefix.slice(0, -1) : prefix}${omission}`;
 }
 
 async function readScope(path: string): Promise<LoadedScope> {
@@ -121,7 +126,7 @@ async function readScope(path: string): Promise<LoadedScope> {
     bytes = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { state: { kind: "absent", path } };
-    return { state: { kind: "failed", path, diagnostic: bounded(error) } };
+    return { state: { kind: "failed", path, diagnostic: boundedDiagnostic(error) } };
   }
   try {
     const decoded: SettingsEntry["value"] = JSON.parse(bytes);
@@ -130,7 +135,7 @@ async function readScope(path: string): Promise<LoadedScope> {
     const root = freezeJson(decoded);
     return { state: { kind: "read", path }, root };
   } catch (error) {
-    return { state: { kind: "failed", path, diagnostic: bounded(error) } };
+    return { state: { kind: "failed", path, diagnostic: boundedDiagnostic(error) } };
   }
 }
 

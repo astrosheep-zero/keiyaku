@@ -37,7 +37,7 @@ import { errorCategory, KeiyakuError } from "../errors.js";
 import { publishDispatch, readDispatch } from "../dispatch/index.js";
 import { akumaAliasSchema, parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
-import type { Settings } from "../settings.js";
+import { boundedDiagnostic, type Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
 import { requireInput, requireMarkdown as text, nonblank, optionalNonblank, optionalSignal } from "./input.js";
@@ -206,14 +206,9 @@ function callSeat(contract: unknown) {
   return seat;
 }
 
-function pluginDiagnostic(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
-}
-
 async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurrence: string): Promise<void> {
   try {
-    await appendFile(paths.log, `plugin ${occurrence} failed: ${pluginDiagnostic(error)}\n`);
+    await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
   } catch {
     // Plugin diagnostic loss must not change an already admitted call.
   }

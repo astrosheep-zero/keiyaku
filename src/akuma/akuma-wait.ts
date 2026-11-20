@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedDiagnostic as diagnostic } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import {
@@ -195,9 +196,4 @@ export async function executeWaitAkuma(
   } finally {
     observer.clear();
   }
-}
-
-function diagnostic(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
 }

@@ -3,7 +3,7 @@ import { registerHooks } from "node:module";
 import { isAbsolute, join, posix, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { Settings, type SettingsEntry } from "../settings.js";
+import { boundedDiagnostic, Settings, type SettingsEntry } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type {
   KeiyakuPlugin,
@@ -16,7 +16,6 @@ import type {
   PluginWaitDeferralInput,
 } from "./public.js";
 
-const DIAGNOSTIC_LIMIT = 500;
 const PLUGIN_ATTEMPT_TIMEOUT_MS = 5_000;
 const PLUGIN_NAMESPACE = "plugins";
 const SQUARE_PLUGIN_PACKAGE = "@astrosheep/keiyaku-plugin-square";
@@ -67,7 +66,7 @@ export function reportPluginDiagnostic(
   if (report === undefined) return;
   try {
     const detail = error instanceof Error ? error.message : String(error);
-    void Promise.resolve(report(`plugin ${subject} ${stage}: ${detail}`.slice(0, DIAGNOSTIC_LIMIT))).catch(() => {});
+    void Promise.resolve(report(boundedDiagnostic(`plugin ${subject} ${stage}: ${detail}`))).catch(() => {});
   } catch {
     // Diagnostics are optional side effects too.
   }
