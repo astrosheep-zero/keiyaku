@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { AkumaId, AkumaTellResult } from "@astrosheep/keiyaku";
 
 const text = z.string();
 const turnHistoryIdPattern = /^turn\/[1-9][0-9]*$/u;
@@ -64,7 +63,7 @@ export const historySchema = z.strictObject({
 });
 
 const subject = {
-  akumaId: text.regex(/^aku\/[^/\s]+\/[0-9a-f]{8}$/u).transform((value) => value as AkumaId),
+  akumaId: text.regex(/^aku\/[^/\s]+\/[0-9a-f]{8}$/u),
   tellId: text,
   turn: turnHistoryId.exactOptional(),
 };
@@ -73,6 +72,8 @@ const failure = z.discriminatedUnion("stage", [
   z.strictObject({ stage: z.literal("confirmation"), reason: z.enum(["deadline", "hung", "untidy", "stopped"]), diagnostic: text }),
   z.strictObject({ stage: z.literal("observation"), diagnostic: text }),
 ]);
+// Paseo refuses any import, even type-only, that resolves into the package
+// containing this plugin; tests pin core Tell results to this schema.
 export const tellSchema = z.discriminatedUnion("result", [
   z.strictObject({ result: z.literal("told"), ...subject }),
   z.strictObject({ result: z.literal("failed"), ...subject,
@@ -83,6 +84,7 @@ export const tellSchema = z.discriminatedUnion("result", [
     ]).exactOptional(),
     failures: z.tuple([failure], failure).readonly(),
   }),
-]) satisfies z.ZodType<Extract<AkumaTellResult, { result: string }>>;
+]);
+export type TellAdmission = z.output<typeof tellSchema>;
 export type History = z.output<typeof historySchema>;
 export type Row = History["rows"][number];

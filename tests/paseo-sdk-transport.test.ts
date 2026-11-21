@@ -12,6 +12,7 @@ import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
 import { historySchema, tellSchema, type History } from "../plugins/paseo/plugin/server/keiyaku.js";
+import type { AkumaTellResult } from "../src/index.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
@@ -583,6 +584,8 @@ test("the installed SDK admits one Tell before submission and correlates its lat
   assert.equal(pending.length, 1);
   const tellId = pending[0]!.id;
   assert.deepEqual(admitted, { result: "told", akumaId: value.allocated.id, tellId });
+  const coreTellFitsMirror: [Extract<AkumaTellResult, { result: string }>] extends [zod.input<typeof tellSchema>] ? true : false = true;
+  assert.ok(coreTellFitsMirror);
   assert.deepEqual(tellSchema.parse(admitted), admitted);
 
   const stream = transport.stream(root, value.allocated.id, t.signal)[Symbol.asyncIterator]();

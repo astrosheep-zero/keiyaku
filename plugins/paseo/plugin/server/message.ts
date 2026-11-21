@@ -1,7 +1,6 @@
 import type { ProviderEvent, ProviderPrompt } from "@getpaseo/plugin/server/provider";
-import type { AkumaTellResult } from "@astrosheep/keiyaku";
-/** The installed native owner validates this crossing value. */
-export type TellAdmission = Extract<AkumaTellResult, { result: string }>;
+import type { TellAdmission } from "./keiyaku.js";
+export type { TellAdmission };
 export type AdmittedMessage = Readonly<{ tellId: string; text: string; sequence?: number; at?: string }>;
 /** Submit one plain-text Tell and return its admission receipt. */
 export type Tell = (world: string, akuId: string, signal: AbortSignal, text: string) => Promise<TellAdmission>;
