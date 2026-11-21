@@ -6,18 +6,19 @@ import { Akumas, Keis, Keiyaku, Repo, World } from "../src/index.js";
 import { HeldAkumaLeash } from "../src/akuma/heart/index.js";
 import { allocatedHeart, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { withGitShim } from "./support/git.js";
-import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
+import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
 
-test("Contract catalogues select terminal journals under one order without retired-workspace reads", async () => {
+test("Contract catalogues filter settled lifecycle before the bound", async () => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
   const claimed = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
   accepted(await claimed.kei.deliver({}));
-  assert.equal(present(await claimed.kei.state()).terminal?.kind, "claimed");
+  // The settled catalogue below reports this Contract's exact phase as "claimed"; the separate
+  // state read only repeated that journal fact, so it goes and the filtered output stays the witness.
   const abandoned = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
   accepted(await abandoned.kei.abandon({}));
   const active = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
@@ -36,7 +37,9 @@ test("Contract catalogues select terminal journals under one order without retir
       ]));
       assert.ok(settled.rows?.every(row => row.attention === undefined));
       assert.doesNotMatch(readFileSync(trace, "utf8"), /status --porcelain|rev-list|worktree list/u);
-      const bounded = await traced.list({ selection: "settled", limit: 1 });
+      // The bound is a product call, not a trace witness: the first call already proved no
+      // worktree/status/rev-list read, so this one runs without the wrapper's extra process.
+      const bounded = await contracts.list({ selection: "settled", limit: 1 });
       assert.deepEqual(bounded.rows, settled.rows?.slice(0, 1));
       assert.equal(bounded.more, true);
     },

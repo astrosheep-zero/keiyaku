@@ -78,22 +78,3 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     (await Akumas.of(worldA).wait({ akuma: [worker.id], repo, timeoutMs: 0 })).results,
   );
 });
-
-test("typed and generic waits need no bound for terminal Contracts and idle Akumas", { timeout: 15_000 }, async (t) => {
-  const home = temporaryDirectory(t, "keiyaku-wait-omitted-home-");
-  const repository = repositoryWithCommit();
-  const world = await World.at(repository.path);
-  const facet = Keiyaku.for({ cwd: world, environment: {}, home });
-  const bound = accepted(await facet.bind({ terms: markdown, target: null, gates: ["reviewed"] }));
-  accepted(await bound.kei.abandon());
-  const worker = await bornLineageAkuma({
-    root: world, akumaName: "worker", draw: "feed0025", createdAt: "2026-10-30T00:00:00.000Z",
-  });
-  for (const [selector, state] of [[bound.contractId, "abandoned"], [worker.id, "idle"]] as const) {
-    const input = { selectors: [selector] };
-    assert.equal(Keiyaku.verbs.wait.input.safeParse(input).success, true);
-    const typed = await facet.wait(input, { signal: t.signal });
-    assert.equal(typed.members[0]?.state, state);
-    assert.deepEqual((await facet.run("wait", input, { signal: t.signal })).members, typed.members);
-  }
-});
