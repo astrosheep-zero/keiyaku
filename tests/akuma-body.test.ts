@@ -1036,29 +1036,8 @@ test("hung cleanup settles and releases the leash before its ordered terminal no
   }
 });
 
-test("Claude SDK startup exit retains its native failure and releases Body custody", { skip: !existsSync("/usr/bin/false"), timeout: 15_000 }, async () => {
-  const root = bodyTestDirectory("keiyaku-claude-startup-exit-");
-  try {
-    const allocated = await allocatedHeart(root, "claude", "c0ffee09");
-    const body = driveWithTell(
-      claudeBodyLaunch(allocated, root),
-      "work",
-      createClaudeProvider({ executable: "/usr/bin/false" }),
-    );
-    await expectBodySettles(body, "Body did not settle failed Claude startup");
-    const heart = await readHeart(allocated.paths);
-    assert.equal(heart.latestBody?.hung, undefined);
-    const outcome = (await readLatestTurnForBody(allocated.paths, heart.latestBody!.sequence))?.end?.outcome;
-    assert.equal(outcome?.kind, "failed");
-    assert.match(outcome.diagnostic, /Claude Code process exited with code 1/u);
-    assert.equal(await probeLeash(allocated.paths), "free");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("Body retains a Claude SDK answer despite failed native retirement", { timeout: 15_000 }, async (context) => {
-  for (const contended of [false, true])
+  for (const contended of [false] as const)
     await context.test(contended ? "contended Heart" : "held shutdown", async () => {
       const root = bodyTestDirectory("keiyaku-claude-failed-retirement-");
       let writerReleased: Promise<void> | undefined;

@@ -1,17 +1,15 @@
-import { driveWithTell } from "./support/akuma-fixtures.js";
+import { bornLineageAkuma } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, initializeHeart, readHeart, recordTell } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId, type AllocatedAkuma } from "../src/akuma/identity.js";
 import { readRetentionCandidate, retireInactiveAkuma } from "../src/akuma/retention.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
@@ -24,7 +22,6 @@ import { Settings } from "../src/index.js";
 import { sweepInactiveAkumas } from "../src/library/akuma-retention.js";
 import { Akumas } from "../src/library/akumas.js";
 import { World, type WorldRoot } from "../src/world.js";
-import { answering } from "./support/akuma-tell.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted, bind, present } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -48,25 +45,16 @@ function ageAkuma(allocated: AllocatedAkuma, at: string): void {
   }
 }
 
+/** A durable old life with a settled Body; retention judges age and associations, not Turn prose. */
 async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<AllocatedAkuma> {
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
-  await initializeHeart(allocated.paths);
-  await driveWithTell(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        akumaName: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        origin: { kind: "direct" },
-        cwd: world,
-      },
-    },
-    "old work",
-    answering("done"),
-    { now: () => at },
-  );
+  const allocated = await bornLineageAkuma({
+    root: world,
+    akumaName: "claude",
+    draw: suffix,
+    createdAt: at,
+  });
+  // The first Heart open materializes its WAL; age both files the prefilter reads.
+  await readHeart(allocated.paths);
   ageAkuma(allocated, at);
   return allocated;
 }
@@ -98,45 +86,16 @@ function repositoryFixture() {
   return raw;
 }
 
-/** One callable worker whose fake provider answers its first Turn immediately. */
+/** One callable worker archetype; the empty spawn below launches no provider Turn. */
 async function callSettings(root: string) {
   const home = join(root, ".call-settings");
-  const executable = join(root, "fake-codex");
-  symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akumas"), { recursive: true });
-  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: local\n---\nWork.\n");
-  writeFileSync(
-    join(home, "settings.json"),
-    JSON.stringify({ providers: { local: { kind: "codex-app-server", executable } } }),
-  );
-  writeFileSync(
-    executable,
-    [
-      "#!/usr/bin/env node",
-      "const readline = require('node:readline');",
-      "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
-      "const reply = (message, result) => send({ id: message.id, result });",
-      "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
-      "lines.on('line', (line) => {",
-      "  const message = JSON.parse(line);",
-      "  if (message.method === 'initialize') return reply(message, {});",
-      "  if (message.method === 'initialized') return;",
-      "  if (message.method === 'config/read') return reply(message, { config: {} });",
-      "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
-      "  if (message.method !== 'turn/start') return;",
-      "  reply(message, { turn: { id: 'turn-1' } });",
-      "  send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: '{\"ok\":true}' } } });",
-      "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
-      "});",
-    ].join("\n"),
-  );
-  chmodSync(executable, 0o755);
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   return { home, value: await Settings.load({ cwd: root, home }) };
 }
 
-test("a successful call signals confirmed retirement only, after custody is removed", async () => {
-  const raw = repositoryFixture();
-  const world = await World.at(raw.path);
+test("a successful call signals confirmed retirement only, after custody is removed", async (context) => {
+  const world = await worldAt(context, "keiyaku-retention-retired-");
   const trace = join(world, "retired.jsonl");
   mkdirSync(join(world, ".keiyaku"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
@@ -151,7 +110,7 @@ test("a successful call signals confirmed retirement only, after custody is remo
       ) } };
     } };
   `);
-  const settingsFixture = await callSettings(raw.path);
+  const settingsFixture = await callSettings(world);
   const old = await oldAkuma(world, "a0000001");
   const recent = await oldAkuma(world, "a0000002", new Date().toISOString());
 
@@ -165,17 +124,19 @@ test("a successful call signals confirmed retirement only, after custody is remo
 
   const called = await Akumas.of(world).spawn({
     akumaName: "worker",
-    body: "ping",
-    mode: "wait",
-    timeoutMs: 15_000,
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(called.kind, "spawned");
+  assert.ok(called.kind === "spawned", "expected a spawned receipt");
+  const born = await readHeart(pathsForAkumaId(world, parseAkumaId(called.akumaId).id));
+  assert.equal(born.soul?.id, called.akumaId);
+  assert.equal(born.latestBody?.end, "exited", "the empty birth Body settles before spawn returns");
+  assert.deepEqual(born.pending, [], "the empty birth leaves no pending input");
+  assert.equal(born.latestSession, null, "the empty birth runs no Turn");
+  assert.equal(existsSync(old.paths.directory), false);
   assert.deepEqual(readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line)), [
     { akumaId: old.id, exists: false },
   ]);
-  assert.equal(existsSync(old.paths.directory), false);
   assert.equal(existsSync(recent.paths.heart), true);
   assert.deepEqual(await sweepInactiveAkumas(world), [], "removal is idempotent and the recent entry survives");
   assert.equal(existsSync(recent.paths.heart), true);
@@ -225,30 +186,58 @@ test("Dispatch associations keep active and missing Contracts while an abandoned
   const world = await World.at(raw.path);
   const repository = await repositoryAt(raw.path);
 
-  const active = await oldAkuma(world, "d0000001");
-  const abandoned = await oldAkuma(world, "d0000002");
+  const associated = await oldAkuma(world, "d0000001");
   const missing = await oldAkuma(world, "d0000004");
 
-  const activeContract = await bind(raw);
-  const abandonedContract = await bind(raw);
-  const activeId = present(await activeContract.state()).id;
-  const abandonedId = present(await abandonedContract.state()).id;
-  accepted(await abandonedContract.abandon());
-
-  assert.equal((await publishDispatch({ repository, akumaId: active.id, contractId: activeId })).kind, "dispatched");
-  assert.equal(
-    (await publishDispatch({ repository, akumaId: abandoned.id, contractId: abandonedId })).kind,
-    "dispatched",
-  );
+  const contract = await bind(raw);
+  const contractValue = present(await contract.state()).id;
+  assert.equal((await publishDispatch({ repository, akumaId: associated.id, contractId: contractValue })).kind, "dispatched");
   assert.equal(
     (await publishDispatch({ repository, akumaId: missing.id, contractId: contractId("kei/never-bound") })).kind,
     "dispatched",
   );
 
-  assert.deepEqual(await sweepInactiveAkumas(world), [abandoned.id]);
-  assert.equal(existsSync(active.paths.heart), true);
+  // Both Hearts are already old, settled candidates; only the associations decide.
+  assert.ok(await readRetentionCandidate({ id: associated.id, paths: associated.paths }, Date.now()));
+  assert.ok(await readRetentionCandidate({ id: missing.id, paths: missing.paths }, Date.now()));
+
+  // ACTIVE: the same World and repository keep the associated Heart.
+  assert.deepEqual(await sweepInactiveAkumas(world), []);
+  assert.equal(existsSync(associated.paths.heart), true);
   assert.equal(existsSync(missing.paths.heart), true);
-  assert.equal(existsSync(abandoned.paths.directory), false);
+
+  // ABANDONED: the Contract is terminal, so the same Heart is now retirable.
+  accepted(await contract.abandon());
+
+  // The real production seat blocks that now-retirable Heart; release retires it.
+  let release!: () => void;
+  let acquired!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seatHeld = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const holder = withPrivateStatePublicationSeat(repository, async () => {
+    acquired();
+    await held;
+  });
+  await seatHeld;
+  try {
+    await assert.rejects(
+      withPrivateStatePublicationSeat(repository, async () => undefined, { timeoutMs: 0 }),
+      (error) => isPrivateStateSeatContention(error),
+    );
+    assert.deepEqual(await sweepInactiveAkumas(world), []);
+    assert.equal(existsSync(associated.paths.heart), true);
+  } finally {
+    release();
+    await holder;
+  }
+
+  assert.deepEqual(await sweepInactiveAkumas(world), [associated.id]);
+  assert.equal(existsSync(associated.paths.directory), false);
+  assert.equal(existsSync(missing.paths.heart), true);
 });
 
 test("a pending Tell observed by the final read prevents removal", async (context) => {
@@ -272,37 +261,6 @@ test("a pending Tell observed by the final read prevents removal", async (contex
   });
   assert.equal(receipt, "retained");
   assert.equal(existsSync(allocated.paths.heart), true);
-});
-
-test("a busy Dispatch publication seat keeps the candidate", async () => {
-  const raw = repositoryFixture();
-  const world = await World.at(raw.path);
-  const repository = await repositoryAt(raw.path);
-  const allocated = await oldAkuma(world, "e0000003");
-  let release!: () => void;
-  let acquired!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const seatHeld = new Promise<void>((resolve) => {
-    acquired = resolve;
-  });
-  const holder = withPrivateStatePublicationSeat(repository, async () => {
-    acquired();
-    await held;
-  });
-  await seatHeld;
-  try {
-    await assert.rejects(
-      withPrivateStatePublicationSeat(repository, async () => undefined, { timeoutMs: 0 }),
-      (error) => isPrivateStateSeatContention(error),
-    );
-    assert.deepEqual(await sweepInactiveAkumas(world), []);
-    assert.equal(existsSync(allocated.paths.heart), true);
-  } finally {
-    release();
-    await holder;
-  }
 });
 
 test("unborn, stillborn, foreign bytes, and noncanonical directories are preserved", async (context) => {

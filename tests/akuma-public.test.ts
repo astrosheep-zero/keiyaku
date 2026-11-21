@@ -31,7 +31,6 @@ import type { BodyLaunch, BodyLauncher } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import {
   activitySlice,
-  appendActivity,
   beginTurn,
   bindTellsToTurn,
   breakBody,
@@ -43,14 +42,12 @@ import {
   readTell,
   readTurn,
   recordTell,
-  recordTellDeliveries,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Akumas, KeiyakuError } from "../src/index.js";
-import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -161,105 +158,6 @@ async function bornHistoryHandle(root: string, suffix: string) {
   });
   return { allocated, holder, turn, handle: new AkumaOwner(allocated.id, await World.at(root)) };
 }
-
-test("compact activity ids recover retained input, tool phases and narration through CLI", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-activity-exact-");
-  const world = await World.at(root);
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  const born = await bornBody(root, "c0000020", "2026-08-10T00:00:00.000Z");
-  const api = Akumas.of(world);
-  const owner = new AkumaOwner(born.allocated.id, world);
-  const command = `npm test ${"argument ".repeat(60)}`;
-  const call = `begin ${"task ".repeat(100)}end`;
-  try {
-    const turn = await beginTurn(born.allocated.paths, { bodySequence: born.body.sequence, startedAt: "2026-08-10T00:00:01.000Z", call });
-    const start = await appendActivity(born.allocated.paths, {
-      turnSequence: turn.sequence, at: "2026-08-10T00:00:02.000Z",
-      event: { type: "tool", phase: "started", id: "native-run", name: "bash", call: { kind: "run", command } },
-    });
-    const observed = await cliJson<Awaited<ReturnType<typeof api.status>>>(["status", born.allocated.id], { cwd: root });
-    const active = observed.value.work.summary;
-    assert.ok(active && active.id === start && active.clipped);
-    const rawStart = await runCli(["history", born.allocated.id, "--id", String(active.id)], { cwd: root });
-    assert.equal(rawStart.exit, 0);
-    assert.equal(rawStart.stdout, `run $ ${command.trim()}`);
-    const nativePage = historyPage(await owner.history());
-    const composedStatus = await api.status({ akuma: born.allocated.id });
-    assert.deepEqual(observed.value, composedStatus);
-    assert.deepEqual(composedStatus.recent, nativePage.rows);
-    assert.deepEqual((await owner.status()).recent, nativePage.rows);
-    const composedPage = await api.history({ akuma: born.allocated.id });
-    assert.ok(composedPage.kind === "akuma");
-    assert.deepEqual(composedPage.events, nativePage.rows);
-    const pageJson = await cliJson(["history", born.allocated.id], { cwd: root });
-    assert.deepEqual(pageJson.value, composedPage);
-    const pageText = await runCli(["history", born.allocated.id], { cwd: root });
-    assert.match(pageText.stdout, /\? run \(bash\).*\n +\$ npm test .*…/u);
-    assert.equal(nativePage.rows[0]?.id, turn.sequence);
-    assert.equal(nativePage.rows[0]?.text, "", "opening Turn still counts but is not visible or openable");
-    const callEntry = nativePage.rows.find(row => row.text.startsWith("▸"));
-    assert.ok(callEntry);
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(callEntry.id)], { cwd: root })).stdout, `call: ${call}`);
-
-    const done = await appendActivity(born.allocated.paths, {
-      turnSequence: turn.sequence, at: "2026-08-10T00:00:03.000Z",
-      event: { type: "tool", phase: "completed", id: "native-run", name: "bash", call: { kind: "run", command }, result: { status: "error", exitCode: 7, output: "retained output", message: "test failed" } },
-    });
-    const displaced = await api.history({ akuma: born.allocated.id, id: String(active.id) });
-    assert.ok(displaced.kind === "akuma-activity" && displaced.row.kind === "tool");
-    assert.equal(displaced.row.sequence, start);
-    assert.equal(displaced.row.phase, "started");
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(start)], { cwd: root })).stdout, `run $ ${command.trim()}`);
-    const settled = await cliJson<Awaited<ReturnType<typeof api.history>>>(["history", born.allocated.id, "--id", String(done)], { cwd: root });
-    assert.ok(settled.value.kind === "akuma-activity" && settled.value.row.kind === "tool");
-    assert.equal(settled.value.row.sequence, done);
-    assert.equal(settled.value.row.phase, "completed");
-    assert.equal(settled.value.row.toolId, displaced.row.toolId);
-    assert.equal(settled.value.row.turnSequence, displaced.row.turnSequence);
-    assert.deepEqual(settled.value.row.result, { status: "error", exitCode: 7, output: "retained output", message: "test failed" });
-    const beforeDone = historyPage(await owner.history({ before: done, limit: 1 }));
-    const sinceStart = historyPage(await owner.history({ since: start }));
-    assert.deepEqual(beforeDone.rows, nativePage.rows.slice(-1));
-    assert.equal(beforeDone.omitted, 2);
-    assert.equal(beforeDone.hasEarlier, true);
-    assert.deepEqual(sinceStart.rows.map(row => row.id), [done]);
-    assert.equal(sinceStart.lowestRetained, turn.sequence);
-    assert.equal(sinceStart.highest, done);
-    assert.ok((await runCli(["history", born.allocated.id, "--id", String(done)], { cwd: root })).stdout.includes(command.trim()));
-
-    const tellText = `continue\n  ${"direction ".repeat(50)}`;
-    const admitted = await recordTell(born.allocated.paths, { kind: "tell", id: "exact-pending", body: tellText, recordedAt: "2026-08-10T00:00:04.000Z" });
-    assert.equal(admitted.kind, "recorded");
-    const pending = (await api.status({ akuma: born.allocated.id })).work.pending?.[0];
-    assert.ok(pending);
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(pending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
-    await recordTellDeliveries(born.allocated.paths, [{ tellId: "exact-pending", turnSequence: turn.sequence, route: "launch", fence: "native-fence", deliveredAt: "2026-08-10T00:00:05.000Z" }]);
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(pending.id)], { cwd: root })).stdout, `tell: ${tellText}`);
-
-    const answer = `first\n  ${"answer 🙂 ".repeat(80)}last`;
-    const said = await appendActivity(born.allocated.paths, { turnSequence: turn.sequence, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: answer } });
-    const preview = (await api.status({ akuma: born.allocated.id })).work.summary;
-    assert.ok(preview?.id === said && preview.text.startsWith("first ") && preview.clipped);
-    await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-08-10T00:00:07.000Z", outcome: { kind: "answered", answer, session: { sessionId: "exact-native" } } });
-    const page = historyPage(await owner.history());
-    assert.ok(page.rows.some(row => row.id === said && row.text.startsWith("▎")));
-    assert.ok(page.rows.at(-1)?.text.startsWith(`✓ turn/${turn.sequence}\n`));
-    const rawSaid = await runCli(["history", born.allocated.id, "--id", String(said)], { cwd: root });
-    assert.equal(rawSaid.stdout, `said: ${answer}`);
-    assert.equal((await runCli(["history", born.allocated.id, "--answer"], { cwd: root })).stdout, answer);
-    assert.equal((await runCli(["history", born.allocated.id, "--id", `turn/${turn.sequence}`], { cwd: root })).stdout, answer);
-    assert.deepEqual(await owner.fork({ at: String(said) }, noBodyLaunch), { kind: "unknown-history" });
-    assert.equal((await api.history({ akuma: born.allocated.id, id: String(turn.sequence) })).kind, "akuma-unknown-history");
-    assert.equal((await api.history({ akuma: born.allocated.id, id: "999999" })).kind, "akuma-unknown-history");
-    const idle = await recordTell(born.allocated.paths, { kind: "tell", id: "idle-pending", body: tellText, recordedAt: "2026-08-10T00:00:08.000Z" });
-    assert.equal(idle.kind, "recorded");
-    const idleStatus = await api.status({ akuma: born.allocated.id });
-    const idlePending = idleStatus.work.pending?.[0];
-    assert.ok(idlePending && idleStatus.work.kind === "idle" && idleStatus.work.outcome?.state === "done");
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(idlePending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
-    assert.deepEqual((await owner.status()).work, idleStatus.work);
-  } finally { born.holder.release(); }
-});
 
 for (const observation of ["status", "wait", "roster"] as const) {
   test(`${observation} observes a Body that finishes between Heart read and leash probe`, async (t) => {

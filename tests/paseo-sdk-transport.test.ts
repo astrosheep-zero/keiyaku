@@ -404,13 +404,16 @@ test("an idle frame is never bounded by the ordinary request timeout", async (t)
   await set({ streamHistory: frame(1) });
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
   assert.deepEqual(pulled(await stream.next()), [1], "opening the subscription is one bounded handshake");
-  await set({ streamHistory: frame(2), streamDelayMs: 1_200 });
-  assert.deepEqual(pulled(await stream.next()), [2],
-    "waiting for the next change is the observation's job, never a bounded request");
-  await set({ tellDelayMs: 1_200 });
-  await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"),
-    /timed out after 400ms/u,
-    "an ordinary request still carries its own bound");
+  await set({ streamHistory: frame(2), streamDelayMs: 1_200, tellDelayMs: 1_200 });
+  const idle = stream.next();
+  await Promise.all([
+    assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"),
+      /timed out after 400ms/u,
+      "an ordinary request still carries its own bound"),
+    idle.then((result) =>
+      assert.deepEqual(pulled(result), [2],
+        "waiting for the next change is the observation's job, never a bounded request")),
+  ]);
 });
 
 /**

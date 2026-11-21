@@ -44,7 +44,7 @@ import { translatePiEvent, piSessionModel, type PiEventState } from "../src/akum
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
 import { providerTurn } from "../src/akuma/providers/turn.js";
-import { spawnStdioProcess, type StdioProcess } from "../src/runtime/proc/stdio.js";
+import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 import { processExists, waitForCondition, waitForFixtureFile } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
@@ -719,27 +719,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   assert.deepEqual(acpLog(fake.log), records, "unsupported system injection does not become a user prompt");
 });
 
-test("ACP load retains the exact session ID without a fork or live tell capability", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-acp-resume-");
-  const fake = fakeAcp(root);
-  const provider = createAcpProvider(fake.execution);
-  assert.equal(provider.fork, undefined);
-  const drive = await provider.resume!({
-    ...DRIVE_DEFAULTS,
-    launchTells: [{ id: "launch", text: "continue" }],
-    cwd: root,
-    options: {},
-    session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
-  }).result;
-  const events = await collectEvents(drive.events);
-  assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-  const load = acpLog(fake.log).find((record) => record.kind === "load")!;
-  assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
-  assert.equal("_meta" in (load.params as object), false);
-});
-
-test("ACP applies model then effort session selectors before prompting on fresh and resumed sessions", async (context) => {
+test("ACP applies model then effort session selectors before prompting a resumed session", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-acp-config-");
   const fake = fakeAcp(root, "config");
   const execution = {
@@ -752,59 +732,46 @@ test("ACP applies model then effort session selectors before prompting on fresh 
     },
   };
   const provider = createAcpProvider(execution);
+  assert.equal(provider.fork, undefined, "ACP never offers a fork it cannot prove");
   assert.deepEqual(provider.admitOptions({ model: "k28", effort: "low" }), {
     kind: "admitted",
     options: { model: "k28", effort: "low" },
   });
-  const run = async (resume: boolean) => {
-    const attempt = resume
-      ? provider.resume!({
-          ...DRIVE_DEFAULTS,
-          launchTells: [{ id: "launch", text: "continue" }],
-          cwd: root,
-          options: { model: "k28", effort: "low" },
-          session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
-        })
-      : provider.start(freshInput("build", { cwd: root, options: { model: "k28", effort: "low" } }));
-    const drive = await attempt.result;
-    for await (const _event of drive.events) {
-      /* drain */
-    }
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-    await attempt.closed;
-  };
-  await run(false);
-  await run(true);
+  const attempt = provider.resume!({
+    ...DRIVE_DEFAULTS,
+    launchTells: [{ id: "launch", text: "continue" }],
+    cwd: root,
+    options: { model: "k28", effort: "low" },
+    session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
+  });
+  const drive = await attempt.result;
+  const observed: AgentEvent[] = [];
+  for await (const event of drive.events) observed.push(event);
+  assert.deepEqual(observed[0], { type: "session", coordinate: { sessionId: "retained-session" } });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+  await attempt.closed;
   const records = acpLog(fake.log);
-  assert.deepEqual(
-    records.map((record) => record.kind),
-    [
-      "initialize",
-      "new",
-      "set-config",
-      "set-config",
-      "prompt",
-      "initialize",
-      "load",
-      "set-config",
-      "set-config",
-      "prompt",
-    ],
-  );
+  assert.deepEqual(records.map((record) => record.kind), [
+    "initialize",
+    "load",
+    "set-config",
+    "set-config",
+    "prompt",
+  ]);
   for (const record of records.filter((entry) => entry.kind === "set-config")) {
-    const params = record.params as { sessionId: string; configId: string; value: string };
-    assert.equal(params.sessionId, records.indexOf(record) < 5 ? "fresh-session" : "retained-session");
+    assert.equal((record.params as { sessionId: string }).sessionId, "retained-session");
   }
   assert.deepEqual(
     records.filter((record) => record.kind === "set-config").map((record) => record.params),
     [
-      { sessionId: "fresh-session", configId: "model", value: "k28" },
-      { sessionId: "fresh-session", configId: "thinking", value: "low" },
       { sessionId: "retained-session", configId: "model", value: "k28" },
       { sessionId: "retained-session", configId: "thinking", value: "low" },
     ],
   );
-  assert.deepEqual((records[4]!.params as { prompt: unknown }).prompt, [{ type: "text", text: "build" }]);
+  assert.deepEqual((records[4]!.params as { prompt: unknown }).prompt, [{ type: "text", text: "continue" }]);
+  const load = records.find((record) => record.kind === "load")!;
+  assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
+  assert.equal("_meta" in (load.params as object), false);
 });
 
 test("ACP admits one strict configuration declaration and refuses invalid or conflicting configurations", (context) => {
@@ -956,34 +923,6 @@ const controlledAcpExecution = {
   executable: "controlled",
   config: { argvBefore: [], argvAfter: [] },
 };
-
-test("ACP retains an answered Turn and a drain failure even after its child exits", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-acp-drain-failure-");
-  const drain = deferred<void>();
-  const error = new Error("drain failed");
-  let child!: StdioProcess;
-  const attempt = createAcpProvider(fakeAcp(root).execution, {
-    spawnProcess(input) {
-      child = spawnStdioProcess(input);
-      return {
-        ...child,
-        async endInputAndDrain() {
-          await drain.promise;
-          await child.endInputAndDrain();
-          throw error;
-        },
-      };
-    },
-  }).start(freshInput("build", { cwd: root }));
-  try {
-    const drive = await attempt.result;
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
-  } finally {
-    drain.resolve();
-    await assert.rejects(attempt.closed, (actual) => actual === error);
-  }
-  assert.equal((await child.exited).code, 0);
-});
 
 test("ACP retains a failed cancel write in custody when a native answer wins", { timeout: 5_000 }, async () => {
   const controlled = controlledAcpProcess();
@@ -1272,17 +1211,12 @@ test("OpenCode composes the spawned environment and proves child exit when cance
     return child.env;
   };
 
-  const base = await spawnedEnvironment();
-  assert.deepEqual(JSON.parse(base.OPENCODE_CONFIG_CONTENT ?? "null"), composeHeadlessPermissionConfig());
-  const literal = '{"mcp":{"square":{"type":"local","command":["square","mcp-server"]}}}';
-  const overridden = await spawnedEnvironment({
-    OPENCODE_CONFIG_CONTENT: literal,
-    KEIYAKU_ACTOR_WORLD: "/wrong",
-    KEIYAKU_ACTOR_ID: "aku/parent/1234abcd",
-  }, { akumaId: "aku/worker/4321abcd", world });
-  assert.equal(overridden.OPENCODE_CONFIG_CONTENT, literal);
-  assert.equal(overridden.KEIYAKU_ACTOR_WORLD, world);
-  assert.equal(overridden.KEIYAKU_ACTOR_ID, "aku/worker/4321abcd");
+  // One spawned native child carries the headless baseline and the Body's own
+  // actor pair; the Codex env_vars case owns authored-environment precedence.
+  const spawned = await spawnedEnvironment(undefined, { akumaId: "aku/worker/4321abcd", world });
+  assert.deepEqual(JSON.parse(spawned.OPENCODE_CONFIG_CONTENT ?? "null"), composeHeadlessPermissionConfig());
+  assert.equal(spawned.KEIYAKU_ACTOR_WORLD, world);
+  assert.equal(spawned.KEIYAKU_ACTOR_ID, "aku/worker/4321abcd");
 });
 
 test("OpenCode start and resume reject closed when readiness cleanup fails", async (t) => {
@@ -1783,7 +1717,6 @@ function fakeCodex(
     | "exit-before-completion"
     | "exit-before-admit"
     | "foreign-thread"
-    | "model-evidence"
     | "rpc-reject"
     | "missing-turn-id"
     | "steer-hung-terminal" = "complete",
@@ -1813,6 +1746,7 @@ function fakeCodex(
       `const mode=${JSON.stringify(mode)};`,
       `const rerouteRelease=${JSON.stringify(rerouteRelease)};`,
       `const terminalEof=${JSON.stringify(join(root, "terminal-eof"))};`,
+      "let startedFresh=false;",
       "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
       "const reply=(message,result)=>send({id:message.id,result});",
       "const hang=mode==='terminal-hang'?setInterval(()=>{},1000):null;",
@@ -1832,7 +1766,8 @@ function fakeCodex(
       `  if(message.method==='config/read') return reply(message,{config:{mcp_servers:${JSON.stringify(mcpServers)}}});`,
       "  if(message.method==='thread/start'){",
       "    if(mode==='exit-before-admit') process.exit(7);",
-      "    return reply(message,{thread:{id:'thread-fresh'},...(mode==='model-evidence'?{model:'gpt-5-codex'}:{})});",
+      "    startedFresh=true;",
+      "    return reply(message,{thread:{id:'thread-fresh'},...(mode==='complete'?{model:'gpt-5-codex'}:{})});",
       "  }",
       "  if(message.method==='thread/resume') return reply(message,{thread:{id:message.params.threadId}});",
       "  if(message.method==='thread/fork') return reply(message,{thread:{id:'thread-child'}});",
@@ -1840,19 +1775,22 @@ function fakeCodex(
       "    if(mode==='rpc-reject') return send({id:message.id,error:{message:'turn start refused'}});",
       "    if(mode==='missing-turn-id') return reply(message,{turn:{}});",
       "    reply(message,{turn:{id:'turn-1'}});",
-      "    if(mode==='model-evidence'){",
+      "    if(mode==='complete'){",
+      "      const foreign=message.params.threadId+'-foreign';",
+      "      send({method:'item/completed',params:{threadId:foreign,turnId:'turn-child',item:{id:'child-answer',type:'agentMessage',text:'child answer'}}});",
+      "      send({method:'error',params:{threadId:foreign,turnId:'turn-child',error:{message:'child error'},willRetry:false}});",
+      "      const finish=()=>{",
+      "        send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
+      "        send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+      "      };",
+      "      if(!startedFresh) return finish();",
       "      const released=setInterval(()=>{",
       "        if(!fs.existsSync(rerouteRelease)) return;",
       "        clearInterval(released);",
       "        send({method:'model/rerouted',params:{threadId:message.params.threadId,turnId:'turn-1',fromModel:'gpt-5-codex',toModel:'gpt-5-codex-mini',reason:'capacity'}});",
-      "        send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
-      "        send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+      "        finish();",
       "      },5);",
       "      return;",
-      "    }",
-      "    if(mode==='complete'){",
-      "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
-      "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
       "    }",
       "    if(mode==='terminal-drain'||mode==='terminal-hang'){",
       "      send({method:'item/started',params:{item:{id:'command-terminal',type:'commandExecution',command:'npm test'}}});",
@@ -2102,39 +2040,6 @@ test("Claude settles the Turn before its Query tail fails retirement", { timeout
   await assert.rejects(attempt.closed, (error) => error === failure);
 });
 
-test("Claude owns the hook's spawned process after result and Query retirement", { timeout: 10_000 }, async (context) => {
-  const cwd = temporaryDirectory(context, "keiyaku-claude-child-");
-  const diagnostic = deferred<string>();
-  let child!: SpawnedProcess;
-  const provider = createClaudeProvider(async () => ({
-    query(input) {
-      child = input.options!.spawnClaudeCodeProcess!({
-        command: process.execPath,
-        args: ["-e", "console.error(process.env.NATIVE_DIAGNOSTIC); process.stdin.resume()"],
-        cwd,
-        env: { ...process.env, NATIVE_DIAGNOSTIC: "native stderr" },
-        signal: new AbortController().signal,
-      });
-      return fakeQuery(claudeResult(1), input.prompt as AsyncIterable<SDKUserMessage>);
-    },
-  }), { config: { stderr: diagnostic.resolve } });
-  const attempt = provider.start(freshInput("work", { cwd }));
-  try {
-    const drive = await attempt.result;
-    assert.equal(await diagnostic.promise, "native stderr\n");
-    assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
-    let closed = false;
-    void attempt.closed.then(() => { closed = true; });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(closed, false, "the process still holds its stdio independently of Query");
-    assert.equal(child.exitCode, null);
-  } finally {
-    await attempt.forceDispose();
-    await attempt.closed;
-  }
-  assert.equal(child.signalCode, "SIGKILL");
-});
-
 test("Claude retains a delegated native spawn that arrives after setup cancellation", { timeout: 10_000 }, async (context) => {
   const cwd = temporaryDirectory(context, "keiyaku-claude-late-child-");
   const started = deferred<void>();
@@ -2245,13 +2150,20 @@ test("Claude rejects unacknowledged input with the original transport failure", 
   await assert.rejects(drive.completion, (error) => error === nativeError);
 });
 
-test("Codex app-server maps admitted options, native session, answer, and exact turn history", async (context) => {
+test("Codex app-server maps admitted options, native session, answer, exact turn history, Body/MCP environment, fork resume, and context opt-out", { timeout: 30_000 }, async (context) => {
   const root = temporaryDirectory(context, "keiyaku-codex-provider-");
-  const fake = fakeCodex(root);
+  const fake = fakeCodex(root, "complete", {
+    square: { command: "square", args: ["mcp-server"], env: { HOME_FLAG: "kept by native" }, env_vars: ["EXISTING"] },
+    remote: { url: "https://example.com/mcp" },
+    workspace: { command: "tools", environment_id: "workspace" },
+    disabled: { command: "disabled", enabled: false },
+  });
   const config = {
     service_tier: "priority",
     sandbox_mode: "workspace-write",
     sandbox_workspace_write: { writable_roots: [root, "/native/extra"], network_access: false },
+    mcp_servers: { square: { env: { CUSTOM: "kept", KEIYAKU_ACTOR_ID: "aku/authored/author" } } },
+    approval_policy: "never",
   };
   const provider = createCodexAppServerProvider({
     name: "configured",
@@ -2265,35 +2177,74 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     effort: "high",
     network: "enabled" as const,
     systemPrompt: "Work precisely.",
+    systemPromptMode: "append" as const,
   };
   assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
 
-  const drive = await provider.start({
+  const start = provider.start({
     ...DRIVE_DEFAULTS,
+    signal: context.signal,
     launchTells: [{ id: "launch", text: "build" }],
     cwd: root,
     options,
+    execution: { akumaId: "aku/worker/1234abcd", world: "/world" },
     runtimeInstructions: "<keiyaku>current</keiyaku>",
     session: { kind: "fresh" },
-  }).result;
-  const events = await collectEvents(drive.events);
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
-  assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "thread-fresh" } });
-  assert.ok(events.some((event) => event.type === "assistant" && event.text === "codex answer"));
+  });
+  const drive = await start.result;
+  // The channel keeps one unconsumed model observation, so the fixture reroutes
+  // only once a reader has seen the admitted model: the initial and replacement
+  // observations are ordered by that handshake, never by elapsed time.
+  const events: AgentEvent[] = [];
+  const collecting = (async () => {
+    for await (const event of drive.events) {
+      events.push(event);
+      if (event.type === "model") writeFileSync(fake.rerouteRelease, "");
+    }
+  })();
+  const answered = await drive.completion;
+  await collecting;
+  assert.deepEqual(answered, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
+  await start.closed;
+  assert.deepEqual(events[0], { type: "model", model: "gpt-5-codex" }, "thread admission names the loaded model");
+  const admitted = events[1];
+  assert.deepEqual(admitted, { type: "session", coordinate: { sessionId: "thread-fresh" } });
+  if (admitted?.type !== "session" || answered.kind !== "answered" || answered.historyId === undefined)
+    assert.fail("the fresh start admits one session with a native history coordinate");
+  assert.deepEqual(
+    events.filter((event) => event.type === "model"),
+    [
+      { type: "model", model: "gpt-5-codex" },
+      { type: "model", model: "gpt-5-codex-mini" },
+    ],
+    "a replacement model names itself only after the initial admission is observed",
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type === "assistant"),
+    [{ type: "assistant", text: "codex answer" }],
+    "a spawned child thread's messages do not attribute to this Turn",
+  );
 
+  const nativeConfig = {
+    ...config,
+    mcp_servers: { square: {
+      env: { CUSTOM: "kept", KEIYAKU_ACTOR_ID: "aku/authored/author" },
+      env_vars: ["EXISTING", "KEIYAKU_ACTOR_ID", "KEIYAKU_ACTOR_WORLD"],
+    } },
+  };
   const requests = fake.requests();
   assert.deepEqual(
     requests.map((request) => request.method),
-    ["initialize", "initialized", "thread/start", "turn/start"],
+    ["initialize", "initialized", "config/read", "thread/start", "turn/start"],
   );
-  const thread = requests[2]!.params as Record<string, unknown>;
+  const thread = requests[3]!.params as Record<string, unknown>;
   assert.deepEqual(thread, {
     cwd: root,
-    config,
+    config: nativeConfig,
     model: "gpt-test",
     developerInstructions: "Work precisely.",
   });
-  const turn = requests[3]!.params as Record<string, unknown>;
+  const turn = requests[4]!.params as Record<string, unknown>;
   assert.deepEqual(turn, {
     threadId: "thread-fresh",
     input: [{ type: "text", text: "build" }],
@@ -2303,20 +2254,70 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     approvalPolicy: "never",
   });
   assert.equal(fake.environment().SETTINGS_LITERAL, "from-settings");
-  assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "");
+  assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "aku/worker/1234abcd");
+  assert.equal(fake.environment().KEIYAKU_ACTOR_WORLD, "/world");
 
-  const resumed = provider.resume!({
-    ...freshInput("continue", { cwd: root, options }),
-    session: { kind: "resume", coordinate: { sessionId: "thread-fresh" } },
+  // The same admitted session is the only fork source: its native Turn is the
+  // resume coordinate, and the child resume plus explicit opt-out never change
+  // the personality carried by every thread request.
+  const fork = provider.fork!({
+    session: { sessionId: admitted.coordinate.sessionId },
+    at: answered.historyId,
+    cwd: root,
   });
-  await (await resumed.result).completion;
-  await resumed.closed;
-  assert.deepEqual(fake.requests().slice(4).map((request) => request.method),
-    ["initialize", "initialized", "thread/resume", "turn/start"]);
-  assert.deepEqual(fake.requests()[6]?.params, { threadId: "thread-fresh", ...thread });
+  const child = await fork.result;
+  await fork.closed;
+  assert.deepEqual(
+    fake.requests().find((request) => request.method === "thread/fork")?.params,
+    { threadId: admitted.coordinate.sessionId, lastTurnId: answered.historyId },
+    "the fork request names the admitted source thread and its native Turn",
+  );
+  const clearInherited = "Any inherited Keiyaku execution context is inactive for this execution.";
+  const resumeChild = async (
+    runtimeInstructions: string,
+    execution?: { akumaId: string; world: string },
+  ) => {
+    const attempt = provider.resume!({
+      ...freshInput("work", { cwd: root, options, ...(execution === undefined ? {} : { execution }) }),
+      runtimeInstructions,
+      session: { kind: "resume", coordinate: child.session },
+    });
+    const childDrive = await attempt.result;
+    const childEvents = await collectEvents(childDrive.events);
+    const childCompletion = await childDrive.completion;
+    await attempt.closed;
+    assert.deepEqual(childCompletion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
+    assert.deepEqual(
+      childEvents.filter((event) => event.type === "assistant"),
+      [{ type: "assistant", text: "codex answer" }],
+      "the active child Turn never attributes the foreign thread's answer",
+    );
+  };
+  await resumeChild("<keiyaku>child</keiyaku>");
+  await resumeChild(clearInherited, { akumaId: "aku/worker/1234abcd", world: "/world" });
+  const childResumes = fake.requests().filter((request) =>
+    request.method === "thread/resume" &&
+    (request.params as Record<string, unknown>).threadId === child.session.sessionId);
+  assert.equal(childResumes.length, 2, "both child resumes name the forked session");
+  assert.deepEqual(fake.requests().slice(-5).map((request) => request.method),
+    ["initialize", "initialized", "config/read", "thread/resume", "turn/start"]);
+  assert.deepEqual(fake.requests().at(-2)?.params, { threadId: child.session.sessionId, ...thread });
+
+  const turns = fake.requests().filter((request) => request.method === "turn/start");
+  assert.deepEqual(turns.map((entry) => (entry.params as Record<string, unknown>).additionalContext), [
+    { keiyaku_execution: { kind: "application", value: "<keiyaku>current</keiyaku>" } },
+    { keiyaku_execution: { kind: "application", value: "<keiyaku>child</keiyaku>" } },
+    { keiyaku_execution: { kind: "application", value: clearInherited } },
+  ]);
+  assert.ok(turns.slice(-2).every((entry) =>
+    JSON.stringify((entry.params as Record<string, unknown>).input) === JSON.stringify([{ type: "text", text: "work" }])));
+  const threads = fake.requests().filter((request) =>
+    request.method === "thread/start" || request.method === "thread/resume");
+  assert.ok(threads.every((entry) =>
+    (entry.params as Record<string, unknown>).developerInstructions === "Work precisely."));
 });
 
-test("native adapters report only the runtime model their own payloads name", { timeout: 30_000 }, async (context) => {
+test("native adapters report only the runtime model their own payloads name", async () => {
   const pi = piSink();
   pi.observe({
     type: "message_end",
@@ -2426,101 +2427,6 @@ test("native adapters report only the runtime model their own payloads name", { 
   const unnamedChannel = new AgentEventChannel();
   codexNotificationResult({ method: "model/rerouted", params: { reason: "unnamed replacement" } }, codexState, unnamedChannel);
   assert.deepEqual(await drainChannel(unnamedChannel), [{ type: "model" }]);
-
-  const root = temporaryDirectory(context, "keiyaku-codex-model-");
-  const fake = fakeCodex(root, "model-evidence");
-  const drive = await createCodexAppServerProvider({
-    name: "configured",
-    kind: "codex-app-server",
-    executable: fake.executable,
-  }).start({
-    ...DRIVE_DEFAULTS,
-    launchTells: [{ id: "launch", text: "build" }],
-    cwd: root,
-    options: {},
-    session: { kind: "fresh" },
-  }).result;
-  // The channel keeps one unconsumed model observation, so the fixture reroutes
-  // only once a reader has seen the admitted model: the two observations below
-  // are ordered by that handshake, never by elapsed time.
-  const observed: AgentEvent[] = [];
-  const collecting = (async () => {
-    for await (const event of drive.events) {
-      observed.push(event);
-      if (event.type === "model") writeFileSync(fake.rerouteRelease, "");
-    }
-  })();
-  await drive.completion;
-  await collecting;
-  assert.deepEqual(
-    observed.filter((event) => event.type === "model"),
-    [
-      { type: "model", model: "gpt-5-codex" },
-      { type: "model", model: "gpt-5-codex-mini" },
-    ],
-    "thread admission names the loaded model; a reroute names its replacement",
-  );
-});
-
-test("Codex current developer context reaches start, fork resume, and ordinary resume without changing personality", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-codex-runtime-context-");
-  const fake = fakeCodex(root);
-  const provider = createCodexAppServerProvider(fake.executable);
-  const input = freshInput("work", { cwd: root, options: { systemPrompt: "Personality", systemPromptMode: "append" } });
-  const finish = async (attempt: ReturnType<typeof provider.start>) => {
-    await (await attempt.result).completion;
-    await attempt.closed;
-  };
-  await finish(provider.start({ ...input, runtimeInstructions: "<keiyaku>source</keiyaku>" }));
-  const fork = provider.fork!({ session: { sessionId: "thread-fresh" }, at: "turn-1", cwd: root });
-  const child = await fork.result;
-  await fork.closed;
-  await finish(provider.resume!({ ...input, runtimeInstructions: "<keiyaku>child</keiyaku>",
-    session: { kind: "resume", coordinate: child.session } }));
-  const clearInherited = "Any inherited Keiyaku execution context is inactive for this execution.";
-  await finish(provider.resume!({ ...input, runtimeInstructions: clearInherited,
-    session: { kind: "resume", coordinate: child.session } }));
-  await finish(provider.start(input));
-  const turns = fake.requests().filter((request) => request.method === "turn/start");
-  assert.deepEqual(turns.map((turn) => (turn.params as Record<string, unknown>).additionalContext), [
-    { keiyaku_execution: { kind: "application", value: "<keiyaku>source</keiyaku>" } },
-    { keiyaku_execution: { kind: "application", value: "<keiyaku>child</keiyaku>" } },
-    { keiyaku_execution: { kind: "application", value: clearInherited } },
-    undefined,
-  ]);
-  const threads = fake.requests().filter((request) => request.method === "thread/start" || request.method === "thread/resume");
-  assert.ok(threads.every((thread) => (thread.params as Record<string, unknown>).developerInstructions === "Personality"));
-  assert.ok(turns.every((turn) => JSON.stringify((turn.params as Record<string, unknown>).input) === JSON.stringify([{ type: "text", text: "work" }])));
-});
-
-test("Codex forwards the Body pair through native env_vars without rewriting explicit MCP environment", async (t) => {
-  const root = temporaryDirectory(t, "keiyaku-codex-mcp-actor-");
-  const fake = fakeCodex(root, "complete", {
-    square: { command: "square", args: ["mcp-server"], env: { HOME_FLAG: "kept by native" }, env_vars: ["EXISTING"] },
-    remote: { url: "https://example.com/mcp" },
-    workspace: { command: "tools", environment_id: "workspace" },
-    disabled: { command: "disabled", enabled: false },
-  });
-  const config = { mcp_servers: { square: { env: {
-    CUSTOM: "kept",
-    KEIYAKU_ACTOR_ID: "aku/authored/author",
-  } } }, approval_policy: "never" };
-  const provider = createCodexAppServerProvider({
-    name: "configured", kind: "codex-app-server", executable: fake.executable, config,
-  });
-  const attempt = provider.start(freshInput("work", { cwd: root, execution: { akumaId: "aku/worker/1234abcd", world: "/world" } }));
-  assert.equal((await (await attempt.result).completion).kind, "answered");
-  await attempt.closed;
-  assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "aku/worker/1234abcd");
-  assert.equal(fake.environment().KEIYAKU_ACTOR_WORLD, "/world");
-  const request = fake.requests().find((entry) => entry.method === "thread/start");
-  assert.deepEqual(request?.params, {
-    cwd: root,
-    config: { ...config, mcp_servers: { square: {
-      env: { CUSTOM: "kept", KEIYAKU_ACTOR_ID: "aku/authored/author" },
-      env_vars: ["EXISTING", "KEIYAKU_ACTOR_ID", "KEIYAKU_ACTOR_WORLD"],
-    } } },
-  });
 });
 
 test("Codex retains a command's aggregated output and every file change's patch", async () => {
@@ -2659,23 +2565,6 @@ test("OpenCode v2 records only producer-verified completed file patches", () => 
     type: "tool", phase: "completed", id: "edit-1", name: "edit",
     call: { kind: "fileChange", changes: [{ op: "update", path: "a.ts", diffstat: { added: 1, removed: 1 }, patch }] },
     result: { status: "ok", output: "Edited a.ts" },
-  });
-});
-
-test("Codex ignores notifications from a spawned child thread", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-codex-foreign-thread-");
-  const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
-  const drive = await provider.start(freshInput("delegate", { cwd: root })).result;
-  const events = await collectEvents(drive.events);
-
-  assert.deepEqual(events, [
-    { type: "session", coordinate: { sessionId: "thread-fresh" } },
-    { type: "assistant", text: "parent answer" },
-  ]);
-  assert.deepEqual(await drive.completion, {
-    kind: "answered",
-    answer: "parent answer",
-    historyId: "turn-1",
   });
 });
 

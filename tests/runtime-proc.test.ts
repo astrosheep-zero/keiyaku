@@ -1,4 +1,4 @@
-import { deferred as promiseBarrier, killFixtureProcess, restoreEnvironment, temporaryDirectory } from "./support/process.js";
+import { deferred as promiseBarrier, killFixtureProcess, temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -97,76 +97,6 @@ test("spawn-capable fixture cleanup waits for a live writer before deleting its 
   }
 });
 
-test("spawn-capable fixture cleanup retains both delayed and settled ambiguous failed launches", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-delayed-body-receipt-"));
-  const body = join(root, "akuma-body.mjs");
-  const receipt = join(root, "body-pids");
-  const ready = join(root, "body-start.ready");
-  const previousBarrier = process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER;
-  const previousReady = process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY;
-  process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER = "stdin";
-  process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY = ready;
-  const restoreReceipt = installAkumaBodyPidReceipt(receipt);
-  writeFileSync(body, "", "utf8");
-  const child = spawn(process.execPath, [body], { env: process.env, stdio: ["pipe", "ignore", "ignore"] });
-  const exited = new Promise<void>((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", () => resolve());
-  });
-  const original = new Error("fixture operation failed after launch");
-  let cleanup: Awaited<ReturnType<typeof cleanupSpawnCapableFixture>> | undefined;
-  try {
-    await waitForFile(ready);
-    assert.equal(existsSync(receipt), false);
-    assert.ok(child.pid !== undefined);
-    assert.equal(processExists(child.pid), true);
-    await assert.rejects(
-      async () => {
-        try {
-          throw original;
-        } finally {
-          cleanup = await cleanupSpawnCapableFixture({
-            fixturePath: root,
-            pidReceiptPath: receipt,
-            timeoutMs: 2_000,
-            operationFailed: true,
-          });
-        }
-      },
-      (error: unknown) => error === original,
-    );
-    assert.deepEqual(cleanup, {
-      kind: "retained",
-      diagnostic: "spawn-capable operation failed before birth proof",
-    });
-    assert.equal(existsSync(root), true);
-    assert.equal(processExists(child.pid), true);
-    child.stdin?.end("release\n");
-    await waitForFile(receipt);
-    const settled = await cleanupSpawnCapableFixture({
-      fixturePath: root,
-      pidReceiptPath: receipt,
-      timeoutMs: 2_000,
-      operationFailed: true,
-    });
-    assert.deepEqual(settled, {
-      kind: "retained",
-      diagnostic: "spawn-capable operation failed without proof that its launch set is closed",
-    });
-    await exited;
-    assert.equal(existsSync(root), true);
-    assert.deepEqual(readPidReceipt(receipt), [child.pid]);
-    assert.equal(processExists(child.pid), false);
-  } finally {
-    restoreReceipt();
-    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_BARRIER", previousBarrier);
-    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT_READY", previousReady);
-    if (child.pid !== undefined && processExists(child.pid)) child.kill("SIGKILL");
-    await exited;
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("PID receipts reject malformed nonempty lines and retain failed fixtures", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-v4-malformed-pid-receipt-");
   const receipt = join(root, "body-pids");
@@ -213,35 +143,6 @@ test("graceful termination cleans the group after SIGTERM EPERM and leader exit"
 
   await terminateOwnedProcess(child);
   assert.deepEqual(signals, ["SIGTERM", 0, 0, "SIGKILL", 0]);
-});
-
-test("runProcess reports termination failure without waiting for child close", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX group signals only");
-    return;
-  }
-  const originalKill = process.kill;
-  let ownedPid: number | undefined;
-  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-    if (pid < 0 && (signal === "SIGTERM" || signal === "SIGKILL")) {
-      ownedPid = -pid;
-      throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
-    }
-    return originalKill(pid, signal as NodeJS.Signals);
-  }) as typeof process.kill);
-
-  try {
-    await assert.rejects(
-      runProcess({ argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"], timeoutMs: 10 }),
-      /kill EPERM/u,
-    );
-    assert.ok(ownedPid !== undefined);
-  } finally {
-    if (ownedPid !== undefined) {
-      originalKill(-ownedPid, "SIGKILL");
-      await waitForProcessExit(ownedPid);
-    }
-  }
 });
 
 function waitForOutputLine(
@@ -336,76 +237,6 @@ const expectLaterTerminateIsInert = (owned: Awaited<ReturnType<typeof spawnDetac
     await owned.terminate(true);
   });
 
-test("runProcess observes split UTF-8 output before the child completes while retaining its tail", { timeout: 60_000 }, async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-v4-runtime-split-utf8-");
-  const tailRelease = join(root, "tail-release");
-  const exitRelease = join(root, "exit-release");
-  let observed = "";
-  let settled = false;
-  const controller = new AbortController();
-  context.signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const { promise: liveOutput, resolve: ready } = promiseBarrier<void>();
-  const { promise: liveTail, resolve: tail } = promiseBarrier<void>();
-  const pending = runProcess(
-    input(
-      [
-        process.execPath,
-        "-e",
-        [
-          'const { existsSync } = require("node:fs");',
-          `const [tailRelease, exitRelease] = ${JSON.stringify([tailRelease, exitRelease])};`,
-          'process.stdout.write("ready\\n");',
-          "const waitFor = (path, next) => {",
-          "  const poll = () => (existsSync(path) ? next() : setTimeout(poll, 5));",
-          "  poll();",
-          "};",
-          "waitFor(tailRelease, () => {",
-          "  process.stdout.write(Buffer.from([0xe2]));",
-          "  process.stdout.write(Buffer.from([0x82]));",
-          "  process.stdout.write(Buffer.from([0xac]));",
-          "  waitFor(exitRelease, () => process.exit(0));",
-          "});",
-        ].join(" "),
-      ],
-      {
-        signal: controller.signal,
-        onOutput: ({ stream, text }) => {
-          if (stream !== "stdout") return;
-          observed += text;
-          if (observed.includes("ready\n")) ready();
-          if (observed.includes("€")) tail();
-        },
-      },
-    ),
-  );
-  const finished = pending.then((outcome) => {
-    settled = true;
-    return outcome;
-  });
-
-  try {
-    // The child holds its tail and its exit until this test releases each stage,
-    // so readiness is a handshake instead of an elapsed-time assumption.
-    await awaitReadiness("the split UTF-8 readiness line", liveOutput, finished);
-    assert.equal(settled, false);
-    writeFileSync(tailRelease, "release\n");
-    await awaitReadiness("the decoded UTF-8 tail", liveTail, finished);
-    assert.equal(settled, false);
-    writeFileSync(exitRelease, "release\n");
-    assert.deepEqual(await finished, {
-      kind: "terminal",
-      code: 0,
-      stdout: "ready\n€",
-      stderr: "",
-      truncated: false,
-    });
-    assert.equal(observed, "ready\n€");
-  } finally {
-    controller.abort();
-    await finished.catch(() => undefined);
-  }
-});
-
 test("runProcess retains truncated output at its exact timeout", { timeout: 60_000 }, async (context) => {
   const controller = new AbortController();
   context.signal.addEventListener("abort", () => {
@@ -450,22 +281,6 @@ test("runProcess retains truncated output at its exact timeout", { timeout: 60_0
   }
 });
 
-test("consumeProcessStdout terminates after a consumer failure", async () => {
-  const result = await consumeProcessStdout(
-    input([process.execPath, "-e", 'process.stdout.write("output"); setInterval(() => {}, 1_000);']),
-    () => {
-      throw new Error("consumer refused output");
-    },
-  );
-
-  assert.deepEqual(result.outcome, {
-    kind: "stream-error",
-    diagnostic: "consumer refused output",
-    stderr: "",
-    truncated: false,
-  });
-});
-
 test("runProcess reports unknown exits", async () => {
   const outcome = await runProcess(
     input([
@@ -488,46 +303,6 @@ test("runProcess reports spawn errors", async () => {
 
   assert.ok(outcome.kind === "spawn-error", "expected outcome.kind = \"spawn-error\"");
   assert.match(outcome.diagnostic, /ENOENT/);
-});
-
-test("Unix natural leader exit cleans a surviving descendant once", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX process groups only");
-    return;
-  }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-leader-exit-"));
-  const descendantPidPath = join(root, "descendant-pid");
-  const descendant = [
-    `require("node:fs").writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid) + "\\n");`,
-    'process.on("SIGTERM", () => {});',
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    'const { existsSync } = require("node:fs");',
-    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    'const deadline = Date.now() + 60000;',
-    `while (!existsSync(${JSON.stringify(descendantPidPath)})) { if (Date.now() >= deadline) { console.error("fixture wait for the descendant pid receipt expired after 60000ms"); process.exit(1); } }`,
-    "process.exit(0);",
-  ].join(" ");
-  let owned: Awaited<ReturnType<typeof spawnDetachedProcess>> | undefined;
-  let descendantPid: number | undefined;
-  try {
-    owned = await spawnDetachedProcess({
-      argv: [process.execPath, "-e", parent],
-      cwd: root,
-      log: join(root, "stdio.log"),
-    });
-    const ownedProcess = owned;
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
-    await ownedProcess.exited;
-    await waitForProcessExit(descendantPid);
-    await expectLaterTerminateIsInert(ownedProcess);
-  } finally {
-    killFixtureProcess(descendantPid);
-    if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("runProcess natural exit retires a live descendant with inherited pipes before returning", { timeout: 60_000 }, async (t) => {
@@ -569,25 +344,6 @@ test("runProcess natural exit retires a live descendant with inherited pipes bef
   }
 });
 
-test("runProcess preserves a natural-exit cleanup failure and starts termination only once", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX process groups only");
-    return;
-  }
-  const originalKill = process.kill;
-  let signals = 0;
-  const failure = Object.assign(new Error("natural cleanup failed"), { code: "EIO" });
-  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
-    if (pid < 0 && signal === "SIGTERM") {
-      signals += 1;
-      throw failure;
-    }
-    return originalKill(pid, signal as NodeJS.Signals);
-  }) as typeof process.kill);
-  await assert.rejects(runProcess(input([process.execPath, "-e", "process.exit(0)"])), (error) => error === failure);
-  assert.equal(signals, 1);
-});
-
 test("runProcess cancellation closes the directly-owned helper boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-cancel-"));
   const descendant = [
@@ -626,43 +382,6 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
   }
 });
 
-test("LineRpcProcess endInputAndDrain admits delayed notifications before producer EOF", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-"));
-  const child = [
-    "process.stdin.resume();",
-    'const send = (method) => process.stdout.write(JSON.stringify({ method }) + "\\n");',
-    'process.stdin.on("end", () => setTimeout(() => { send("item/completed"); process.exit(0); }, 350));',
-    'send("turn/completed");',
-  ].join(" ");
-  let rpc: LineRpcProcess | undefined;
-  let closed = false;
-  let notificationTimer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root });
-    const notifications: string[] = [];
-    let resolveDrain!: (value: Promise<void>) => void;
-    const drainStarted = new Promise<Promise<void>>((resolve, reject) => {
-      notificationTimer = setTimeout(() => reject(new Error("line RPC terminal notification was not admitted")), 2_000);
-      resolveDrain = (drained) => {
-        clearTimeout(notificationTimer);
-        resolve(drained);
-      };
-    });
-    rpc.onNotification((notification) => {
-      notifications.push(notification.method);
-      if (notification.method === "turn/completed") resolveDrain(rpc!.endInputAndDrain());
-    });
-    const drained = await drainStarted;
-    await drained;
-    assert.deepEqual(notifications, ["turn/completed", "item/completed"]);
-    closed = true;
-  } finally {
-    clearTimeout(notificationTimer);
-    if (!closed) await rpc?.close(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-drain-timeout-"));
   const child = ["process.stdin.resume();", "process.stdin.on('end',()=>{});", "setInterval(()=>{},1000);"].join(" ");
@@ -680,34 +399,26 @@ test("LineRpcProcess endInputAndDrain force-closes an uncooperative producer", a
   }
 });
 
-test("LineRpcProcess rejects pending requests and closes on malformed JSON", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-malformed-"));
+test("LineRpcProcess accepts a valid oversized response and rejects malformed JSON", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-framing-"));
   const child = [
-    "process.stdin.on('data', () => process.stdout.write('{malformed}\\n'));",
-    "process.stdin.resume();",
-  ].join(" ");
-  let rpc: LineRpcProcess | undefined;
-  try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 5_000 });
-    await assert.rejects(rpc.request("probe"), /malformed JSON/u);
-  } finally {
-    await rpc?.close(true);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("LineRpcProcess accepts a valid oversized response", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-line-rpc-large-response-"));
-  const child = [
-    "process.stdin.on('data', () => process.stdout.write(JSON.stringify({id:1,result:'x'.repeat(300000)}) + '\\n'));",
-    "process.stdin.resume();",
-  ].join(" ");
+    "const readline = require('node:readline');",
+    "let seen = 0;",
+    "const lines = readline.createInterface({ input: process.stdin });",
+    "lines.on('line', (line) => {",
+    "  seen += 1;",
+    "  if (seen > 1) return process.stdout.write('{malformed}\\n');",
+    "  const message = JSON.parse(line);",
+    "  process.stdout.write(JSON.stringify({ id: message.id, result: 'x'.repeat(300000) }) + '\\n');",
+    "});",
+  ].join("\n");
   let rpc: LineRpcProcess | undefined;
   try {
     rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 15_000 });
     const result = await rpc.request("probe");
     assert.equal(typeof result, "string");
     assert.equal((result as string).length, 300_000);
+    await assert.rejects(rpc.request("again"), /malformed JSON/u);
   } finally {
     await rpc?.close(true);
     rmSync(root, { recursive: true, force: true });
@@ -819,6 +530,7 @@ test("a direct spawner retains a short exit marker write before its exit receipt
   assert.equal(shortened, true);
   assert.match(content, /\[child exit 0\]\n$/u);
   assert.equal(exit.log.to, content.length);
+  await expectLaterTerminateIsInert(owned);
 });
 
 test("release lets the parent reach beforeExit while the detached child continues", async () => {

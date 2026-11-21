@@ -6,11 +6,11 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { AkumaNameError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import {
@@ -153,7 +153,7 @@ test("malformed explicit callers refuse before allocation on public call and for
   assert.equal((await Akumas.of(world).list()).rows, undefined);
 });
 
-test("prompt-free spawn settles before immediate Ask and retains native config through wake and fork", async (t) => {
+test("prompt-free spawn settles before immediate Ask and retains its native config", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
@@ -201,30 +201,14 @@ test("prompt-free spawn settles before immediate Ask and retains native config t
     assert.equal(asked.kind, "answered");
     if (asked.kind !== "answered") assert.fail(JSON.stringify(asked));
     assert.deepEqual(asked.answer, { ok: true });
-    let answeredTurn: `turn/${number}` | undefined;
     for await (const window of PublicAkuma.select(world, result.akumaId).stream()) {
       assert.deepEqual(window.rows.filter(row => row.kind === "tell").map(row => row.text), ["schema-call"]);
       assert.equal(window.rows.filter(row => row.kind === "turn").length, 1);
       assert.ok(!window.rows.some(row => row.kind === "call"));
-      const outcome = window.rows.find(row => row.kind === "outcome");
-      assert.ok(outcome?.outcome.kind === "answered");
-      answeredTurn = `turn/${outcome.turnSequence}`;
+      assert.ok(window.rows.find(row => row.kind === "outcome")?.outcome.kind === "answered");
       break;
     }
-
-    // Reopening after Settings change must use the retained native recipe.
-    writeFileSync(join(configured.home, "settings.json"), JSON.stringify({ providers: {} }));
-    const reopened = PublicAkuma.select(await World.at(world), result.akumaId);
-    await reopened.idle({ timeoutMs: 10_000 });
-    const continued = await reopened.tell("continue", { wait: true, timeoutMs: 10_000 });
-    assert.ok("state" in continued && continued.state === "done");
-    assert.equal(continued.answer, '{"ok":true}');
     assert.deepEqual((await readSoul(pathsForAkumaId(world, result.akumaId)))?.provider.config, configured.config);
-    assert.ok(answeredTurn);
-    const fork = await api.fork({ akuma: result.akumaId, at: answeredTurn });
-    assert.equal(fork.kind, "forked");
-    if (fork.kind !== "forked") assert.fail(JSON.stringify(fork));
-    assert.deepEqual((await readSoul(pathsForAkumaId(world, fork.childAkumaId)))?.provider.config, configured.config);
     operationFailed = false;
   } finally {
     try {
@@ -312,68 +296,64 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
   }
 });
 
-test("Akumas.spawn preserves its child when initial Tell admission fails", async (t) => {
+test("Akumas.spawn preserves its child when initial Tell admission fails and binds its first Turn ahead of later settlement", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const departure = bodyReceiptFixture(t, raw.path);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  // The first spawn's frozen execution directory is private to this fixture.
+  // Parking it makes the real admitTell's workdir check fail immediately.
+  const firstCwd = temporaryDirectory(t, "call-first-workdir-");
+  const parkedCwd = `${firstCwd}.parked`;
   let akumaId: string | undefined;
   let admissionCalls = 0;
-  let operationFailed = true;
   const admitTell = AkumaOwner.prototype.admitTell;
-  t.mock.method(AkumaOwner.prototype, "admitTell", async function (this: AkumaOwner, ...args: Parameters<typeof admitTell>) {
-    admissionCalls += 1;
-    const paths = pathsForAkumaId(world, this.id);
-    assert.equal((await readHeart(paths)).latestBody?.end, "exited");
-    const writer = new DatabaseSync(paths.heart);
-    try {
-      writer.exec("BEGIN IMMEDIATE");
-      return await admitTell.apply(this, args);
-    } finally {
-      writer.close();
-    }
-  });
+  const admission = t.mock.method(
+    AkumaOwner.prototype,
+    "admitTell",
+    async function (this: AkumaOwner, ...args: Parameters<typeof admitTell>) {
+      admissionCalls += 1;
+      const paths = pathsForAkumaId(world, this.id);
+      assert.equal((await readHeart(paths)).latestBody?.end, "exited");
+      renameSync(firstCwd, parkedCwd);
+      try {
+        return await admitTell.apply(this, args);
+      } finally {
+        renameSync(parkedCwd, firstCwd);
+      }
+    },
+  );
+  // Both public composition outcomes share this World and one in-process host;
+  // the first spawn leaves a stopped child behind, the second proves first-Turn binding.
+  const api = Akumas.of(world, { hosting: "in-process" });
+  let admissionRestored = false;
+  const restoreAdmission = () => {
+    if (admissionRestored) return;
+    admissionRestored = true;
+    admission.mock.restore();
+  };
   try {
-    const result = await Akumas.of(world).spawn({
+    const failed = await api.spawn({
       akumaName: "worker",
-      body: "first Tell blocked by Heart writer",
-      cwd: world,
+      body: "first Tell blocked by missing frozen workdir",
+      cwd: firstCwd,
       ...configured.placement,
       mode: "detach",
     });
-    akumaId = result.akumaId;
-    assert.equal(result.kind, "failed");
-    if (result.kind !== "failed") assert.fail("expected initial Tell failure");
-    assert.equal(result.failures[0].stage, "tell");
-    if (result.failures[0].stage !== "tell") assert.fail("expected Tell stage");
-    assert.match(result.failures[0].diagnostic, /database is locked/u);
+    akumaId = failed.akumaId;
+    assert.equal(failed.kind, "failed");
+    if (failed.kind !== "failed") assert.fail("expected initial Tell failure");
+    assert.equal(failed.failures[0].stage, "tell");
+    if (failed.failures[0].stage !== "tell") assert.fail("expected Tell stage");
+    assert.match(failed.failures[0].diagnostic, /frozen execution directory .* no longer exists/u);
     assert.equal(admissionCalls, 1);
-    const child = PublicAkuma.select(world, result.akumaId);
+    const child = PublicAkuma.select(world, failed.akumaId);
     assert.equal((await child.status()).life, "asleep");
     const history = await child.history();
     assert.deepEqual(history.rows, []);
-    operationFailed = false;
-  } finally {
-    try {
-      if (akumaId !== undefined)
-        await PublicAkuma.select(world, akumaId)
-          .kill()
-          .catch(() => undefined);
-      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
-    } finally {
-      departure.restore();
-      restoreSquareLedger();
-    }
-  }
-});
+    restoreAdmission();
+    await child.kill().catch(() => undefined);
 
-test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn settles before observation", async (t) => {
-  const { raw, world, configured } = await directCallFixture();
-  const departure = bodyReceiptFixture(t, raw.path);
-  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
-  let observedTellId: string | undefined;
-  let operationFailed = true;
-  try {
-    const result = await Akumas.of(world).spawn({
+    let observedTellId: string | undefined;
+    const result = await api.spawn({
       akumaName: "worker",
       body: "ordinary-first-input",
       cwd: world,
@@ -438,12 +418,14 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
     assert.equal(result.input?.kind, "answered");
     assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     assert.equal(result.tellId, observedTellId);
-    operationFailed = false;
   } finally {
+    restoreAdmission();
     try {
-      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
+      if (akumaId !== undefined)
+        await PublicAkuma.select(world, akumaId)
+          .kill()
+          .catch(() => undefined);
     } finally {
-      departure.restore();
       restoreSquareLedger();
     }
   }

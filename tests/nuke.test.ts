@@ -53,7 +53,7 @@ function gitNukeShim(extra = ""): string {
   return ['printf "%s\\n" "$*" >> "$KEIYAKU_CALLS"', extra, 'exec "$KEIYAKU_REAL_GIT" "$@"'].join("\n");
 }
 
-async function gitNukeFixture() {
+async function gitNukeFixture(options: Readonly<{ foreign?: boolean; branch?: boolean }> = {}) {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(raw.path);
@@ -63,12 +63,12 @@ async function gitNukeFixture() {
   const place = (await readPlaceRegister(repository)).get(managed)!;
   const managedPath = worktreePath(repository, place);
   raw.run(["worktree", "add", "--detach", managedPath, "HEAD"]);
-  raw.run(["branch", "business-branch"]);
+  if (options.branch !== false) raw.run(["branch", "business-branch"]);
   raw.run(["update-ref", "refs/keiyaku/delivery/nuke-managed", "HEAD"]);
   raw.run(["update-ref", "refs/keiyaku/candidate/nuke-managed", "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  const foreign = `${raw.path}-foreign`;
-  raw.run(["worktree", "add", "--detach", foreign, "HEAD"]);
+  const foreign = options.foreign === true ? `${raw.path}-foreign` : undefined;
+  if (foreign !== undefined) raw.run(["worktree", "add", "--detach", foreign, "HEAD"]);
   return {
     raw,
     world,
@@ -136,9 +136,10 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
 }
 
 test("confirmed nuke stops live writers and removes owned state while preserving boundaries", async () => {
-  const fixture = await gitNukeFixture();
+  const fixture = await gitNukeFixture({ foreign: true });
+  const foreign = fixture.foreign!;
   try {
-    const { raw, world, managedPath, foreign } = fixture;
+    const { raw, world, managedPath } = fixture;
     const debts = Debts.of(world);
     assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
     const namespace = join(world, ".keiyaku", "namespace", "current");
@@ -192,7 +193,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.deepEqual(await nuke({ world, confirm: world }), { kind: "accepted" });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
+    rmSync(foreign, { recursive: true, force: true });
   }
 });
 
@@ -257,7 +258,7 @@ test("confirmed nuke cleans a legacy Heart schema", async () => {
 });
 
 test("confirmed nuke preserves recognized entries when stop cannot take custody", async () => {
-  const fixture = await gitNukeFixture();
+  const fixture = await gitNukeFixture({ foreign: false, branch: false });
   const { world, raw } = fixture;
   try {
     const debt = await Debts.of(world).add({ title: "Keep debt while writer lives" });
@@ -305,13 +306,43 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       leash.release();
     }
   } finally {
-    raw.run(["worktree", "remove", "--force", fixture.foreign]);
     rmSync(world, { recursive: true, force: true });
   }
 });
 
-test("Git nuke refuses a changed state OID before deleting regenerable topology", async () => {
-  const fixture = await gitNukeFixture();
+test("native reset returns a required partial stop after confirmed deletion and awaits independent owners", async () => {
+  const fixture = await gitNukeFixture({ foreign: false });
+  const { raw, world, managedPath } = fixture;
+  try {
+    const debt = await Debts.of(world).add({ title: "Independent owner despite Git stop" });
+    assert.ok(debt.kind === "accepted");
+    raw.run(["worktree", "remove", "--force", managedPath]);
+    mkdirSync(managedPath, { recursive: true });
+    writeFileSync(join(managedPath, "foreign.txt"), "not owned by Git cleanup\n");
+    const result = await nuke({ world, confirm: world });
+    assert.ok(result.kind === "accepted");
+    assert.equal(result.refsRemoved, 1);
+    assert.equal(result.worktreesRemoved, 0);
+    assert.equal(result.debtsRemoved, 1);
+    assert.equal(classifyVerb("nuke", {}, { kind: "returned", value: result }), "retryable");
+    assert.deepEqual(result.issues, [
+      {
+        kind: "reset-owner-stopped",
+        owner: "git",
+        diagnostic: `managed Place path has foreign custody: ${managedPath}`,
+      },
+    ]);
+    assert.deepEqual(await Debts.of(world).debt({ id: debt.id }).read(), { kind: "missing" });
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
+    assert.equal(readFileSync(join(managedPath, "foreign.txt"), "utf8"), "not owned by Git cleanup\n");
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("Git nuke refuses a changed state OID and exact-read-backs the unknown retry before topology cleanup", async () => {
+  const fixture = await gitNukeFixture({ foreign: false, branch: false });
   const calls = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-state-race-")), "calls");
   const raced = join(calls, "..", "raced");
   fixture.raw.run(["commit", "--allow-empty", "--quiet", "-m", "moved-state"]);
@@ -336,19 +367,10 @@ test("Git nuke refuses a changed state OID before deleting regenerable topology"
     assert.equal(refPresent(fixture.raw, "refs/keiyaku/delivery/nuke-managed"), true);
     assert.equal(refPresent(fixture.raw, "refs/keiyaku/candidate/nuke-managed"), true);
     assert.equal(readFileSync(calls, "utf8").includes("worktree remove --force "), false);
-    await nukeGit(fixture.world);
-    assert.equal(existsSync(fixture.managedPath), false);
-    assert.equal(refPresent(fixture.raw, "refs/heads/keiyaku-state"), false);
-  } finally {
-    rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
-  }
-});
 
-test("Git nuke exact-read-backs an unknown state deletion before topology cleanup", async () => {
-  const fixture = await gitNukeFixture();
-  const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-unknown-state-")), "done");
-  try {
+    // The retry deletes the state ref and is killed mid-flight; the next attempt
+    // must exact-read-back that unknown deletion before removing topology.
+    const marker = join(mkdtempSync(join(tmpdir(), "keiyaku-v4-nuke-unknown-state-")), "done");
     const capability = await repositoryAt(fixture.world);
     const held = await acquireSqliteTransactionLock({
       path: privateStatePublicationSeatPath(capability),
@@ -378,7 +400,6 @@ test("Git nuke exact-read-backs an unknown state deletion before topology cleanu
     assert.equal(refPresent(fixture.raw, "refs/keiyaku/delivery/nuke-managed"), false);
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
-    rmSync(fixture.foreign, { recursive: true, force: true });
   }
 });
 
@@ -472,7 +493,7 @@ test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts
 test("native reset awaits independent removals and keeps their counts on an exceptional owner retirement", async () => {
   const { nukeWithGit } = await import("../src/library/nuke.js");
   const { KeiyakuError } = await import("../src/index.js");
-  const fixture = await gitNukeFixture();
+  const fixture = await gitNukeFixture({ foreign: false });
   const { raw, world } = fixture;
   const original = new TypeError("reset owner retirement bug");
   try {
@@ -502,39 +523,6 @@ test("native reset awaits independent removals and keeps their counts on an exce
     assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), false);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
   } finally {
-    raw.run(["worktree", "remove", "--force", fixture.foreign]);
-    rmSync(world, { recursive: true, force: true });
-  }
-});
-
-test("native reset returns a required partial stop after confirmed deletion and awaits independent owners", async () => {
-  const fixture = await gitNukeFixture();
-  const { raw, world, managedPath } = fixture;
-  try {
-    const debt = await Debts.of(world).add({ title: "Independent owner despite Git stop" });
-    assert.ok(debt.kind === "accepted");
-    raw.run(["worktree", "remove", "--force", managedPath]);
-    mkdirSync(managedPath, { recursive: true });
-    writeFileSync(join(managedPath, "foreign.txt"), "not owned by Git cleanup\n");
-    const result = await nuke({ world, confirm: world });
-    assert.ok(result.kind === "accepted");
-    assert.equal(result.refsRemoved, 1);
-    assert.equal(result.worktreesRemoved, 0);
-    assert.equal(result.debtsRemoved, 1);
-    assert.equal(classifyVerb("nuke", {}, { kind: "returned", value: result }), "retryable");
-    assert.deepEqual(result.issues, [
-      {
-        kind: "reset-owner-stopped",
-        owner: "git",
-        diagnostic: `managed Place path has foreign custody: ${managedPath}`,
-      },
-    ]);
-    assert.deepEqual(await Debts.of(world).debt({ id: debt.id }).read(), { kind: "missing" });
-    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
-    assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
-    assert.equal(readFileSync(join(managedPath, "foreign.txt"), "utf8"), "not owned by Git cleanup\n");
-  } finally {
-    raw.run(["worktree", "remove", "--force", fixture.foreign]);
     rmSync(world, { recursive: true, force: true });
   }
 });
