@@ -248,16 +248,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "markdown/**", allow: [any("markdown/**")] },
     {
-      source: "library/region.ts",
-      allow: [
-        any("document/**"),
-        any("core/facts/**"),
-        runtime("git/identity.ts", ["contractIdSchema"]),
-        any("git/read-observation.ts"),
-        any("protocol/operations.ts"),
-      ],
-    },
-    {
       source: "git/hooks.ts",
       allow: [any("git/**"), any("runtime/proc/**"), any("settings.ts")],
     },

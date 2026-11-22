@@ -15,7 +15,6 @@ export const capabilityPolicy = {
       owners: [
         { source: "bounded-list.ts", symbols: ["z"] },
         { source: "history.ts", symbols: ["z"] },
-        { source: "library/region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },
         { source: "plugin/runtime.ts", symbols: ["z"] },
         { source: "kanshi/report.ts", symbols: ["z"] },
@@ -26,7 +25,7 @@ export const capabilityPolicy = {
         { source: "alias/index.ts", symbols: ["z"] },
         { source: "dispatch/index.ts", symbols: ["z"] },
         { source: "akuma/**" },
-        { source: "library/**", except: "library/region.ts" },
+        { source: "library/**" },
         { source: "library/contract-wait.ts", symbols: ["z"] },
         { source: "library/contract-types.ts", symbols: ["z"] },
         { source: "library/contract-outcomes.ts", symbols: ["z"] },
