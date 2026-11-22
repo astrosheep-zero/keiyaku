@@ -34,7 +34,7 @@ export type CompositionBoundary = Readonly<{
 
 export type SensitiveImportRule = Readonly<{
   module: string;
-  owners: readonly Readonly<{ source: string; symbols?: readonly string[]; mode?: DependencyMode }>[];
+  owners: readonly Readonly<{ source: string; except?: string; symbols?: readonly string[]; mode?: DependencyMode }>[];
 }>;
 
 export type ForbiddenSourcePattern = Readonly<{
@@ -247,6 +247,7 @@ function referenceDiagnostics(
   const allowed = sensitive.owners.some((owner) => {
     return (
       matches(owner.source, unit.path) &&
+      (!owner.except || !matches(owner.except, unit.path)) &&
       (owner.mode !== "type-only" || reference.symbols.runtime.length === 0) &&
       (owner.symbols === undefined || symbols.every((symbol) => owner.symbols!.includes(symbol)))
     );
