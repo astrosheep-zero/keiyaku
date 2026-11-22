@@ -86,9 +86,9 @@ import {
   type ContractWaitResult,
 } from "./contract-wait.js";
 import { targetName } from "../core/facts/types.js";
-import { prepareAmendDocument } from "../body/amend.js";
-import { decodeArcDocument } from "../body/arc.js";
-import { decodeContractDocument } from "../body/decode.js";
+import { prepareAmendDocument } from "../document/amend.js";
+import { decodeArcDocument } from "../document/arc.js";
+import { decodeContractDocument } from "../document/decode.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";

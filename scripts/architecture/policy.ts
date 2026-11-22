@@ -23,7 +23,7 @@ const contractOwner = {
     history,
     runtime("akuma/identity.ts", ["akumaIdSchema"]),
     types("bounded-list.ts", ["LifecycleSelection"]),
-    any("body/**"),
+    any("document/**"),
     any("contract-guidance.ts"),
     any("contract-worktree.ts"),
     any("core/facts/**"),
@@ -85,7 +85,7 @@ const libraryOwner = {
     types("bounded-list.ts", ["LifecycleSelection"]),
     any("akuma/**"),
     any("alias/**"),
-    any("body/**"),
+    any("document/**"),
     any("contract-worktree.ts"),
     any("core/facts/**"),
     any("dispatch/**"),
@@ -120,7 +120,7 @@ const libraryOwner = {
 
 const protocolOwner = {
   allow: [
-    any("body/**"),
+    any("document/**"),
     boundedList,
     any("coordination/**"),
     any("core/**"),
@@ -236,10 +236,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "core/**", allow: [any("core/**")] },
     {
-      source: "body/**",
+      source: "document/**",
       allow: [
         errorBase,
-        any("body/**"),
+        any("document/**"),
         any("core/facts/types.ts"),
         any("duration.ts"),
         any("markdown/**"),
@@ -306,7 +306,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "protocol/placement.ts",
       allow: [
-        any("body/**"),
+        any("document/**"),
         boundedList,
         any("coordination/**"),
         any("core/**"),
@@ -320,7 +320,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "protocol/read/**",
       allow: [
         runtime("errors.ts", ["errorCategory"]),
-        any("body/**"),
+        any("document/**"),
         boundedList,
         any("core/**"),
         any("git/**"),
@@ -614,8 +614,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("akuma/projection.ts"),
         runtime("akuma/projection.ts", ["withoutReportedChanges"]),
         any("alias/**"),
-        any("body/decode.ts"),
-        any("body/region.ts"),
+        any("document/decode.ts"),
+        any("document/region.ts"),
         any("core/facts/types.ts"),
         any("dispatch/**"),
         boundedList,
@@ -668,7 +668,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/akuma.ts"),
         types("akuma/projection.ts"),
         runtime("akuma/projection.ts", ["withoutReportedChanges"]),
-        any("body/region.ts"),
+        any("document/region.ts"),
         boundedList,
         any("identity/selector.ts"),
         any("index.ts"),

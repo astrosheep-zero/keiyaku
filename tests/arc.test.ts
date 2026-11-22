@@ -1,15 +1,15 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderContractBody } from "../src/body/render.js";
+import { renderContractBody } from "../src/document/render.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderContractGuidance } from "../src/contract-guidance.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
 import { contractId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
-import type { ContractBody } from "../src/body/types.js";
-import { decodeContractDocument } from "../src/body/decode.js";
+import type { ContractBody } from "../src/document/types.js";
+import { decodeContractDocument } from "../src/document/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { observeContract } from "./support/git.js";

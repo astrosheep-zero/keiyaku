@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { Keis, Keiyaku, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
-import { decodeContractDocument } from "../src/body/decode.js";
+import { decodeContractDocument } from "../src/document/decode.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
 import type { TestGitRepository } from "./support/git.js";

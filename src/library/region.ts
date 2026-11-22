@@ -1,7 +1,7 @@
 import { type RegionOverlap } from "../region.js";
 export { regionOverlapSchema, regionOverlapResultSchema, type RegionOverlap } from "../region.js";
-import { decodeContractDocument } from "../body/decode.js";
-import { regionsOverlapWithRelation } from "../body/region.js";
+import { decodeContractDocument } from "../document/decode.js";
+import { regionsOverlapWithRelation } from "../document/region.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";

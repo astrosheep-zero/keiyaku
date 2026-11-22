@@ -1,4 +1,4 @@
-import { regionsOverlapWithRelation } from "../body/region.js";
+import { regionsOverlapWithRelation } from "../document/region.js";
 import type { KanshiRegionSelection, RegionDeclaration, RegionOverlap, RegionRead } from "./report.js";
 
 function regionOverlaps(mine: readonly string[], declarations: readonly RegionDeclaration[]): readonly RegionOverlap[] {

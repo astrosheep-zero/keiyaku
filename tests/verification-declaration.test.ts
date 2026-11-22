@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareAmendDocument } from "../src/body/amend.js";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { renderContractBody } from "../src/body/render.js";
-import type { ContractBody } from "../src/body/types.js";
+import { prepareAmendDocument } from "../src/document/amend.js";
+import { decodeContractDocument } from "../src/document/decode.js";
+import { renderContractBody } from "../src/document/render.js";
+import type { ContractBody } from "../src/document/types.js";
 import { gate } from "../src/core/facts/types.js";
 import { contractTerms, documentDerivation } from "../src/library/input.js";
 import { singletonRequirement, verificationRequirement } from "../src/verification/declaration.js";

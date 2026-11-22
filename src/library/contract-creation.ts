@@ -1,5 +1,5 @@
 /** @architectureCompositionRoot */
-import { decodeCanonicalContractDocument } from "../body/render.js";
+import { decodeCanonicalContractDocument } from "../document/render.js";
 import { targetName, type ContractId } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
 import type { WorktreeHooks } from "../git/hooks.js";

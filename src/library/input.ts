@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { decodeArcDocument } from "../body/arc.js";
-import { decodeContractDocument } from "../body/decode.js";
+import { decodeArcDocument } from "../document/arc.js";
+import { decodeContractDocument } from "../document/decode.js";
 import { KeiyakuError } from "../errors.js";
-import { verificationDefinition } from "../body/decode.js";
-import type { DecodedContractDocument } from "../body/types.js";
+import { verificationDefinition } from "../document/decode.js";
+import type { DecodedContractDocument } from "../document/types.js";
 import { contractId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
 import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";

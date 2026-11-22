@@ -23,7 +23,7 @@ import {
   readContractMembership,
 } from "../src/protocol/read/status.js";
 import { Keis, KeiyakuError, Repo, Kanshi } from "../src/index.js";
-import { decodeContractDocument } from "../src/body/decode.js";
+import { decodeContractDocument } from "../src/document/decode.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";

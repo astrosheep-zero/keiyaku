@@ -16,7 +16,8 @@ import {
   type GitRefUpdate,
 } from "./repository.js";
 import type { GitReadObservation } from "./read-observation.js";
-import type { ContractWorkspaceLocation } from "../workspace-place.js";
+
+export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>;
 
 const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
 

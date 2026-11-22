@@ -105,9 +105,11 @@ Markdown sections.
 ## Dependency Direction
 
 Pact folds authority and makes pure legal decisions. The document boundary
-prepares caller terms. Git observes, persists, admits, and performs physical
-effects. Protocol is the only join between pact decisions and Git. Execution
-producers use the shared process runtime and return to protocol. Library
+prepares caller terms independently of Akuma execution. Git observes, persists,
+admits, and performs physical effects. Git workspace observation consumes an
+explicit appointment without depending on the workspace appointment owner.
+Protocol is the only join between pact decisions and Git. Execution producers
+use the shared process runtime and return to protocol. Library
 composes those capabilities into package operations; CLI only adapts invocation
 and renders adjudicated public values.
 

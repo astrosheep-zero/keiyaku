@@ -11,7 +11,7 @@ import {
   observeReadableContractJournals,
   withContractReadObservationAt,
 } from "../../git/observe.js";
-import { decodeContractDocument } from "../../body/decode.js";
+import { decodeContractDocument } from "../../document/decode.js";
 import { observeTargetLag, observeWorkspace, workspaceHasUnmergedPaths, worktreePath } from "../../git/workspace.js";
 import { readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type {

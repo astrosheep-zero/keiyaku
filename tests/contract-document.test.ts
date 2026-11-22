@@ -1,7 +1,7 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeContractDocument } from "../src/body/decode.js";
+import { decodeContractDocument } from "../src/document/decode.js";
 import { KeiyakuError } from "../src/errors.js";
 
 function withCriteria(criteria: string): string {

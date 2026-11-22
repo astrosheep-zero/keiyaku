@@ -108,7 +108,7 @@ export const capabilityPolicy = {
       module: "node:crypto",
       owners: [
         { source: "akuma/**" },
-        { source: "body/**" },
+        { source: "document/**" },
         { source: "cli/**" },
         { source: "coordination/**" },
         { source: "dispatch/**" },
@@ -220,7 +220,7 @@ export const capabilityPolicy = {
         "akuma-body.ts",
         "body-host.ts",
         "alias/**",
-        "body/**",
+        "document/**",
         "bounded-list.ts",
         "cli/**",
         "contract-worktree.ts",

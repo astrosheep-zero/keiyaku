@@ -3,7 +3,7 @@ import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { decodeContractDocument } from "../src/body/decode.js";
+import { decodeContractDocument } from "../src/document/decode.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { cachedRepositoryAt } from "./support/git.js";
@@ -63,8 +63,8 @@ function crossProcessAmend(
         KEIYAKU_LOCK_MODULE: new URL("../src/coordination/sqlite-transaction-lock.js", import.meta.url).href,
         KEIYAKU_AMEND_MODULE: new URL("../src/protocol/amend.js", import.meta.url).href,
         KEIYAKU_CHANNEL_MODULE: new URL("../src/git/read-observation.js", import.meta.url).href,
-        KEIYAKU_BODY_AMEND_MODULE: new URL("../src/body/amend.js", import.meta.url).href,
-        KEIYAKU_BODY_DECODE_MODULE: new URL("../src/body/decode.js", import.meta.url).href,
+        KEIYAKU_BODY_AMEND_MODULE: new URL("../src/document/amend.js", import.meta.url).href,
+        KEIYAKU_BODY_DECODE_MODULE: new URL("../src/document/decode.js", import.meta.url).href,
         KEIYAKU_INPUT_MODULE: new URL("../src/library/input.js", import.meta.url).href,
         KEIYAKU_REPOSITORY: input.repository,
         KEIYAKU_CONTRACT: input.contractId,

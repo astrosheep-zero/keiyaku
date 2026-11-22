@@ -1,9 +1,9 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareAmendDocument } from "../src/body/amend.js";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { decodeRegion, RegionDocumentError } from "../src/body/region.js";
+import { prepareAmendDocument } from "../src/document/amend.js";
+import { decodeContractDocument } from "../src/document/decode.js";
+import { decodeRegion, RegionDocumentError } from "../src/document/region.js";
 import { KeiyakuError } from "../src/errors.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";

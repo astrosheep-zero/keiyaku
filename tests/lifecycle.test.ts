@@ -14,11 +14,11 @@ import {
 } from "../src/core/facts/types.js";
 import { singletonRequirement } from "../src/verification/declaration.js";
 import { uniqueEntryUlid } from "./support/journal.js";
-import { prepareAmendDocument } from "../src/body/amend.js";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { renderContractBody } from "../src/body/render.js";
+import { prepareAmendDocument } from "../src/document/amend.js";
+import { decodeContractDocument } from "../src/document/decode.js";
+import { renderContractBody } from "../src/document/render.js";
 import { KeiyakuError } from "../src/errors.js";
-import type { ContractBody } from "../src/body/types.js";
+import type { ContractBody } from "../src/document/types.js";
 
 const id = contractId("kei/lifecycle-cycle");
 

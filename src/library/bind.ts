@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { decodeContractDocument } from "../body/decode.js";
-import { decodeCanonicalContractDocument } from "../body/render.js";
+import { decodeContractDocument } from "../document/decode.js";
+import { decodeCanonicalContractDocument } from "../document/render.js";
 import { contractIdFromSegment, type ContractId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";

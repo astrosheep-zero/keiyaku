@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { renderContractBody } from "../src/body/render.js";
+import { decodeContractDocument } from "../src/document/decode.js";
+import { renderContractBody } from "../src/document/render.js";
 import { contractId, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractPhysicalName } from "../src/git/identity.js";
 import {

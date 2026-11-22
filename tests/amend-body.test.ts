@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { prepareAmendDocument } from "../src/body/amend.js";
-import { decodeContractDocument } from "../src/body/decode.js";
-import { renderContractBody } from "../src/body/render.js";
-import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
+import { prepareAmendDocument } from "../src/document/amend.js";
+import { decodeContractDocument } from "../src/document/decode.js";
+import { renderContractBody } from "../src/document/render.js";
+import type { ContractBody as ContractBodyValue } from "../src/document/types.js";
 import { Keis, KeiyakuError, Repo } from "../src/index.js";
 import { makeGitRepository } from "./support/git.js";
 
