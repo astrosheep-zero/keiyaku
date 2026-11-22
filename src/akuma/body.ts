@@ -1,6 +1,5 @@
 import { projectAkumaBirth } from "./caller.js";
-import { appendFile } from "node:fs/promises";
-import { boundedDiagnostic } from "../settings.js";
+import { recordPluginDiagnostic } from "./plugin-diagnostic.js";
 import { abortable, abortableDelay } from "./abort.js";
 import { AkumaWorkdirMissingError } from "./akuma-errors.js";
 import { BodySupervisor } from "./body-supervisor.js";
@@ -122,14 +121,6 @@ async function bornSoul(
     throw new Error("Akuma birth identity does not match its directory");
   }
   return { soul: born, created: result === "born" };
-}
-
-export async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, error: unknown): Promise<void> {
-  try {
-    await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
-  } catch {
-    /* plugin diagnostic loss never changes Heart truth */
-  }
 }
 
 /** The plugin host bag for one Body occurrence; diagnostics are appended to its log. */

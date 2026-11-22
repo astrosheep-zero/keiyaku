@@ -96,7 +96,7 @@ type ForkBindAdmission = Readonly<{
  * A legally non-forkable source is an expected refusal; corrupt persisted authority for a source that
  * does exist is exceptional and names that source Contract.
  */
-export async function admitForkBindWithAppointment(
+export async function admitForkBind(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;
@@ -165,7 +165,7 @@ export async function admitForkBindWithAppointment(
   return { kind: "document", admission, document };
 }
 
-export async function prepareMarkdownBind(
+export async function admitMarkdownBind(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;

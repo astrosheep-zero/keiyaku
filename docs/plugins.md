@@ -204,7 +204,8 @@ Independent handles may select independent destinations. Local public
 observations default to line-oriented stderr; spawn observations keep their
 existing Akuma log and additionally notify an explicitly selected host.
 CLI output remains owned by its process edge, and Body observations retain
-their own log custody.
+their own log custody. Body execution and spawn composition share one Akuma-owned
+best-effort diagnostic log writer; failure to write never changes product results.
 
 Activation remains process-local and is selected once per World. Activation
 diagnostics belong to the producer that initiated activation; delivery

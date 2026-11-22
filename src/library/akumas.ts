@@ -23,7 +23,7 @@ import { sweepInactiveAkumas } from "./akuma-retention.js";
 import { emitPluginSignal, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 import type { ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
-import { callAkumas, forkAkumas } from "./akuma-creation.js";
+import { spawnAkumas, forkAkumas } from "./akuma-creation.js";
 import { normalizedList, requireInput } from "./input.js";
 import {
   askAkuma,
@@ -123,7 +123,7 @@ class AkumasHandle {
   }
 
   spawn(input: SpawnInput): Promise<SpawnResult> {
-    const pending = callAkumas(this.withWorld(input, "Akumas.spawn input"), this.#spawn, this.#reportDiagnostic);
+    const pending = spawnAkumas(this.withWorld(input, "Akumas.spawn input"), this.#spawn, this.#reportDiagnostic);
     return pending.then(async (result) => {
       await this.maintain(this.#world);
       return result;

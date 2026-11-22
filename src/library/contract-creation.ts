@@ -8,7 +8,7 @@ import type { RepositoryScope } from "../protocol/operations.js";
 import type { BindTargetSelection } from "../protocol/bind.js";
 import { executionStop, isOperationalStop } from "../protocol/progress.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
-import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
+import { admitForkBind, admitMarkdownBind } from "./bind.js";
 import type { BindOutcome } from "./contract-outcomes.js";
 import {
   captureLocalContractComposition,
@@ -76,7 +76,7 @@ export async function bindKei(
       if (document === undefined) throw new Error("Markdown bind requires its prepared document");
       return await markdownBind(prepared, document, context);
     }
-    const fork = await admitForkBindWithAppointment({
+    const fork = await admitForkBind({
       scope,
       channel,
       progress: accumulator,
@@ -98,7 +98,7 @@ type BindContext = Readonly<{
 
 async function bindAnswer(
   { accumulator, scope, channel, hooks, handle }: BindContext,
-  leading: Awaited<ReturnType<typeof prepareMarkdownBind>>["result"],
+  leading: Awaited<ReturnType<typeof admitMarkdownBind>>["result"],
   region: Parameters<typeof observeRegion>[3],
 ): Promise<BindOutcome> {
   if (leading.kind === "refused") {
@@ -149,7 +149,7 @@ async function markdownBind(
   const { debt, target, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
   const targetSelection = bindTargetSelection(target);
-  const admission = await prepareMarkdownBind({
+  const admission = await admitMarkdownBind({
     scope: context.scope,
     channel: context.channel,
     document,

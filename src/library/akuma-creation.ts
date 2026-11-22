@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
-import { pendingWakeSchema, tellActionSchema, tellResultSchema } from "../akuma/call-initial-tell.js";
+import { pendingWakeSchema, tellActionSchema, tellResultSchema, type TellResult } from "../akuma/call-initial-tell.js";
 import {
   completedTextObservationSchema,
   operationDiagnosticSchema,
@@ -12,7 +12,7 @@ import {
 import { akumaIdSchema } from "../akuma/identity.js";
 import { forkFailureSchemas } from "../akuma/akuma-owner.js";
 import { randomUUID } from "node:crypto";
-import { appendFile } from "node:fs/promises";
+import { recordPluginDiagnostic } from "../akuma/plugin-diagnostic.js";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import {
   prepareAkumaCall,
@@ -29,7 +29,6 @@ import {
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
-import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd, durationSchema, validateAkumaInput } from "../akuma/call-input.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "../akuma/identity.js";
 import { moveAlias } from "../alias/index.js";
@@ -37,7 +36,7 @@ import { errorCategory, KeiyakuError } from "../errors.js";
 import { publishDispatch, readDispatch } from "../dispatch/index.js";
 import { akumaAliasSchema, parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
-import { boundedDiagnostic, type Settings } from "../settings.js";
+import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
 import { requireInput, requireMarkdown as text, nonblank, optionalNonblank, optionalSignal } from "./input.js";
@@ -209,19 +208,11 @@ function integrationFailure(error: unknown, primary = error): IntegrationFailure
   };
 }
 
-function callSeat(contract: unknown) {
+function contractSeat(contract: unknown) {
   if (contract === undefined) return undefined;
   const seat = seatForKei(contract);
   if (seat === null) throw new KeiyakuError("invalid-input", "contract must be a Kei");
   return seat;
-}
-
-async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurrence: string): Promise<void> {
-  try {
-    await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
-  } catch {
-    // Plugin diagnostic loss must not change an already admitted call.
-  }
 }
 
 function callDiagnosticSink(
@@ -230,14 +221,14 @@ function callDiagnosticSink(
   reportDiagnostic?: (message: string) => void,
 ): (message: string) => void {
   return (message) => {
-    void recordPluginDiagnostic(paths, message, occurrence);
+    void recordPluginDiagnostic(paths, occurrence, message);
     // Return the host's possible Promise for the plugin diagnostic isolation boundary.
     return reportDiagnostic?.(message);
   };
 }
 
 type DispatchAnswer = Readonly<{ failure?: z.output<typeof dispatchStageSchema>; dispatchWarning?: string }>;
-async function callDispatch(input: Parameters<typeof publishDispatch>[0]): Promise<DispatchAnswer> {
+async function publishSpawnDispatch(input: Parameters<typeof publishDispatch>[0]): Promise<DispatchAnswer> {
   try {
     const published = await publishDispatch(input);
     const warning = published.seatClose?.map((lag) => lag.diagnostic).join("\n");
@@ -266,7 +257,7 @@ async function forkDispatch(
     const association = await readDispatch(repository, parent);
     return association === null
       ? {}
-      : await callDispatch({ repository, akumaId: child, contractId: association.contractId });
+      : await publishSpawnDispatch({ repository, akumaId: child, contractId: association.contractId });
   } catch (error) {
     return { failure: { stage: "dispatch", failure: integrationFailure(error) } };
   }
@@ -319,7 +310,7 @@ type ParsedCallInput = Omit<SpawnInput, "alias" | "body" | "contract" | "mode" |
     alias?: AkumaAlias;
     mode: "wait" | "detach";
     timeoutMs: number;
-    seat: ReturnType<typeof callSeat>;
+    seat: ReturnType<typeof contractSeat>;
     initialTell?: InitialCallTell;
   }>;
 
@@ -357,7 +348,7 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
   const home = optionalNonblank(values.home, "home");
   const settings = settingsOption(values.settings);
   const alias = parseSpawnAlias(values.alias);
-  const seat = callSeat(values.contract);
+  const seat = contractSeat(values.contract);
   const observe = values.observe as AskObserver | undefined;
   const initialTell = initialCallTell(options.body, initiator);
   return {
@@ -500,7 +491,7 @@ async function settleCall(
   return result();
 }
 
-export async function callAkumas(
+export async function spawnAkumas(
   input: SpawnInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
   reportDiagnostic?: (message: string) => void,
@@ -527,7 +518,7 @@ export async function callAkumas(
     const dispatch: DispatchAnswer =
       seat === undefined
         ? {}
-        : await callDispatch({
+        : await publishSpawnDispatch({
             repository: parsed.signal === undefined ? seat.scope : { ...seat.scope, signal: parsed.signal },
             akumaId: admitted.id,
             contractId: seat.id,

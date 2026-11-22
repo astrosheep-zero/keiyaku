@@ -805,6 +805,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
       ],
     },
+    {
+      source: "akuma/plugin-diagnostic.ts",
+      allow: [runtime("settings.ts", ["boundedDiagnostic"]), types("akuma/identity.ts", ["AkumaPaths"])],
+    },
     { source: "akuma/read-pool.ts", allow: [] },
     { source: "akuma/timeline-text.ts", allow: [types("akuma/projection.ts"), any("text-preview.ts")] },
     { source: "akuma/projection.ts", allow: [any("akuma/heart/**"), runtime("history.ts", ["selectHistoryPage"])] },
@@ -972,6 +976,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("world.ts"),
       ],
     },
-  ],
+  ].map((zone) =>
+    zone.source === "akuma/body.ts" || zone.source === "library/akuma-creation.ts"
+      ? zone
+      : { ...zone, deny: [...("deny" in zone ? zone.deny : []), any("akuma/plugin-diagnostic.ts")] },
+  ),
   ...capabilityPolicy,
 } as const satisfies ArchitecturePolicy;
