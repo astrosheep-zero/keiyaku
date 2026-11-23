@@ -145,8 +145,9 @@ export async function settleAkumaKill(
   signal?: AbortSignal,
   retainLeash = false,
   onStop?: () => void,
+  owner?: string,
 ): Promise<KillSettlement> {
-  const request = await requestStop(paths, new Date().toISOString(), signal);
+  const request = await requestStop(paths, new Date().toISOString(), signal, owner);
   if (request.kind !== "requested") {
     // A witnessed Body was already settled: the kill witness Heart recorded is
     // the kill evidence, not a stop outcome.
@@ -627,13 +628,19 @@ export class AkumaOwner {
     return { kind: "forked", childAkumaId: birth.child.id };
   }
 
-  async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
+  async kill(options: Readonly<{ signal?: AbortSignal; initiator?: string }> = {}): Promise<KillEvidence> {
     let admitted = false;
     try {
       return (
-        await settleAkumaKill(this.paths, options.signal, false, () => {
-          admitted = true;
-        })
+        await settleAkumaKill(
+          this.paths,
+          options.signal,
+          false,
+          () => {
+            admitted = true;
+          },
+          options.initiator,
+        )
       ).evidence;
     } catch (error) {
       if (!admitted) throw error;

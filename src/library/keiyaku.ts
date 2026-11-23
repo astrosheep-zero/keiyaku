@@ -281,10 +281,12 @@ export class Keiyaku {
     },
     kill: async (input, controls) => {
       const { at, akumas } = await this.#akumas();
+      const initiator = deliveryOwner(this.#input.environment, this.#input.identity?.owner);
       return await akumas.kill({
         ...input,
         ...executionSignal(controls),
         ...(at.repo === undefined ? {} : { repo: at.repo }),
+        ...(initiator === undefined ? {} : { initiator }),
       });
     },
     wait: async ({ selectors, for: bound, ...input }, controls) => {

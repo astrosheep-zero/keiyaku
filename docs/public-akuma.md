@@ -73,7 +73,9 @@ selection remains independent of that policy.
 Creation accepts optional explicit caller and initiator attribution, including
 prompt-free births and forks. Either kind of caller declaration is
 nonauthoritative; the SDK never infers it from ambient process environment.
-Fork attribution describes the invoking edge, not the source's caller. Known
+Fork attribution describes the invoking edge, not the source's caller. Tell and
+kill may carry the same optional nonauthoritative initiator attribution; kill
+uses it only to exclude that Owner from the cancellation's notification audience. Known
 Contract association may travel as observation metadata to birth execution;
 Dispatch remains solely the submitting composition's authority. Execution context
 uses that known launch association before Dispatch publication, naming it as

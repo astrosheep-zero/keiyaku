@@ -259,12 +259,16 @@ async function executeObservedTellAkuma(input: AskExecutionInput, closeAtBound =
 type KillExecutionInput = Readonly<{
   path: WorldRoot;
   ids: readonly AkumaStatus["id"][];
+  initiator?: string;
   signal?: AbortSignal;
 }>;
 
 export async function executeKillAkuma(input: KillExecutionInput): Promise<AkumaKillResult> {
   input.signal?.throwIfAborted();
-  const options = input.signal === undefined ? {} : { signal: input.signal };
+  const options = {
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+  };
   const members = await Promise.all(
     input.ids.map(async (id) => {
       try {

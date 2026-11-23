@@ -28,6 +28,7 @@ export function surveillanceAudience(
   heart: DatabaseSync,
   turn: number | Readonly<{ bodySequence: number }> | "all-open" | null,
   self: string | null = null,
+  excluding: readonly string[] = [],
 ): readonly string[] {
   return heart
     .prepare(
@@ -62,7 +63,8 @@ export function surveillanceAudience(
       self,
       self,
     )
-    .map(({ owner }) => owner as string);
+    .map(({ owner }) => owner as string)
+    .filter((owner) => !excluding.includes(owner));
 }
 
 export function changeSurveillanceFact(heart: DatabaseSync, owner: string, off: boolean): boolean {

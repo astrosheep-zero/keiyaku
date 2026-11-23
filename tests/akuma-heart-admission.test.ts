@@ -6,7 +6,7 @@ import { bornBody, heartFixture } from "./support/akuma-fixtures.js";
 import { withHeartTransaction, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
 import {
   activitySlice, appendActivity, beginTurn, bindTellsToTurn, cancelBodyTurns, endTurn, HeldAkumaLeash,
-  readHeart, readTurn, recordTell, recordTellDeliveries,
+  readHeart, readTurn, recordTell, recordTellDeliveries, requestStop,
 } from "../src/akuma/heart/index.js";
 import { projectFact } from "../src/akuma/projection.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
@@ -102,6 +102,57 @@ test("unavailable audience leaves the exact terminal and put-down admitted", asy
     }
     assert.equal((await readHeart(paths)).latestBody?.end, "put-down");
   } finally { holder.release(); value.close(); }
+});
+
+test("a controlled interrupt excludes its own initiator from the canceled audience", async () => {
+  const value = await heartFixture("keiyaku-heart-cancel-interrupter-");
+  const at = "2026-08-08T00:00:00.000Z";
+  const { allocated, holder, body } = await bornBody(value.root, "ca1ce106", at);
+  const paths = allocated.paths;
+  try {
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: "alice" });
+    await recordTell(paths, { kind: "tell", id: "bound", body: "work", recordedAt: at, initiator: "bob" });
+    await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["bound"], boundAt: at });
+    const interrupted = await recordTell(paths, { kind: "tell", id: "interrupt", body: "yield", recordedAt: at, initiator: "alice" }, { interrupt: true });
+    assert.equal(interrupted.kind, "recorded");
+    const canceled = await cancelBodyTurns(paths, { bodySequence: body.sequence, at });
+    assert.deepEqual(canceled.map(({ audience }) => audience), [{ kind: "known", owners: ["bob"] }]);
+  } finally { holder.release(); value.close(); }
+});
+
+test("a controlled kill excludes its attributed Owner from the canceled audience", async () => {
+  const value = await heartFixture("keiyaku-heart-cancel-killer-");
+  const at = "2026-08-08T00:00:00.000Z";
+  const { allocated, holder, body } = await bornBody(value.root, "ca1ce107", at);
+  const paths = allocated.paths;
+  try {
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: "alice" });
+    await recordTell(paths, { kind: "tell", id: "bound", body: "work", recordedAt: at, initiator: "bob" });
+    await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["bound"], boundAt: at });
+    assert.equal((await requestStop(paths, at, undefined, "alice")).kind, "requested");
+    const canceled = await cancelBodyTurns(paths, { bodySequence: body.sequence, at });
+    assert.deepEqual(canceled.map(({ audience }) => audience), [{ kind: "known", owners: ["bob"] }]);
+  } finally { holder.release(); value.close(); }
+});
+
+test("unattributed control excludes nobody from the canceled audience", async () => {
+  const at = "2026-08-08T00:00:00.000Z";
+  for (const control of [{ kind: "interrupt", draw: "ca1ce108" }, { kind: "kill", draw: "ca1ce109" }] as const) {
+    const value = await heartFixture(`keiyaku-heart-cancel-unattributed-${control.kind}-`);
+    const { allocated, holder, body } = await bornBody(value.root, control.draw, at);
+    const paths = allocated.paths;
+    try {
+      const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: "alice" });
+      await recordTell(paths, { kind: "tell", id: "bound", body: "work", recordedAt: at, initiator: "bob" });
+      await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["bound"], boundAt: at });
+      const admitted = control.kind === "interrupt"
+        ? await recordTell(paths, { kind: "tell", id: "interrupt", body: "yield", recordedAt: at }, { interrupt: true })
+        : await requestStop(paths, at);
+      assert.equal(admitted.kind, control.kind === "interrupt" ? "recorded" : "requested");
+      const canceled = await cancelBodyTurns(paths, { bodySequence: body.sequence, at });
+      assert.deepEqual(canceled.map(({ audience }) => audience), [{ kind: "known", owners: ["alice", "bob"] }]);
+    } finally { holder.release(); value.close(); }
+  }
 });
 
 test("Heart read admission yields through an exclusive WAL reader lock and executes once", async () => {

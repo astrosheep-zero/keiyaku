@@ -38,7 +38,7 @@ import { KeiyakuError } from "../errors.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
-import { optionalSignal, requireInput } from "./input.js";
+import { optionalNonblank, optionalSignal, requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type AkumaWaitInput = AkumaSetAddressInput &
@@ -66,7 +66,7 @@ export type {
   AkumaTellResult,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-export type AkumaKillInput = AkumaAddressInput & Readonly<{ signal?: AbortSignal }>;
+export type AkumaKillInput = AkumaAddressInput & Readonly<{ initiator?: string; signal?: AbortSignal }>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
     id?: string;
@@ -258,14 +258,16 @@ export async function waitAkuma(
 }
 
 export async function killAkuma(input: AkumaKillInput & Readonly<{ path: WorldRoot }>): Promise<AkumaKillResult> {
-  const values = requireInput(input, "Akumas.kill input", ["path", "akuma", "repo", "signal"]);
+  const values = requireInput(input, "Akumas.kill input", ["path", "akuma", "repo", "initiator", "signal"]);
   if (typeof values.akuma !== "string" || values.akuma.trim().length === 0)
     throw new KeiyakuError("invalid-input", "akuma must be a nonblank string");
+  const initiator = optionalNonblank(values.initiator, "initiator");
   const callerSignal = optionalSignal(values.signal);
   const addressed = await addressAkumaSet({ ...addressInput(values), akuma: [values.akuma] }, { forWrite: true });
   return await executeKillAkuma({
     path: addressed.path,
     ids: addressed.orderedIds,
+    ...(initiator === undefined ? {} : { initiator }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   }).catch((error: unknown) => {
     if (error instanceof HeartUnbornError) throw new AkumaNotBornError(error.id);

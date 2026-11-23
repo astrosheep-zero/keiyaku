@@ -233,7 +233,7 @@ export const killEvidenceSchema = z.enum([
 ]);
 export type KillEvidence = z.output<typeof killEvidenceSchema>;
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;
-export type StopFact = Readonly<{ bodySequence: number; requestedAt: string }>;
+export type StopFact = Readonly<{ bodySequence: number; requestedAt: string; owner?: string }>;
 export type PauseFact = Readonly<{
   bodySequence: number;
   requestedAt: string;

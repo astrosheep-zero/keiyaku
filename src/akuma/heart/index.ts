@@ -652,6 +652,7 @@ export async function requestStop(
   paths: AkumaPaths,
   at: string,
   signal?: AbortSignal,
+  owner?: string,
 ): Promise<
   | Readonly<{ kind: "requested"; body: BodyFact }>
   | Readonly<{ kind: "witnessed"; body: BodyFact }>
@@ -675,7 +676,7 @@ export async function requestStop(
         return { kind: "already-stopped", body };
       }
       const existing = stopFact(heart);
-      if (existing === null) insertStopControl(heart, body.sequence, at);
+      if (existing === null) insertStopControl(heart, body.sequence, at, owner);
       else if (existing.bodySequence !== body.sequence) throw new Error("Akuma stop target is not the latest Body");
       return { kind: "requested", body };
     },
@@ -703,8 +704,16 @@ export async function cancelBodyTurns(
       (body.end !== undefined && body.end !== "put-down")
     )
       throw new Error(`Akuma Body ${input.bodySequence} cannot settle controlled cancellation`);
+    const pause = pauseFact(heart);
+    const stop = stopFact(heart);
+    const controllers = [
+      ...(pause?.bodySequence === input.bodySequence && pause.frontierTellId !== undefined
+        ? [tellFact(heart, pause.frontierTellId)?.initiator]
+        : []),
+      ...(stop?.bodySequence === input.bodySequence && stop.owner !== undefined ? [stop.owner] : []),
+    ].filter((owner) => owner !== undefined);
     const canceled = openTurnsForBody(heart, input.bodySequence).map((turnSequence) =>
-      admitTurnEnd(heart, { turnSequence, outcome: { kind: "canceled" }, completedAt: input.at }),
+      admitTurnEnd(heart, { turnSequence, outcome: { kind: "canceled" }, completedAt: input.at }, controllers),
     );
     endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
     pruneAfterTurnEnds(heart, canceled);
@@ -771,8 +780,8 @@ export async function readLatestTurnForBody(paths: AkumaPaths, bodySequence: num
 
 type TurnEndInput = Readonly<{ turnSequence: number; outcome: TurnOutcome; completedAt: string }>;
 
-function admitTurnEnd(heart: DatabaseSync, input: TurnEndInput): ObservedTurnEnd {
-  const audience = observeSurveillance(() => surveillanceAudience(heart, input.turnSequence));
+function admitTurnEnd(heart: DatabaseSync, input: TurnEndInput, excluding: readonly string[] = []): ObservedTurnEnd {
+  const audience = observeSurveillance(() => surveillanceAudience(heart, input.turnSequence, null, excluding));
   return { ...insertTurnEndFact(heart, { kind: "turn-end", ...input }), audience };
 }
 

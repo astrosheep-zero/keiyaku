@@ -246,13 +246,18 @@ class AkumaHandle {
     return this.owner(true).stream(signal === undefined ? {} : { signal });
   }
 
-  async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
+  async kill(options: Readonly<{ signal?: AbortSignal; initiator?: string }> = {}): Promise<KillEvidence> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
       throw new KeiyakuError("invalid-input", "Akuma kill options must be an object");
     }
+    if (options.initiator !== undefined && (typeof options.initiator !== "string" || options.initiator.trim() === ""))
+      throw new KeiyakuError("invalid-input", "Akuma kill initiator must be a nonblank string");
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
-    return await this.owner().kill(signal === undefined ? {} : { signal });
+    return await this.owner().kill({
+      ...(signal === undefined ? {} : { signal }),
+      ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
+    });
   }
 }
 

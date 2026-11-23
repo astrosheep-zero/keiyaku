@@ -290,10 +290,10 @@ export function insertActivityFact(
   return sequence;
 }
 
-export function insertStopControl(database: DatabaseSync, bodySequence: number, at: string): void {
+export function insertStopControl(database: DatabaseSync, bodySequence: number, at: string, owner?: string): void {
   database
     .prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('stop', ?, ?)")
-    .run(json({ bodySequence }), at);
+    .run(json({ bodySequence, ...(owner === undefined ? {} : { owner }) }), at);
 }
 
 export function insertInterruptBarrier(
@@ -341,11 +341,18 @@ export function stopFact(database: DatabaseSync): StopFact | null {
     | ControlRow
     | undefined;
   if (row === undefined) return null;
-  const value = parsed<{ bodySequence: unknown }>(row.value_json);
+  const value = parsed<{ bodySequence: unknown; owner?: unknown }>(row.value_json);
   if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
     throw new Error("Akuma stop control has an invalid Body sequence");
   }
-  return { bodySequence: value.bodySequence as number, requestedAt: row.at };
+  if (value.owner !== undefined && (typeof value.owner !== "string" || value.owner === "")) {
+    throw new Error("Akuma stop control has an invalid Owner");
+  }
+  return {
+    bodySequence: value.bodySequence as number,
+    requestedAt: row.at,
+    ...(value.owner === undefined ? {} : { owner: value.owner }),
+  };
 }
 
 const pauseControlSchema = z

@@ -196,7 +196,9 @@ open Turns.
 
 Audience is the deduplicated union of current standing and eligible opening and
 binding membership of the exact correlated Turn. An outcome captures membership
-through that Turn's terminal transition. An abnormal Body end captures its
+through that Turn's terminal transition. A controlled cancellation captures
+that same audience except the Owner whose interrupt or kill caused the stop;
+unattributed control excludes nobody. An abnormal Body end captures its
 audience in the write that establishes it, using only the latest admitted Turn
 of that exact Body if still open. Known absence of such a Turn allows standing
 alone; unreadable evidence is diagnostic and does not undo settlement. Later
