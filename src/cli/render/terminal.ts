@@ -31,7 +31,7 @@ export type RecoveryCall =
   | Readonly<{ verb: "deliver"; input: VerbInput<"deliver"> }>
   | Readonly<{ verb: "verify"; input: VerbInput<"verify"> }>;
 
-function shellWord(value: string): string {
+export function shellWord(value: string): string {
   return /^[a-zA-Z0-9_./:@-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 

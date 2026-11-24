@@ -26,7 +26,7 @@ import { resetFailureLines } from "./receipt.js";
 import { renderRefusal, renderStructuredRefusal } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
-import { exactIndentedLines, formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
+import { exactIndentedLines, formatNextCall, safeText, shellWord, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
 export type RenderVerbContext = TextRenderContext & Readonly<{ alias?: string; disposition?: VerbDisposition }>;
@@ -161,7 +161,7 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
             `--${completion}`,
             ...(bound === undefined ? [] : ["--for", bound]),
           ];
-          return argv.every((word) => /^[a-zA-Z0-9_./:@-]+$/u.test(word)) ? argv.join(" ") : undefined;
+          return argv.map(shellWord).join(" ");
         })()
       : undefined;
   return [...head, ...rows, ...(resume === undefined || safeText(resume) !== resume ? [] : [`resume: ${resume}`])].join(

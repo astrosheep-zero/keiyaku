@@ -1,4 +1,9 @@
-import { removeTempDirectory } from "./support/process.js";
+import {
+  akumaBodyPidReceiptImport,
+  appendNodeOptionsImport,
+  removeTempDirectory,
+  waitForPidReceiptExit,
+} from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -98,7 +103,7 @@ function acpRecipe(
 
 /** A world whose archetypes all reach one fake ACP agent, plus the home holding those archetypes. */
 function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.ProcessEnv }> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-observing-")));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "keiyaku-observing-")));
   const world = join(root, "world");
   const home = join(root, ".home");
   mkdirSync(join(world, ".keiyaku"), { recursive: true });
@@ -133,8 +138,19 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
       2,
     )}\n`,
   );
-  const env: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_HOME: home };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    KEIYAKU_HOME: home,
+    KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT: join(root, "body-pids"),
+    NODE_OPTIONS: appendNodeOptionsImport(akumaBodyPidReceiptImport()),
+  };
   return { root, world, env };
+}
+
+/** Windows refuses to remove a tree a departing Body still holds, so await every Body's physical exit first. */
+async function removeObservingWorld(root: string): Promise<void> {
+  await waitForPidReceiptExit(join(root, "body-pids"));
+  await removeTempDirectory(root);
 }
 
 async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
@@ -212,7 +228,7 @@ test("packaged prompt-free spawn births without admitting a Tell", { timeout: 12
       `an explicit --workdir is the indented execution directory:\n${located.stdout}`,
     );
   } finally {
-    await removeTempDirectory(root);
+    await removeObservingWorld(root);
   }
 });
 
@@ -226,7 +242,7 @@ test("packaged Spawn does not accept answer observation", { timeout: 120_000 }, 
     assert.match(result.stderr, /reason  option --wait is not valid for spawn/u);
     assert.match(result.stderr, /help  keiyaku spawn --help/u);
   } finally {
-    await removeTempDirectory(root);
+    await removeObservingWorld(root);
   }
 });
 
@@ -363,7 +379,7 @@ test(
         "the wait conclusion distinguishes an empty answer from silence",
       );
     } finally {
-      await removeTempDirectory(root);
+      await removeObservingWorld(root);
     }
   },
 );
@@ -432,7 +448,7 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
         cleanupFailure ??= error;
       }
     }
-    if (cleanupFailure === undefined) await removeTempDirectory(root);
+    if (cleanupFailure === undefined) await removeObservingWorld(root);
     else t.diagnostic(`retained fixture ${root}; a plural-wait target did not settle: ${String(cleanupFailure)}`);
     if (cleanupFailure !== undefined) throw cleanupFailure;
   }

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { isolatedTestEnvironment } from "./test-environment.mjs";
@@ -119,7 +119,8 @@ if (compiled && runtimeFiles.some((file) => !existsSync(file))) {
   process.exit(1);
 }
 const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
-const fixtureHome = mkdtempSync(join(tmpdir(), "keiyaku-test-home-"));
+// Neither a symlinked temporary parent (macOS /var) nor a Windows short name may leak into the home coordinate.
+const fixtureHome = realpathSync.native(mkdtempSync(join(tmpdir(), "keiyaku-test-home-")));
 const environment = isolatedTestEnvironment(process.env, fixtureHome);
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;

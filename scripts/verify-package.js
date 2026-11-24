@@ -32,11 +32,13 @@ assertWindowsArtifact(artifact);
 if (process.env.npm_lifecycle_event === "postpack" && process.env.npm_config_dry_run !== "true") {
   const destination = mkdtempSync(join(tmpdir(), "keiyaku-verify-pack-"));
   try {
-    const output = execFileSync(
-      "npm",
-      ["pack", "--json", "--ignore-scripts", "--pack-destination", destination],
-      { cwd: root, encoding: "utf8" },
-    );
+    // Windows cannot exec the npm shim directly; the lifecycle names npm's own entry script.
+    const pack = ["pack", "--json", "--ignore-scripts", "--pack-destination", destination];
+    const npm = process.env.npm_execpath;
+    const output =
+      npm === undefined
+        ? execFileSync("npm", pack, { cwd: root, encoding: "utf8" })
+        : execFileSync(process.execPath, [npm, ...pack], { cwd: root, encoding: "utf8" });
     const archive = JSON.parse(output)[0]?.filename;
     if (typeof archive !== "string")
       throw new Error("npm pack did not return its tarball path for Windows launcher inspection");

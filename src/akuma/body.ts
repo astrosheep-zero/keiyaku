@@ -25,6 +25,7 @@ import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import type { TellSettlement, TellWake } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
+import type { PluginSignal } from "../plugin/public.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import type { ExecutionAssociationReader } from "./execution-instructions.js";
@@ -123,12 +124,17 @@ async function bornSoul(
   return { soul: born, created: result === "born" };
 }
 
-/** The plugin host bag for one Body occurrence; diagnostics are appended to its log. */
+/** The plugin host for one Body occurrence; a signal returns only after its diagnostics reach the Akuma log. */
 function pluginHost(launch: BodyLaunch, world: WorldRoot, occurrence: string) {
+  let recorded = Promise.resolve();
+  const reportDiagnostic = (message: string): void => {
+    recorded = recorded.then(() => recordPluginDiagnostic(launch.paths, occurrence, message));
+  };
   return {
-    world,
-    reportDiagnostic: (message: string): void => {
-      void recordPluginDiagnostic(launch.paths, occurrence, message);
+    reportDiagnostic,
+    async emit(signal: PluginSignal, producerControl?: AbortSignal): Promise<void> {
+      await emitPluginSignal({ world, reportDiagnostic, producerControl }, signal);
+      await recorded;
     },
   };
 }
@@ -208,7 +214,7 @@ type BodyEndObservation =
     }>;
 
 async function emitBodyBirth(launch: BodyLaunch, soul: Soul, world: WorldRoot, bodySequence: number): Promise<void> {
-  await emitPluginSignal(pluginHost(launch, world, "birth"), {
+  await pluginHost(launch, world, "birth").emit({
     kind: "akuma.born",
     akumaId: soul.id,
     bodySequence,
@@ -224,7 +230,7 @@ function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot) {
       try {
         const turn = await readTurn(launch.paths, turnSequence);
         if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
-        await emitPluginSignal(pluginHost(launch, world, "turn started"), {
+        await pluginHost(launch, world, "turn started").emit({
           kind: "akuma.turn-started",
           akumaId: soul.id,
           turnSequence,
@@ -242,8 +248,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
   return {
     async emit({ bodySequence, turnSequence, completedAt, audience, outcome }, producerControl): Promise<void> {
       if (audience.kind === "unavailable") host.reportDiagnostic(`audience unavailable: ${audience.diagnostic}`);
-      await emitPluginSignal(
-        { ...host, producerControl },
+      await host.emit(
         {
           kind: "akuma.turn-outcome",
           akumaId: soul.id,
@@ -259,6 +264,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
                 : { kind: "failed", reason: outcome.diagnostic },
           ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
         },
+        producerControl,
       );
     },
   };
@@ -268,7 +274,7 @@ function bodyEndEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot) {
   const host = pluginHost(launch, world, "body end");
   return async ({ bodySequence, end, at, diagnostic, audience }: BodyEndObservation): Promise<void> => {
     if (audience?.kind === "unavailable") host.reportDiagnostic(`audience unavailable: ${audience.diagnostic}`);
-    await emitPluginSignal(host, {
+    await host.emit({
       kind: "akuma.body-ended",
       akumaId: soul.id,
       bodySequence,

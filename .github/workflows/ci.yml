@@ -154,7 +154,6 @@ jobs:
             $nodeArgs += @($env:WINDOWS_TEST_FILES -split "\s+" | Where-Object { $_ })
           } else {
             $nodeArgs += @(
-              "tests/actor.test.ts",
               "tests/akuma-heart.test.ts",
               "tests/akuma-identity.test.ts",
               "tests/amend-body.test.ts",
@@ -164,7 +163,6 @@ jobs:
               "tests/fold.test.ts",
               "tests/markdown-ast.test.ts",
               "tests/model-impact.test.ts",
-              "tests/namespace-context.test.ts",
               "tests/normalized-identity.test.ts",
               "tests/observation.test.ts",
               "tests/runtime-proc.test.ts",

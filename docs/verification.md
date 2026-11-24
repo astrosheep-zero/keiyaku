@@ -168,11 +168,12 @@ release result waits for every started phase and cannot succeed if any required
 phase failed.
 
 The repository test runner owns one fresh temporary fixture root for each
-invocation, replacing any inherited Square-ledger, process-home, and
-Keiyaku-home location. That root serves as the fixture home and owns the
-invocation's Square ledger. Test children and their descendants begin with that
-fixture context rather than the caller's and share its owned ledger; nested
-runners create their own root instead of reusing a parent's. Unrelated ambient
+invocation, named by its canonical physical directory, replacing any inherited
+Square-ledger, process-home, and Keiyaku-home location. That root serves as the
+fixture home and owns the invocation's Square ledger. Test children and their
+descendants begin with that fixture context rather than the caller's and share
+its owned ledger; nested runners create their own root instead of reusing a
+parent's. Unrelated ambient
 environment continues to pass through, including network proxy configuration and
 neutral fixture inputs. The reserved caller environment does not: Keiyaku
 configuration and identity, Square, Paseo, Codex, OpenCode, Pi, and Claude native
