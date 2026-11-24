@@ -25,7 +25,6 @@ import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import type { TellSettlement, TellWake } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
-import type { PluginSignal } from "../plugin/public.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import type { ExecutionAssociationReader } from "./execution-instructions.js";
@@ -132,7 +131,7 @@ function pluginHost(launch: BodyLaunch, world: WorldRoot, occurrence: string) {
   };
   return {
     reportDiagnostic,
-    async emit(signal: PluginSignal, producerControl?: AbortSignal): Promise<void> {
+    async emit(signal: Parameters<typeof emitPluginSignal>[1], producerControl?: AbortSignal): Promise<void> {
       await emitPluginSignal({ world, reportDiagnostic, producerControl }, signal);
       await recorded;
     },
