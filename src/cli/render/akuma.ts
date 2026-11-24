@@ -51,7 +51,7 @@ export function renderAskText(result: AkumaAskResult, alias: string | undefined)
 
 type SpawnPresentation = Readonly<{
   prompt?: string;
-  cwd?: string;
+  showCwd?: boolean;
   alias?: string;
   contractId?: string;
   surface?: "cli" | "mcp";
@@ -75,7 +75,7 @@ function spawnEvidence(result: SpawnResult, input: SpawnPresentation): readonly 
   const showInput = result.tellId !== undefined && (result.kind === "failed" || result.action === undefined);
   return [
     ...(contractId === undefined ? [] : [safeText(contractId)]),
-    ...(input.cwd === undefined ? [] : [safeText(input.cwd)]),
+    ...(input.showCwd === true ? [safeText(result.cwd)] : []),
     ...(result.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(result.dispatchWarning)}`]),
     ...(result.alias === undefined ? [] : [`alias moved · previous ${result.alias.previousAkumaId}`]),
     ...(result.aliasWarning === undefined ? [] : [`alias lag ${safeText(result.aliasWarning)}`]),

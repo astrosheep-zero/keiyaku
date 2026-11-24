@@ -8,15 +8,18 @@ import { contractId } from "../src/core/facts/types.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkumaId;
-function spawned(extra: Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind" | "akumaId"> | Omit<Extract<SpawnResult, { kind: "failed" }>, "akumaId"> = {}): SpawnResult {
-  return { kind: "spawned", akumaId: akuma, ...extra };
+type Extra<T> = Omit<T, "akumaId" | "cwd">;
+function spawned(
+  extra: Extra<Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind">> | Extra<Extract<SpawnResult, { kind: "failed" }>> = {},
+): SpawnResult {
+  return { kind: "spawned", akumaId: akuma, cwd: world, ...extra };
 }
 
 test("a contract-bound spawn receipt indents contract, invocation context, and alias displacement alike", () => {
   const previous = parseAkumaId("aku/worker/0000beef").id;
   const text = renderCallText(
     spawned({ alias: { kind: "moved", previousAkumaId: previous } }),
-    { cwd: world, contractId: contractId("kei/tree-receipt"), alias: "@sapling" },
+    { showCwd: true, contractId: contractId("kei/tree-receipt"), alias: "@sapling" },
   );
   assert.equal(
     text,
@@ -36,7 +39,7 @@ test("a detached call keeps its born child, execution directory, and native fail
       tellId: "tell/msys",
       kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost" }],
     }),
-    { cwd: world, prompt: "prompt" },
+    { showCwd: true, prompt: "prompt" },
   );
   assert.equal(
     text,

@@ -227,6 +227,15 @@ test("packaged prompt-free spawn births without admitting a Tell", { timeout: 12
       located.stdout.split("\n").includes(`  ${await realpath(world)}`),
       `an explicit --workdir is the indented execution directory:\n${located.stdout}`,
     );
+    const relative = await runPackagedCli(["-C", world, "spawn", "worker", "--bare", "--workdir", "."], {
+      cwd: world,
+      env,
+    });
+    assert.equal(relative.code, 0, relative.stderr);
+    assert.ok(
+      relative.stdout.split("\n").includes(`  ${await realpath(world)}`),
+      `a relative --workdir is shown as the canonical directory it resolved to:\n${relative.stdout}`,
+    );
   } finally {
     await removeObservingWorld(root);
   }

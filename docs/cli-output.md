@@ -201,7 +201,9 @@ outcome. Requested and confirmed associations stay distinct. A Tell recovery
 call requires proof the original input was not admitted, and must preserve the
 World, exact child and input; otherwise the receipt shows evidence alone.
 Association, source, execution directory, admitted input, and diagnostics
-remain distinct supporting facts. No receipt claims success over a failed
+remain distinct supporting facts. An explicitly selected execution directory
+appears as the canonical directory the child was born in, never the caller's
+spelling of it. No receipt claims success over a failed
 required stage. Ordinary Tell leads with the addressed selector and its
 admission, naming an exact Turn once only when already known. Transport
 correlation identity is not a text Turn address. Admission claims neither

@@ -226,7 +226,7 @@ function spawnPresentation(input: VerbInput<"spawn">, context: TextRenderContext
   return {
     ...(context.surface === undefined ? {} : { surface: context.surface }),
     ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-    ...(input.workdir === undefined ? {} : { cwd: input.workdir }),
+    ...(input.workdir === undefined ? {} : { showCwd: true }),
     ...(input.alias === undefined ? {} : { alias: input.alias }),
     ...(input.contract === undefined ? {} : { contractId: input.contract }),
   };

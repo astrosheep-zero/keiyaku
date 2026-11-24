@@ -89,6 +89,8 @@ export const spawnWaitHeadSchema = z
   .readonly();
 const spawnAnswer = {
   akumaId: akumaIdSchema,
+  // The canonical execution directory, never the caller's spelling of it.
+  cwd: z.string(),
   ...publicationFields,
   tellId: z.string().exactOptional(),
   action: tellActionSchema.exactOptional(),
@@ -447,7 +449,7 @@ async function settleCall(
   reportDiagnostic?: (message: string) => void,
 ): Promise<SpawnResult> {
   const receipt = admitted.tell;
-  const { cwd: _cwd, contractId, aliasName, failures: associationFailures, ...publication } = head;
+  const { contractId, aliasName, failures: associationFailures, ...publication } = head;
   const { evidence, failures } = callInputEvidence(admitted, parsed);
   failures.push(...(associationFailures ?? []));
   const answer = { akumaId: admitted.id, ...publication, ...evidence };
